@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.reset_daily_equipment() FROM PUBLIC, anon, authenticated;

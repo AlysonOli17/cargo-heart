@@ -2,15 +2,23 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { format, startOfDay, endOfDay, addDays, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, Activity } from "lucide-react";
+import { CalendarIcon, ChevronLeft, ChevronRight, Activity, UserPlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { useRole } from "@/hooks/use-role";
+import { toast } from "sonner";
 import { STATUS_LABELS, STATUS_COLORS, type EquipmentStatus } from "@/lib/equipment";
 
 export const Route = createFileRoute("/operacao")({
@@ -32,11 +40,19 @@ type Client = { id: string; name: string };
 
 function OperationPage() {
   const { user } = useAuth();
+  const { isAdmin, canWrite } = useRole();
   const [date, setDate] = useState<Date>(new Date());
   const [movs, setMovs] = useState<Movement[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const today = isSameDay(date, new Date());
+  const [requestEq, setRequestEq] = useState<Equipment | null>(null);
+  const [reqClient, setReqClient] = useState("");
+  const [reqNotes, setReqNotes] = useState("");
+  const [isReplace, setIsReplace] = useState(false);
+  const [replacePlate, setReplacePlate] = useState("");
+  const [replaceReason, setReplaceReason] = useState("");
+  const [clientOpen, setClientOpen] = useState(false);
 
   const load = async () => {
     const start = startOfDay(date).toISOString();
@@ -87,6 +103,27 @@ function OperationPage() {
     [equipment]
   );
 
+  const submitRequest = async () => {
+    if (!requestEq || !reqClient) return;
+    if (isReplace && (!replacePlate.trim() || !replaceReason.trim())) {
+      toast.error("Informe a placa substituída e o motivo");
+      return;
+    }
+    const { error } = await supabase.from("equipment_requests").insert({
+      equipment_id: requestEq.id, client_id: reqClient,
+      requested_by: user!.id, owner_id: user!.id, notes: reqNotes || null,
+      is_replacement: isReplace,
+      replacement_plate: isReplace ? replacePlate.trim() : null,
+      replacement_reason: isReplace ? replaceReason.trim() : null,
+    });
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Solicitação enviada — aguardando aprovação");
+      setRequestEq(null); setReqClient(""); setReqNotes("");
+      setIsReplace(false); setReplacePlate(""); setReplaceReason("");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -105,6 +142,11 @@ function OperationPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Button variant="outline" onClick={() => setClientOpen(true)}>
+              <UserPlus className="h-4 w-4 mr-2" />Cadastrar cliente
+            </Button>
+          )}
           <Button variant="outline" size="icon" onClick={() => setDate(addDays(date, -1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -146,11 +188,18 @@ function OperationPage() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
               {available.map((e) => (
-                <div key={e.id} className="px-3 py-2 rounded bg-[oklch(0.65_0.18_150)]/10 border border-[oklch(0.65_0.18_150)]/30 text-sm font-mono text-center">
+                <button key={e.id} type="button" disabled={!canWrite}
+                  onClick={() => setRequestEq(e)}
+                  className="px-3 py-2 rounded bg-[oklch(0.65_0.18_150)]/10 border border-[oklch(0.65_0.18_150)]/30 text-sm font-mono text-center hover:bg-[oklch(0.65_0.18_150)]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   {e.identifier}
-                </div>
+                </button>
               ))}
             </div>
+          )}
+          {!canWrite && (
+            <p className="text-xs text-muted-foreground mt-2 italic">
+              Você não tem permissão para solicitar equipamentos.
+            </p>
           )}
         </Card>
       )}
@@ -280,6 +329,54 @@ function OperationPage() {
           </div>
         )}
       </Card>
+
+      <Dialog open={!!requestEq} onOpenChange={(o) => !o && setRequestEq(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Solicitar — {requestEq?.identifier}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Cliente *</Label>
+              <Select value={reqClient} onValueChange={setReqClient}>
+                <SelectTrigger><SelectValue placeholder="Selecione um cliente" /></SelectTrigger>
+                <SelectContent>
+                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <Checkbox id="rep" checked={isReplace} onCheckedChange={(v) => setIsReplace(!!v)} />
+              <Label htmlFor="rep" className="cursor-pointer">É substituição de outro equipamento?</Label>
+            </div>
+            {isReplace && (
+              <>
+                <div>
+                  <Label>Placa / identificação substituída *</Label>
+                  <Input value={replacePlate} onChange={(e) => setReplacePlate(e.target.value)} placeholder="Ex: ABC-1234" />
+                </div>
+                <div>
+                  <Label>Motivo da substituição *</Label>
+                  <Textarea value={replaceReason} onChange={(e) => setReplaceReason(e.target.value)} placeholder="Justifique a substituição..." />
+                </div>
+              </>
+            )}
+            <div>
+              <Label>Observação</Label>
+              <Textarea value={reqNotes} onChange={(e) => setReqNotes(e.target.value)} placeholder="Opcional" />
+            </div>
+            <p className="text-xs text-muted-foreground">A solicitação será enviada para aprovação do administrador.</p>
+            <Button onClick={submitRequest} disabled={!reqClient} className="w-full">Enviar solicitação</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={clientOpen} onOpenChange={setClientOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Novo cliente</DialogTitle></DialogHeader>
+          <ClientForm userId={user!.id} onDone={() => setClientOpen(false)} />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -289,5 +386,38 @@ function StatusPill({ s }: { s: EquipmentStatus }) {
     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s]}`}>
       {STATUS_LABELS[s]}
     </span>
+  );
+}
+
+function ClientForm({ userId, onDone }: { userId: string; onDone: () => void }) {
+  const [form, setForm] = useState({
+    name: "", contact_name: "", phone: "", email: "", document: "", address: "", notes: "",
+  });
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    const { error } = await supabase.from("clients").insert({ ...form, owner_id: userId });
+    setLoading(false);
+    if (error) toast.error(error.message);
+    else { toast.success("Cliente cadastrado"); onDone(); }
+  };
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <div><Label>Nome *</Label><Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>Contato</Label><Input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} /></div>
+        <div><Label>Telefone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+        <div><Label>Documento</Label><Input value={form.document} onChange={(e) => setForm({ ...form, document: e.target.value })} /></div>
+      </div>
+      <div><Label>Endereço</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
+      <div><Label>Observações</Label><Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
+      <Button type="submit" className="w-full" disabled={loading}>{loading ? "Salvando..." : "Salvar"}</Button>
+    </form>
   );
 }
