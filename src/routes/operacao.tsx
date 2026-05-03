@@ -68,14 +68,6 @@ function OperationPage() {
   const eqName = (id: string) => equipment.find(e => e.id === id)?.identifier ?? "—";
   const clientName = (id: string | null) => id ? clients.find(c => c.id === id)?.name ?? "—" : "Sem cliente";
 
-  const stats = useMemo(() => {
-    const moved = new Set(movs.map(m => m.equipment_id)).size;
-    const toClient = movs.filter(m => m.to_status === "com_cliente" && m.from_status !== "com_cliente").length;
-    const toMaint = movs.filter(m => m.to_status === "manutencao").length;
-    const toService = movs.filter(m => m.to_status === "em_atendimento").length;
-    return { moved, toClient, toMaint, toService };
-  }, [movs]);
-
   const byClient = useMemo(() => {
     return clients
       .map((c) => ({
