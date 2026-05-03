@@ -5,7 +5,6 @@ import { AppLayout } from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -154,14 +153,8 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
   const [form, setForm] = useState({
     identifier: equipment?.identifier ?? "",
     type: equipment?.type ?? "",
-    brand: equipment?.brand ?? "",
     model: equipment?.model ?? "",
-    serial_number: equipment?.serial_number ?? "",
-    year: equipment?.year?.toString() ?? "",
-    hour_meter: equipment?.hour_meter?.toString() ?? "",
     status: (equipment?.status ?? "disponivel") as EquipmentStatus,
-    current_client_id: equipment?.current_client_id ?? "",
-    notes: equipment?.notes ?? "",
   });
   const [loading, setLoading] = useState(false);
 
@@ -172,14 +165,8 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
       owner_id: userId,
       identifier: form.identifier,
       type: form.type || null,
-      brand: form.brand || null,
       model: form.model || null,
-      serial_number: form.serial_number || null,
-      year: form.year ? parseInt(form.year) : null,
-      hour_meter: form.hour_meter ? parseFloat(form.hour_meter) : null,
       status: form.status,
-      current_client_id: form.current_client_id || null,
-      notes: form.notes || null,
     };
     const { error } = equipment
       ? await supabase.from("equipment").update(payload).eq("id", equipment.id)
@@ -196,15 +183,7 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
         <div><Label>Tipo</Label><Input value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} placeholder="Escavadeira, Trator..." /></div>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Marca</Label><Input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /></div>
         <div><Label>Modelo</Label><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></div>
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        <div><Label>Nº Série</Label><Input value={form.serial_number} onChange={(e) => setForm({ ...form, serial_number: e.target.value })} /></div>
-        <div><Label>Ano</Label><Input type="number" value={form.year} onChange={(e) => setForm({ ...form, year: e.target.value })} /></div>
-        <div><Label>Horímetro</Label><Input type="number" step="0.1" value={form.hour_meter} onChange={(e) => setForm({ ...form, hour_meter: e.target.value })} /></div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
         <div>
           <Label>Status</Label>
           <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as EquipmentStatus })}>
@@ -216,18 +195,7 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
             </SelectContent>
           </Select>
         </div>
-        <div>
-          <Label>Cliente</Label>
-          <Select value={form.current_client_id || "none"} onValueChange={(v) => setForm({ ...form, current_client_id: v === "none" ? "" : v })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">Nenhum</SelectItem>
-              {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
       </div>
-      <div><Label>Observações</Label><Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
       <Button type="submit" className="w-full" disabled={loading}>{loading ? "Salvando..." : "Salvar"}</Button>
     </form>
   );
