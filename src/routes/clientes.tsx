@@ -41,6 +41,8 @@ function ClientsPage() {
     return () => { supabase.removeChannel(ch); };
   }, [user]);
 
+  if (!user) return null;
+
   const remove = async (id: string) => {
     if (!confirm("Excluir cliente?")) return;
     const { error } = await supabase.from("clients").delete().eq("id", id);
