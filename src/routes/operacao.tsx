@@ -138,12 +138,30 @@ function OperationPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Movimentações" value={movs.length} />
-        <StatCard label="Equip. movidos" value={stats.moved} />
-        <StatCard label="Saídas p/ cliente" value={stats.toClient} color="text-[oklch(0.55_0.18_250)]" />
-        <StatCard label="Para manutenção" value={stats.toMaint} color="text-[oklch(0.6_0.2_50)]" />
-      </div>
+      {today && (
+        <Card className="p-4 border-[oklch(0.65_0.18_150)]/40">
+          <h2 className="font-semibold mb-4 flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.18_150)]" />
+            Equipamentos disponíveis
+            <span className="ml-auto text-xs text-muted-foreground">
+              {available.length}
+            </span>
+          </h2>
+          {available.length === 0 ? (
+            <p className="text-center text-muted-foreground py-6 text-sm">
+              Nenhum equipamento disponível.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+              {available.map((e) => (
+                <div key={e.id} className="px-3 py-2 rounded bg-[oklch(0.65_0.18_150)]/10 border border-[oklch(0.65_0.18_150)]/30 text-sm font-mono text-center">
+                  {e.identifier}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {today && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
