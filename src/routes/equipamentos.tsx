@@ -85,9 +85,25 @@ function EquipmentPage() {
       {items.length === 0 ? (
         <Card className="p-12 text-center text-muted-foreground">Nenhum equipamento. Clique em "Novo equipamento".</Card>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((eq) => (
-            <Card key={eq.id} className="p-4 space-y-2">
+        <div className="space-y-6">
+          {Object.entries(
+            items.reduce<Record<string, Equipment[]>>((acc, eq) => {
+              const k = eq.type?.trim() || "Sem tipo";
+              (acc[k] ||= []).push(eq);
+              return acc;
+            }, {})
+          )
+            .sort(([a], [b]) => a.localeCompare(b, "pt-BR"))
+            .map(([type, group]) => (
+              <section key={type} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold">{type}</h2>
+                  <span className="text-xs text-muted-foreground">({group.length})</span>
+                  <div className="flex-1 border-t" />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {group.map((eq) => (
+                    <Card key={eq.id} className="p-4 space-y-2">
               <div className="flex justify-between items-start gap-2">
                 <div className="min-w-0">
                   <h3 className="font-semibold truncate">{eq.identifier}</h3>
@@ -109,8 +125,11 @@ function EquipmentPage() {
                 <Button variant="ghost" size="icon" onClick={() => { setEditing(eq); setOpen(true); }}><Pencil className="h-4 w-4" /></Button>
                 <Button variant="ghost" size="icon" onClick={() => remove(eq.id)}><Trash2 className="h-4 w-4" /></Button>
               </div>
-            </Card>
-          ))}
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            ))}
         </div>
       )}
 
