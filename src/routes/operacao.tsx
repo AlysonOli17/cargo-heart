@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { format, startOfDay, endOfDay, addDays, isSameDay } from "date-fns";
+import { format, addDays, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, Activity, UserPlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,15 +26,6 @@ export const Route = createFileRoute("/operacao")({
   component: () => <AppLayout><OperationPage /></AppLayout>,
 });
 
-type Movement = {
-  id: string;
-  created_at: string;
-  equipment_id: string;
-  from_status: EquipmentStatus | null;
-  to_status: EquipmentStatus;
-  from_client_id: string | null;
-  to_client_id: string | null;
-};
 type Equipment = { id: string; identifier: string; status: EquipmentStatus; current_client_id: string | null };
 type Client = { id: string; name: string };
 
@@ -42,7 +33,6 @@ function OperationPage() {
   const { user } = useAuth();
   const { isAdmin, canWrite } = useRole();
   const [date, setDate] = useState<Date>(new Date());
-  const [movs, setMovs] = useState<Movement[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const today = isSameDay(date, new Date());
@@ -55,16 +45,10 @@ function OperationPage() {
   const [clientOpen, setClientOpen] = useState(false);
 
   const load = async () => {
-    const start = startOfDay(date).toISOString();
-    const end = endOfDay(date).toISOString();
-    const [{ data: m }, { data: e }, { data: c }] = await Promise.all([
-      supabase.from("movements").select("*")
-        .gte("created_at", start).lte("created_at", end)
-        .order("created_at", { ascending: false }),
+    const [{ data: e }, { data: c }] = await Promise.all([
       supabase.from("equipment").select("id,identifier,status,current_client_id"),
       supabase.from("clients").select("id,name"),
     ]);
-    setMovs((m ?? []) as Movement[]);
     setEquipment((e ?? []) as Equipment[]);
     setClients((c ?? []) as Client[]);
   };
@@ -74,15 +58,11 @@ function OperationPage() {
     load();
     if (!today) return;
     const ch = supabase.channel(`ops-${date.toDateString()}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [user, date.toDateString()]);
-
-  const eqName = (id: string) => equipment.find(e => e.id === id)?.identifier ?? "—";
-  const clientName = (id: string | null) => id ? clients.find(c => c.id === id)?.name ?? "—" : "Sem cliente";
 
   const byClient = useMemo(() => {
     return clients
