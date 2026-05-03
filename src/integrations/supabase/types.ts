@@ -123,8 +123,11 @@ export type Database = {
           decided_by: string | null
           equipment_id: string
           id: string
+          is_replacement: boolean
           notes: string | null
           owner_id: string
+          replacement_plate: string | null
+          replacement_reason: string | null
           requested_by: string
           status: Database["public"]["Enums"]["request_status"]
           updated_at: string
@@ -136,8 +139,11 @@ export type Database = {
           decided_by?: string | null
           equipment_id: string
           id?: string
+          is_replacement?: boolean
           notes?: string | null
           owner_id: string
+          replacement_plate?: string | null
+          replacement_reason?: string | null
           requested_by: string
           status?: Database["public"]["Enums"]["request_status"]
           updated_at?: string
@@ -149,8 +155,11 @@ export type Database = {
           decided_by?: string | null
           equipment_id?: string
           id?: string
+          is_replacement?: boolean
           notes?: string | null
           owner_id?: string
+          replacement_plate?: string | null
+          replacement_reason?: string | null
           requested_by?: string
           status?: Database["public"]["Enums"]["request_status"]
           updated_at?: string
@@ -269,6 +278,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      reset_daily_equipment: { Args: never; Returns: undefined }
     }
     Enums: {
       app_role: "admin" | "operador" | "visualizador"
