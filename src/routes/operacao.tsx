@@ -27,7 +27,7 @@ type Movement = {
   from_client_id: string | null;
   to_client_id: string | null;
 };
-type Equipment = { id: string; identifier: string };
+type Equipment = { id: string; identifier: string; status: EquipmentStatus; current_client_id: string | null };
 type Client = { id: string; name: string };
 
 function OperationPage() {
@@ -45,7 +45,7 @@ function OperationPage() {
       supabase.from("movements").select("*")
         .gte("created_at", start).lte("created_at", end)
         .order("created_at", { ascending: false }),
-      supabase.from("equipment").select("id,identifier"),
+      supabase.from("equipment").select("id,identifier,status,current_client_id"),
       supabase.from("clients").select("id,name"),
     ]);
     setMovs((m ?? []) as Movement[]);
@@ -75,6 +75,25 @@ function OperationPage() {
     const toService = movs.filter(m => m.to_status === "em_atendimento").length;
     return { moved, toClient, toMaint, toService };
   }, [movs]);
+
+  const byClient = useMemo(() => {
+    return clients
+      .map((c) => ({
+        client: c,
+        items: equipment.filter((e) => e.current_client_id === c.id && e.status !== "manutencao"),
+      }))
+      .sort((a, b) => b.items.length - a.items.length);
+  }, [clients, equipment]);
+
+  const inMaintenance = useMemo(
+    () => equipment.filter((e) => e.status === "manutencao"),
+    [equipment]
+  );
+
+  const available = useMemo(
+    () => equipment.filter((e) => e.status === "disponivel"),
+    [equipment]
+  );
 
   return (
     <div className="space-y-6">
@@ -125,6 +144,89 @@ function OperationPage() {
         <StatCard label="Saídas p/ cliente" value={stats.toClient} color="text-[oklch(0.55_0.18_250)]" />
         <StatCard label="Para manutenção" value={stats.toMaint} color="text-[oklch(0.6_0.2_50)]" />
       </div>
+
+      {today && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <Card className="p-4 lg:col-span-2">
+            <h2 className="font-semibold mb-4">Operação por cliente</h2>
+            {byClient.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8 text-sm">
+                Nenhum cliente cadastrado.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {byClient.map(({ client, items }) => (
+                  <div key={client.id} className="border rounded-lg overflow-hidden">
+                    <div className="bg-muted/60 px-3 py-2 text-center font-semibold text-sm uppercase tracking-wide border-b">
+                      {client.name}
+                    </div>
+                    <div className="p-3 min-h-[80px]">
+                      {items.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center italic py-2">
+                          Sem equipamentos
+                        </p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {items.map((e) => (
+                            <li key={e.id} className="text-sm font-mono flex items-center gap-2">
+                              <span className="text-primary">*</span>
+                              <span>{e.identifier}</span>
+                              {e.status === "em_atendimento" && (
+                                <StatusPill s={e.status} />
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {available.length > 0 && (
+                  <div className="border rounded-lg overflow-hidden border-dashed">
+                    <div className="bg-[oklch(0.65_0.18_150)]/15 px-3 py-2 text-center font-semibold text-sm uppercase tracking-wide border-b">
+                      Disponíveis
+                    </div>
+                    <div className="p-3 min-h-[80px]">
+                      <ul className="space-y-1">
+                        {available.map((e) => (
+                          <li key={e.id} className="text-sm font-mono flex items-center gap-2">
+                            <span className="text-[oklch(0.55_0.18_150)]">*</span>
+                            <span>{e.identifier}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-4 border-[oklch(0.65_0.2_50)]/40">
+            <h2 className="font-semibold mb-4 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.2_50)]" />
+              Em manutenção
+              <span className="ml-auto text-xs text-muted-foreground">
+                {inMaintenance.length}
+              </span>
+            </h2>
+            {inMaintenance.length === 0 ? (
+              <p className="text-center text-muted-foreground py-8 text-sm">
+                Nenhum equipamento em manutenção.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {inMaintenance.map((e) => (
+                  <li key={e.id} className="text-sm font-mono flex items-center gap-2 px-2 py-1.5 rounded bg-[oklch(0.65_0.2_50)]/10">
+                    <span className="text-[oklch(0.6_0.2_50)]">*</span>
+                    <span>{e.identifier}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+      )}
 
       <Card className="p-4">
         <h2 className="font-semibold mb-4">
