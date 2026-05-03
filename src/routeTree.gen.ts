@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as OperacaoRouteImport } from './routes/operacao'
+import { Route as ManutencaoRouteImport } from './routes/manutencao'
 import { Route as HistoricoRouteImport } from './routes/historico'
 import { Route as EquipamentosRouteImport } from './routes/equipamentos'
 import { Route as AuthRouteImport } from './routes/auth'
@@ -19,6 +20,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const OperacaoRoute = OperacaoRouteImport.update({
   id: '/operacao',
   path: '/operacao',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ManutencaoRoute = ManutencaoRouteImport.update({
+  id: '/manutencao',
+  path: '/manutencao',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HistoricoRoute = HistoricoRouteImport.update({
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/equipamentos': typeof EquipamentosRoute
   '/historico': typeof HistoricoRoute
+  '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/equipamentos': typeof EquipamentosRoute
   '/historico': typeof HistoricoRoute
+  '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
 }
 export interface FileRoutesById {
@@ -70,6 +78,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/equipamentos': typeof EquipamentosRoute
   '/historico': typeof HistoricoRoute
+  '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
 }
 export interface FileRouteTypes {
@@ -80,9 +89,17 @@ export interface FileRouteTypes {
     | '/auth'
     | '/equipamentos'
     | '/historico'
+    | '/manutencao'
     | '/operacao'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/acesso' | '/auth' | '/equipamentos' | '/historico' | '/operacao'
+  to:
+    | '/'
+    | '/acesso'
+    | '/auth'
+    | '/equipamentos'
+    | '/historico'
+    | '/manutencao'
+    | '/operacao'
   id:
     | '__root__'
     | '/'
@@ -90,6 +107,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/equipamentos'
     | '/historico'
+    | '/manutencao'
     | '/operacao'
   fileRoutesById: FileRoutesById
 }
@@ -99,6 +117,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   EquipamentosRoute: typeof EquipamentosRoute
   HistoricoRoute: typeof HistoricoRoute
+  ManutencaoRoute: typeof ManutencaoRoute
   OperacaoRoute: typeof OperacaoRoute
 }
 
@@ -109,6 +128,13 @@ declare module '@tanstack/react-router' {
       path: '/operacao'
       fullPath: '/operacao'
       preLoaderRoute: typeof OperacaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/manutencao': {
+      id: '/manutencao'
+      path: '/manutencao'
+      fullPath: '/manutencao'
+      preLoaderRoute: typeof ManutencaoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/historico': {
@@ -155,6 +181,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   EquipamentosRoute: EquipamentosRoute,
   HistoricoRoute: HistoricoRoute,
+  ManutencaoRoute: ManutencaoRoute,
   OperacaoRoute: OperacaoRoute,
 }
 export const routeTree = rootRouteImport

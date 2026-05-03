@@ -4,7 +4,7 @@ import { useRole } from "@/hooks/use-role";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Wrench, LogOut, Truck, Activity, Shield, History } from "lucide-react";
+import { LayoutDashboard, Wrench, LogOut, Truck, Activity, Shield, History, CheckCircle2 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ const baseNav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/operacao", label: "Operação", icon: Activity },
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
+  { to: "/manutencao", label: "Manutenção", icon: Wrench },
   { to: "/historico", label: "Histórico", icon: History },
 ];
 
@@ -98,6 +99,53 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     return () => { supabase.removeChannel(channel); };
   }, [user, isAdmin]);
+
+  // Notify when equipment leaves manutencao -> disponivel
+  useEffect(() => {
+    if (!user) return;
+    const playBeep = () => {
+      try {
+        const Ctx = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
+        const ctx = new Ctx();
+        const playTone = (freq: number, start: number, dur: number) => {
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = "sine"; o.frequency.value = freq;
+          o.connect(g); g.connect(ctx.destination);
+          g.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+          g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + start + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+          o.start(ctx.currentTime + start);
+          o.stop(ctx.currentTime + start + dur + 0.05);
+        };
+        playTone(880, 0, 0.18);
+        playTone(1320, 0.2, 0.25);
+      } catch { /* ignore */ }
+    };
+
+    const channel = supabase
+      .channel("equipment_release_notify")
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "equipment" }, async (payload) => {
+        const oldRow = payload.old as { status?: string } | null;
+        const newRow = payload.new as { id: string; status: string; identifier?: string };
+        if (oldRow?.status === "manutencao" && newRow.status === "disponivel") {
+          let identifier = newRow.identifier;
+          if (!identifier) {
+            const { data } = await supabase.from("equipment").select("identifier").eq("id", newRow.id).maybeSingle();
+            identifier = data?.identifier;
+          }
+          playBeep();
+          toast.success("Equipamento liberado da manutenção", {
+            description: `${identifier ?? "Equipamento"} agora está DISPONÍVEL`,
+            duration: 10000,
+            icon: <CheckCircle2 className="h-5 w-5 text-[oklch(0.65_0.18_150)]" />,
+          });
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
 
   if (loading || !user) {
     return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Carregando...</div>;
