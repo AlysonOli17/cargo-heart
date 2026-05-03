@@ -4,14 +4,14 @@ import { useRole } from "@/hooks/use-role";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Users, Wrench, LogOut, Truck, Activity, Shield } from "lucide-react";
+import { LayoutDashboard, Wrench, LogOut, Truck, Activity, Shield, History } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 
 const baseNav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/operacao", label: "Operação", icon: Activity },
-  { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
+  { to: "/historico", label: "Histórico", icon: History },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
