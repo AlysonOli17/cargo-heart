@@ -8,9 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Wrench } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { useRole } from "@/hooks/use-role";
 
 export const Route = createFileRoute("/clientes")({
   head: () => ({ meta: [{ title: "Clientes — FrotaPro" }] }),
@@ -22,22 +24,36 @@ type Client = {
   email: string | null; document: string | null; address: string | null; notes: string | null;
 };
 
+type AvailableEq = { id: string; identifier: string };
+
 function ClientsPage() {
   const { user } = useAuth();
+  const { canWrite } = useRole();
   const [items, setItems] = useState<Client[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
+  const [available, setAvailable] = useState<AvailableEq[]>([]);
+  const [requestEq, setRequestEq] = useState<AvailableEq | null>(null);
+  const [selectedClient, setSelectedClient] = useState<string>("");
+  const [reqNotes, setReqNotes] = useState("");
 
   const load = async () => {
-    const { data } = await supabase.from("clients").select("*").order("name");
+    const [{ data }, { data: eq }] = await Promise.all([
+      supabase.from("clients").select("*").order("name"),
+      supabase.from("equipment").select("id,identifier").eq("status", "disponivel").order("identifier"),
+    ]);
     setItems((data ?? []) as Client[]);
+    setAvailable((eq ?? []) as AvailableEq[]);
   };
 
   useEffect(() => {
     if (!user) return;
     load();
     const ch = supabase.channel("clients-rt")
-      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, load).subscribe();
+      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "equipment_requests" }, load)
+      .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [user]);
 
@@ -47,6 +63,19 @@ function ClientsPage() {
     if (!confirm("Excluir cliente?")) return;
     const { error } = await supabase.from("clients").delete().eq("id", id);
     if (error) toast.error(error.message); else toast.success("Cliente excluído");
+  };
+
+  const submitRequest = async () => {
+    if (!requestEq || !selectedClient) return;
+    const { error } = await supabase.from("equipment_requests").insert({
+      equipment_id: requestEq.id, client_id: selectedClient,
+      requested_by: user!.id, owner_id: user!.id, notes: reqNotes || null,
+    });
+    if (error) toast.error(error.message);
+    else {
+      toast.success("Solicitação enviada — aguardando aprovação do administrador");
+      setRequestEq(null); setSelectedClient(""); setReqNotes("");
+    }
   };
 
   return (
@@ -66,6 +95,64 @@ function ClientsPage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <Card className="p-4 border-[oklch(0.65_0.18_150)]/40">
+        <div className="flex items-center gap-2 mb-3">
+          <Wrench className="h-4 w-4 text-[oklch(0.55_0.18_150)]" />
+          <h2 className="font-semibold">Equipamentos disponíveis</h2>
+          <span className="text-xs text-muted-foreground ml-auto">
+            Clique para solicitar associação a um cliente
+          </span>
+        </div>
+        {available.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Nenhum equipamento disponível no momento.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+            {available.map((e) => (
+              <button key={e.id} type="button"
+                disabled={!canWrite}
+                onClick={() => { setRequestEq(e); setSelectedClient(""); setReqNotes(""); }}
+                className="px-3 py-2 rounded bg-[oklch(0.65_0.18_150)]/10 border border-[oklch(0.65_0.18_150)]/30 text-sm font-mono text-center hover:bg-[oklch(0.65_0.18_150)]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                {e.identifier}
+              </button>
+            ))}
+          </div>
+        )}
+        {!canWrite && (
+          <p className="text-xs text-muted-foreground mt-2 italic">
+            Você não tem permissão para solicitar associações.
+          </p>
+        )}
+      </Card>
+
+      <Dialog open={!!requestEq} onOpenChange={(o) => !o && setRequestEq(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Solicitar associação — {requestEq?.identifier}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Cliente *</Label>
+              <Select value={selectedClient} onValueChange={setSelectedClient}>
+                <SelectTrigger><SelectValue placeholder="Selecione um cliente" /></SelectTrigger>
+                <SelectContent>
+                  {items.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Observação (opcional)</Label>
+              <Textarea value={reqNotes} onChange={(e) => setReqNotes(e.target.value)} placeholder="Motivo da solicitação..." />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              A solicitação será enviada para aprovação do administrador.
+            </p>
+            <Button onClick={submitRequest} disabled={!selectedClient} className="w-full">
+              Enviar solicitação
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {items.length === 0 ? (
         <Card className="p-12 text-center text-muted-foreground">Nenhum cliente. Clique em "Novo cliente".</Card>
