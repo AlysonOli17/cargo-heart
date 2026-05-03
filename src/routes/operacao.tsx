@@ -241,23 +241,6 @@ function OperationPage() {
                     </div>
                   </div>
                 ))}
-                {available.length > 0 && (
-                  <div className="border rounded-lg overflow-hidden border-dashed">
-                    <div className="bg-[oklch(0.65_0.18_150)]/15 px-3 py-2 text-center font-semibold text-sm uppercase tracking-wide border-b">
-                      Disponíveis
-                    </div>
-                    <div className="p-3 min-h-[80px]">
-                      <ul className="space-y-1">
-                        {available.map((e) => (
-                          <li key={e.id} className="text-sm font-mono flex items-center gap-2">
-                            <span className="text-[oklch(0.55_0.18_150)]">*</span>
-                            <span>{e.identifier}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </Card>
@@ -287,49 +270,6 @@ function OperationPage() {
           </Card>
         </div>
       )}
-
-      <Card className="p-4">
-        <h2 className="font-semibold mb-4">
-          Linha do tempo {today && <span className="text-xs text-muted-foreground ml-2">(atualiza em tempo real)</span>}
-        </h2>
-        {movs.length === 0 ? (
-          <p className="text-center text-muted-foreground py-12">
-            Nenhuma movimentação neste dia.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {movs.map((m) => (
-              <div key={m.id} className="flex gap-3 border-l-2 border-primary pl-4 py-2">
-                <div className="min-w-[60px] text-xs text-muted-foreground pt-1">
-                  {format(new Date(m.created_at), "HH:mm:ss")}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium">{eqName(m.equipment_id)}</p>
-                  <div className="flex flex-wrap items-center gap-2 mt-1 text-sm">
-                    {m.from_status ? (
-                      <>
-                        <StatusPill s={m.from_status} />
-                        <span className="text-muted-foreground">→</span>
-                        <StatusPill s={m.to_status} />
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-xs text-muted-foreground italic">Cadastro</span>
-                        <StatusPill s={m.to_status} />
-                      </>
-                    )}
-                  </div>
-                  {(m.from_client_id || m.to_client_id) && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Cliente: {clientName(m.from_client_id)} → <span className="text-foreground font-medium">{clientName(m.to_client_id)}</span>
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
 
       <Dialog open={!!requestEq} onOpenChange={(o) => !o && setRequestEq(null)}>
         <DialogContent>
