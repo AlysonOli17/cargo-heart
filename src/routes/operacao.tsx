@@ -284,15 +284,6 @@ function OperationPage() {
   );
 }
 
-function StatCard({ label, value, color }: { label: string; value: number; color?: string }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className={`text-2xl font-bold mt-1 ${color ?? ""}`}>{value}</p>
-    </Card>
-  );
-}
-
 function StatusPill({ s }: { s: EquipmentStatus }) {
   return (
     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s]}`}>
