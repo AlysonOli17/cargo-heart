@@ -57,6 +57,8 @@ function EquipmentPage() {
     return () => { supabase.removeChannel(ch); };
   }, [user]);
 
+  if (!user) return null;
+
   const remove = async (id: string) => {
     if (!confirm("Excluir equipamento?")) return;
     const { error } = await supabase.from("equipment").delete().eq("id", id);
