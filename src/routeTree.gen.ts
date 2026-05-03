@@ -13,6 +13,7 @@ import { Route as OperacaoRouteImport } from './routes/operacao'
 import { Route as EquipamentosRouteImport } from './routes/equipamentos'
 import { Route as ClientesRouteImport } from './routes/clientes'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AcessoRouteImport } from './routes/acesso'
 import { Route as IndexRouteImport } from './routes/index'
 
 const OperacaoRoute = OperacaoRouteImport.update({
@@ -35,6 +36,11 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AcessoRoute = AcessoRouteImport.update({
+  id: '/acesso',
+  path: '/acesso',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -43,6 +49,7 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
   '/clientes': typeof ClientesRoute
   '/equipamentos': typeof EquipamentosRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
   '/clientes': typeof ClientesRoute
   '/equipamentos': typeof EquipamentosRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
   '/clientes': typeof ClientesRoute
   '/equipamentos': typeof EquipamentosRoute
@@ -65,14 +74,28 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/clientes' | '/equipamentos' | '/operacao'
+  fullPaths:
+    | '/'
+    | '/acesso'
+    | '/auth'
+    | '/clientes'
+    | '/equipamentos'
+    | '/operacao'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/clientes' | '/equipamentos' | '/operacao'
-  id: '__root__' | '/' | '/auth' | '/clientes' | '/equipamentos' | '/operacao'
+  to: '/' | '/acesso' | '/auth' | '/clientes' | '/equipamentos' | '/operacao'
+  id:
+    | '__root__'
+    | '/'
+    | '/acesso'
+    | '/auth'
+    | '/clientes'
+    | '/equipamentos'
+    | '/operacao'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AcessoRoute: typeof AcessoRoute
   AuthRoute: typeof AuthRoute
   ClientesRoute: typeof ClientesRoute
   EquipamentosRoute: typeof EquipamentosRoute
@@ -109,6 +132,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/acesso': {
+      id: '/acesso'
+      path: '/acesso'
+      fullPath: '/acesso'
+      preLoaderRoute: typeof AcessoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -121,6 +151,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AcessoRoute: AcessoRoute,
   AuthRoute: AuthRoute,
   ClientesRoute: ClientesRoute,
   EquipamentosRoute: EquipamentosRoute,
