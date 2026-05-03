@@ -3,11 +3,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Users, Wrench, LogOut, Truck } from "lucide-react";
+import { LayoutDashboard, Users, Wrench, LogOut, Truck, Activity } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 
 const nav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/operacao", label: "Operação", icon: Activity },
   { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
 ];
