@@ -1,12 +1,13 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
+import { useRole } from "@/hooks/use-role";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Users, Wrench, LogOut, Truck, Activity } from "lucide-react";
+import { LayoutDashboard, Users, Wrench, LogOut, Truck, Activity, Shield } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 
-const nav = [
+const baseNav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/operacao", label: "Operação", icon: Activity },
   { to: "/clientes", label: "Clientes", icon: Users },
@@ -15,8 +16,12 @@ const nav = [
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const { isAdmin } = useRole();
   const navigate = useNavigate();
   const loc = useLocation();
+  const nav = isAdmin
+    ? [...baseNav, { to: "/acesso", label: "Acesso", icon: Shield }]
+    : baseNav;
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/auth" });
