@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { format, startOfDay, endOfDay, addDays, isSameDay } from "date-fns";
+import { format, addDays, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, Activity, UserPlus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -26,15 +26,6 @@ export const Route = createFileRoute("/operacao")({
   component: () => <AppLayout><OperationPage /></AppLayout>,
 });
 
-type Movement = {
-  id: string;
-  created_at: string;
-  equipment_id: string;
-  from_status: EquipmentStatus | null;
-  to_status: EquipmentStatus;
-  from_client_id: string | null;
-  to_client_id: string | null;
-};
 type Equipment = { id: string; identifier: string; status: EquipmentStatus; current_client_id: string | null };
 type Client = { id: string; name: string };
 
@@ -42,7 +33,6 @@ function OperationPage() {
   const { user } = useAuth();
   const { isAdmin, canWrite } = useRole();
   const [date, setDate] = useState<Date>(new Date());
-  const [movs, setMovs] = useState<Movement[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const today = isSameDay(date, new Date());
@@ -55,16 +45,10 @@ function OperationPage() {
   const [clientOpen, setClientOpen] = useState(false);
 
   const load = async () => {
-    const start = startOfDay(date).toISOString();
-    const end = endOfDay(date).toISOString();
-    const [{ data: m }, { data: e }, { data: c }] = await Promise.all([
-      supabase.from("movements").select("*")
-        .gte("created_at", start).lte("created_at", end)
-        .order("created_at", { ascending: false }),
+    const [{ data: e }, { data: c }] = await Promise.all([
       supabase.from("equipment").select("id,identifier,status,current_client_id"),
       supabase.from("clients").select("id,name"),
     ]);
-    setMovs((m ?? []) as Movement[]);
     setEquipment((e ?? []) as Equipment[]);
     setClients((c ?? []) as Client[]);
   };
@@ -74,15 +58,11 @@ function OperationPage() {
     load();
     if (!today) return;
     const ch = supabase.channel(`ops-${date.toDateString()}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "movements" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [user, date.toDateString()]);
-
-  const eqName = (id: string) => equipment.find(e => e.id === id)?.identifier ?? "—";
-  const clientName = (id: string | null) => id ? clients.find(c => c.id === id)?.name ?? "—" : "Sem cliente";
 
   const byClient = useMemo(() => {
     return clients
@@ -241,23 +221,6 @@ function OperationPage() {
                     </div>
                   </div>
                 ))}
-                {available.length > 0 && (
-                  <div className="border rounded-lg overflow-hidden border-dashed">
-                    <div className="bg-[oklch(0.65_0.18_150)]/15 px-3 py-2 text-center font-semibold text-sm uppercase tracking-wide border-b">
-                      Disponíveis
-                    </div>
-                    <div className="p-3 min-h-[80px]">
-                      <ul className="space-y-1">
-                        {available.map((e) => (
-                          <li key={e.id} className="text-sm font-mono flex items-center gap-2">
-                            <span className="text-[oklch(0.55_0.18_150)]">*</span>
-                            <span>{e.identifier}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </Card>
@@ -287,49 +250,6 @@ function OperationPage() {
           </Card>
         </div>
       )}
-
-      <Card className="p-4">
-        <h2 className="font-semibold mb-4">
-          Linha do tempo {today && <span className="text-xs text-muted-foreground ml-2">(atualiza em tempo real)</span>}
-        </h2>
-        {movs.length === 0 ? (
-          <p className="text-center text-muted-foreground py-12">
-            Nenhuma movimentação neste dia.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {movs.map((m) => (
-              <div key={m.id} className="flex gap-3 border-l-2 border-primary pl-4 py-2">
-                <div className="min-w-[60px] text-xs text-muted-foreground pt-1">
-                  {format(new Date(m.created_at), "HH:mm:ss")}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium">{eqName(m.equipment_id)}</p>
-                  <div className="flex flex-wrap items-center gap-2 mt-1 text-sm">
-                    {m.from_status ? (
-                      <>
-                        <StatusPill s={m.from_status} />
-                        <span className="text-muted-foreground">→</span>
-                        <StatusPill s={m.to_status} />
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-xs text-muted-foreground italic">Cadastro</span>
-                        <StatusPill s={m.to_status} />
-                      </>
-                    )}
-                  </div>
-                  {(m.from_client_id || m.to_client_id) && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Cliente: {clientName(m.from_client_id)} → <span className="text-foreground font-medium">{clientName(m.to_client_id)}</span>
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
 
       <Dialog open={!!requestEq} onOpenChange={(o) => !o && setRequestEq(null)}>
         <DialogContent>
