@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
 
 export const Route = createFileRoute("/manutencao")({
-  head: () => ({ meta: [{ title: "Manutenção — FrotaPro" }] }),
+  head: () => ({ meta: [{ title: "Manutenção — Disponibilidade Frota Busato" }] }),
   component: () => <AppLayout><MaintenancePage /></AppLayout>,
 });
 

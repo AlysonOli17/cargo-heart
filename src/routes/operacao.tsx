@@ -22,7 +22,7 @@ import { toast } from "sonner";
 import { STATUS_LABELS, STATUS_COLORS, type EquipmentStatus } from "@/lib/equipment";
 
 export const Route = createFileRoute("/operacao")({
-  head: () => ({ meta: [{ title: "Operação ao vivo — FrotaPro" }] }),
+  head: () => ({ meta: [{ title: "Operação ao vivo — Disponibilidade Frota Busato" }] }),
   component: () => <AppLayout><OperationPage /></AppLayout>,
 });
 

@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRole, type AppRole } from "@/hooks/use-role";
 
 export const Route = createFileRoute("/acesso")({
-  head: () => ({ meta: [{ title: "Controle de acesso — FrotaPro" }] }),
+  head: () => ({ meta: [{ title: "Controle de acesso — Disponibilidade Frota Busato" }] }),
   component: () => <AppLayout><AccessPage /></AppLayout>,
 });
 

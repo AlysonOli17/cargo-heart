@@ -173,7 +173,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
               <Truck className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="font-bold text-lg">FrotaPro</span>
+            <span className="font-bold text-lg">Disponibilidade Frota Busato</span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             {nav.map((n) => {

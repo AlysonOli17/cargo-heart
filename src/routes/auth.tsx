@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { Truck } from "lucide-react";
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({ meta: [{ title: "Entrar — FrotaPro" }] }),
+  head: () => ({ meta: [{ title: "Entrar — Disponibilidade Frota Busato" }] }),
   component: AuthPage,
 });
 
@@ -52,7 +52,7 @@ function AuthPage() {
           <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
             <Truck className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-xl font-bold">FrotaPro</span>
+          <span className="text-xl font-bold">Disponibilidade Frota Busato</span>
         </Link>
         <h1 className="text-2xl font-bold mb-1">{mode === "signin" ? "Entrar" : "Criar conta"}</h1>
         <p className="text-sm text-muted-foreground mb-6">Gestão de frota em tempo real</p>
