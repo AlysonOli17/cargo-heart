@@ -31,11 +31,15 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Disponibilidade Frota Busato — Gestão de Frota em Tempo Real" },
       { name: "description", content: "Cadastre clientes, acompanhe equipamentos e veja movimentações ao vivo." },
-      { property: "og:title", content: "Disponibilidade Frota Busato" },
-      { property: "og:description", content: "Gestão de frota em tempo real." },
+      { property: "og:title", content: "Disponibilidade Frota Busato — Gestão de Frota em Tempo Real" },
+      { property: "og:description", content: "Cadastre clientes, acompanhe equipamentos e veja movimentações ao vivo." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Disponibilidade Frota Busato — Gestão de Frota em Tempo Real" },
+      { name: "twitter:description", content: "Cadastre clientes, acompanhe equipamentos e veja movimentações ao vivo." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4c081640-2252-472c-a0a0-ec9727fc9762/id-preview-5f156540--28d318d6-2e4e-4565-9b03-9912f69ae54d.lovable.app-1777834663163.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4c081640-2252-472c-a0a0-ec9727fc9762/id-preview-5f156540--28d318d6-2e4e-4565-9b03-9912f69ae54d.lovable.app-1777834663163.png" },
     ],
     links: [
       {
