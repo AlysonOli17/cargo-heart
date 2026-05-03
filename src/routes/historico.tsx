@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS, type EquipmentStatus } from "@/lib/equipment";
 
 export const Route = createFileRoute("/historico")({
-  head: () => ({ meta: [{ title: "Histórico — FrotaPro" }] }),
+  head: () => ({ meta: [{ title: "Histórico — Disponibilidade Frota Busato" }] }),
   component: () => <AppLayout><HistoryPage /></AppLayout>,
 });
 

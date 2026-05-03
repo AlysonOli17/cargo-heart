@@ -9,7 +9,7 @@ import { Wrench, Users, CircleCheck, Activity } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
 export const Route = createFileRoute("/")({
-  head: () => ({ meta: [{ title: "Dashboard — FrotaPro" }] }),
+  head: () => ({ meta: [{ title: "Dashboard — Disponibilidade Frota Busato" }] }),
   component: () => <AppLayout><Dashboard /></AppLayout>,
 });
 

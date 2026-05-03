@@ -14,7 +14,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS, STATUS_COLORS, type EquipmentStatus } from "@/lib/equipment";
 
 export const Route = createFileRoute("/equipamentos")({
-  head: () => ({ meta: [{ title: "Equipamentos — FrotaPro" }] }),
+  head: () => ({ meta: [{ title: "Equipamentos — Disponibilidade Frota Busato" }] }),
   component: () => <AppLayout><EquipmentPage /></AppLayout>,
 });
 
