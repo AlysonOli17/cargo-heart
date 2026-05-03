@@ -1,12 +1,13 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { LayoutDashboard, Wrench, LogOut, Truck, Activity, Shield, History, CheckCircle2 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const baseNav = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -24,6 +25,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const nav = isAdmin
     ? [...baseNav, { to: "/acesso", label: "Acesso", icon: Shield }]
     : baseNav;
+
+  const [releaseAlert, setReleaseAlert] = useState<{ open: boolean; identifier: string }>({ open: false, identifier: "" });
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/auth" });
@@ -103,23 +106,33 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   // Notify when equipment leaves manutencao -> disponivel
   useEffect(() => {
     if (!user) return;
-    const playBeep = () => {
+    const playBankChime = () => {
       try {
         const Ctx = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
         const ctx = new Ctx();
+        if (ctx.state === "suspended") ctx.resume().catch(() => {});
+        const master = ctx.createGain();
+        master.gain.value = 1.0;
+        master.connect(ctx.destination);
         const playTone = (freq: number, start: number, dur: number) => {
           const o = ctx.createOscillator();
           const g = ctx.createGain();
-          o.type = "sine"; o.frequency.value = freq;
-          o.connect(g); g.connect(ctx.destination);
-          g.gain.setValueAtTime(0.0001, ctx.currentTime + start);
-          g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + start + 0.02);
-          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
-          o.start(ctx.currentTime + start);
-          o.stop(ctx.currentTime + start + dur + 0.05);
+          o.type = "square";
+          o.frequency.value = freq;
+          o.connect(g); g.connect(master);
+          const t = ctx.currentTime + start;
+          g.gain.setValueAtTime(0.0001, t);
+          g.gain.exponentialRampToValueAtTime(0.9, t + 0.02);
+          g.gain.setValueAtTime(0.9, t + dur - 0.05);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+          o.start(t);
+          o.stop(t + dur + 0.05);
         };
-        playTone(880, 0, 0.18);
-        playTone(1320, 0.2, 0.25);
+        // "ding-dong" estilo chamada de senha de banco, repetido 2x bem alto
+        playTone(1568, 0.0, 0.45);   // Sol5
+        playTone(1175, 0.45, 0.6);   // Ré5
+        playTone(1568, 1.2, 0.45);
+        playTone(1175, 1.65, 0.7);
       } catch { /* ignore */ }
     };
 
@@ -134,7 +147,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             const { data } = await supabase.from("equipment").select("identifier").eq("id", newRow.id).maybeSingle();
             identifier = data?.identifier;
           }
-          playBeep();
+          playBankChime();
+          setReleaseAlert({ open: true, identifier: identifier ?? "Equipamento" });
           toast.success("Equipamento liberado da manutenção", {
             description: `${identifier ?? "Equipamento"} agora está DISPONÍVEL`,
             duration: 10000,
@@ -192,6 +206,25 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </header>
       <main className="flex-1 container mx-auto px-4 py-6">{children}</main>
       <Toaster />
+      <AlertDialog open={releaseAlert.open} onOpenChange={(o) => setReleaseAlert((s) => ({ ...s, open: o }))}>
+        <AlertDialogContent className="border-2 border-[oklch(0.65_0.18_150)]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-2xl">
+              <CheckCircle2 className="h-7 w-7 text-[oklch(0.65_0.18_150)]" />
+              Equipamento Liberado
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-lg">
+              <span className="font-bold text-foreground text-2xl block py-3">{releaseAlert.identifier}</span>
+              saiu da manutenção e agora está <span className="font-semibold text-[oklch(0.65_0.18_150)]">DISPONÍVEL</span>.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setReleaseAlert({ open: false, identifier: "" })}>
+              OK, ciente
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
