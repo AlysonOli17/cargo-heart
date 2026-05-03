@@ -14,7 +14,186 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      clients: {
+        Row: {
+          address: string | null
+          contact_name: string | null
+          created_at: string
+          document: string | null
+          email: string | null
+          id: string
+          name: string
+          notes: string | null
+          owner_id: string
+          phone: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          contact_name?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          id?: string
+          name: string
+          notes?: string | null
+          owner_id: string
+          phone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          contact_name?: string | null
+          created_at?: string
+          document?: string | null
+          email?: string | null
+          id?: string
+          name?: string
+          notes?: string | null
+          owner_id?: string
+          phone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      equipment: {
+        Row: {
+          brand: string | null
+          created_at: string
+          current_client_id: string | null
+          hour_meter: number | null
+          id: string
+          identifier: string
+          model: string | null
+          notes: string | null
+          owner_id: string
+          serial_number: string | null
+          status: Database["public"]["Enums"]["equipment_status"]
+          type: string | null
+          updated_at: string
+          year: number | null
+        }
+        Insert: {
+          brand?: string | null
+          created_at?: string
+          current_client_id?: string | null
+          hour_meter?: number | null
+          id?: string
+          identifier: string
+          model?: string | null
+          notes?: string | null
+          owner_id: string
+          serial_number?: string | null
+          status?: Database["public"]["Enums"]["equipment_status"]
+          type?: string | null
+          updated_at?: string
+          year?: number | null
+        }
+        Update: {
+          brand?: string | null
+          created_at?: string
+          current_client_id?: string | null
+          hour_meter?: number | null
+          id?: string
+          identifier?: string
+          model?: string | null
+          notes?: string | null
+          owner_id?: string
+          serial_number?: string | null
+          status?: Database["public"]["Enums"]["equipment_status"]
+          type?: string | null
+          updated_at?: string
+          year?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "equipment_current_client_id_fkey"
+            columns: ["current_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      movements: {
+        Row: {
+          created_at: string
+          equipment_id: string
+          from_client_id: string | null
+          from_status: Database["public"]["Enums"]["equipment_status"] | null
+          id: string
+          notes: string | null
+          owner_id: string
+          to_client_id: string | null
+          to_status: Database["public"]["Enums"]["equipment_status"]
+        }
+        Insert: {
+          created_at?: string
+          equipment_id: string
+          from_client_id?: string | null
+          from_status?: Database["public"]["Enums"]["equipment_status"] | null
+          id?: string
+          notes?: string | null
+          owner_id: string
+          to_client_id?: string | null
+          to_status: Database["public"]["Enums"]["equipment_status"]
+        }
+        Update: {
+          created_at?: string
+          equipment_id?: string
+          from_client_id?: string | null
+          from_status?: Database["public"]["Enums"]["equipment_status"] | null
+          id?: string
+          notes?: string | null
+          owner_id?: string
+          to_client_id?: string | null
+          to_status?: Database["public"]["Enums"]["equipment_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "movements_equipment_id_fkey"
+            columns: ["equipment_id"]
+            isOneToOne: false
+            referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "movements_from_client_id_fkey"
+            columns: ["from_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "movements_to_client_id_fkey"
+            columns: ["to_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +202,11 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      equipment_status:
+        | "disponivel"
+        | "com_cliente"
+        | "manutencao"
+        | "em_atendimento"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +333,13 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      equipment_status: [
+        "disponivel",
+        "com_cliente",
+        "manutencao",
+        "em_atendimento",
+      ],
+    },
   },
 } as const
