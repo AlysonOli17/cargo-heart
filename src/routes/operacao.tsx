@@ -104,14 +104,14 @@ function OperationPage() {
   );
 
   const submitRequest = async () => {
-    if (!requestEq || !reqClient) return;
+    if (!requestEq || !reqClient || !user) return;
     if (isReplace && (!replacePlate.trim() || !replaceReason.trim())) {
       toast.error("Informe a placa substituída e o motivo");
       return;
     }
     const { error } = await supabase.from("equipment_requests").insert({
       equipment_id: requestEq.id, client_id: reqClient,
-      requested_by: user!.id, owner_id: user!.id, notes: reqNotes || null,
+      requested_by: user.id, owner_id: user.id, notes: reqNotes || null,
       is_replacement: isReplace,
       replacement_plate: isReplace ? replacePlate.trim() : null,
       replacement_reason: isReplace ? replaceReason.trim() : null,
@@ -125,6 +125,7 @@ function OperationPage() {
   };
 
   return (
+    !user ? null :
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
