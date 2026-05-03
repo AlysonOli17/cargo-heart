@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as OperacaoRouteImport } from './routes/operacao'
 import { Route as EquipamentosRouteImport } from './routes/equipamentos'
-import { Route as ClientesRouteImport } from './routes/clientes'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AcessoRouteImport } from './routes/acesso'
 import { Route as IndexRouteImport } from './routes/index'
@@ -24,11 +23,6 @@ const OperacaoRoute = OperacaoRouteImport.update({
 const EquipamentosRoute = EquipamentosRouteImport.update({
   id: '/equipamentos',
   path: '/equipamentos',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ClientesRoute = ClientesRouteImport.update({
-  id: '/clientes',
-  path: '/clientes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -51,7 +45,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
-  '/clientes': typeof ClientesRoute
   '/equipamentos': typeof EquipamentosRoute
   '/operacao': typeof OperacaoRoute
 }
@@ -59,7 +52,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
-  '/clientes': typeof ClientesRoute
   '/equipamentos': typeof EquipamentosRoute
   '/operacao': typeof OperacaoRoute
 }
@@ -68,36 +60,21 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
-  '/clientes': typeof ClientesRoute
   '/equipamentos': typeof EquipamentosRoute
   '/operacao': typeof OperacaoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/acesso'
-    | '/auth'
-    | '/clientes'
-    | '/equipamentos'
-    | '/operacao'
+  fullPaths: '/' | '/acesso' | '/auth' | '/equipamentos' | '/operacao'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/acesso' | '/auth' | '/clientes' | '/equipamentos' | '/operacao'
-  id:
-    | '__root__'
-    | '/'
-    | '/acesso'
-    | '/auth'
-    | '/clientes'
-    | '/equipamentos'
-    | '/operacao'
+  to: '/' | '/acesso' | '/auth' | '/equipamentos' | '/operacao'
+  id: '__root__' | '/' | '/acesso' | '/auth' | '/equipamentos' | '/operacao'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AcessoRoute: typeof AcessoRoute
   AuthRoute: typeof AuthRoute
-  ClientesRoute: typeof ClientesRoute
   EquipamentosRoute: typeof EquipamentosRoute
   OperacaoRoute: typeof OperacaoRoute
 }
@@ -116,13 +93,6 @@ declare module '@tanstack/react-router' {
       path: '/equipamentos'
       fullPath: '/equipamentos'
       preLoaderRoute: typeof EquipamentosRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/clientes': {
-      id: '/clientes'
-      path: '/clientes'
-      fullPath: '/clientes'
-      preLoaderRoute: typeof ClientesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -153,10 +123,18 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AcessoRoute: AcessoRoute,
   AuthRoute: AuthRoute,
-  ClientesRoute: ClientesRoute,
   EquipamentosRoute: EquipamentosRoute,
   OperacaoRoute: OperacaoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}
