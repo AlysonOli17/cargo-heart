@@ -4,8 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, Check, X } from "lucide-react";
+import { Shield, Check, X, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole, type AppRole } from "@/hooks/use-role";
@@ -40,6 +42,8 @@ function AccessPage() {
   const [equipMap, setEquipMap] = useState<Record<string, string>>({});
   const [clientMap, setClientMap] = useState<Record<string, string>>({});
   const [profileMap, setProfileMap] = useState<Record<string, string>>({});
+  const [newUser, setNewUser] = useState({ full_name: "", email: "", password: "", role: "operador" as AppRole });
+  const [creating, setCreating] = useState(false);
 
   const load = async () => {
     const [{ data: roles }, { data: profiles }, { data: reqs }, { data: equips }, { data: clients }] = await Promise.all([
@@ -91,6 +95,24 @@ function AccessPage() {
     else toast.success(status === "aprovado" ? "Solicitação aprovada" : "Solicitação rejeitada");
   };
 
+  const createUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUser.email || newUser.password.length < 6) {
+      toast.error("Informe email e senha (mín. 6 caracteres)");
+      return;
+    }
+    setCreating(true);
+    const { data, error } = await supabase.functions.invoke("admin-create-user", { body: newUser });
+    setCreating(false);
+    if (error || (data as any)?.error) {
+      toast.error((data as any)?.error ?? error?.message ?? "Erro ao criar usuário");
+      return;
+    }
+    toast.success("Usuário criado");
+    setNewUser({ full_name: "", email: "", password: "", role: "operador" });
+    load();
+  };
+
   const pending = requests.filter(r => r.status === "pendente");
   const history = requests.filter(r => r.status !== "pendente").slice(0, 20);
 
@@ -103,6 +125,42 @@ function AccessPage() {
         </h1>
         <p className="text-muted-foreground mt-1">Gerencie perfis e aprove solicitações</p>
       </div>
+
+      <Card className="p-4">
+        <h2 className="font-semibold mb-3 flex items-center gap-2">
+          <UserPlus className="h-4 w-4 text-primary" />Cadastrar novo usuário
+        </h2>
+        <form onSubmit={createUser} className="grid gap-3 md:grid-cols-2">
+          <div>
+            <Label>Nome completo</Label>
+            <Input value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} />
+          </div>
+          <div>
+            <Label>Email</Label>
+            <Input type="email" required value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+          </div>
+          <div>
+            <Label>Senha provisória</Label>
+            <Input type="text" required minLength={6} value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+          </div>
+          <div>
+            <Label>Perfil</Label>
+            <Select value={newUser.role} onValueChange={(v) => setNewUser({ ...newUser, role: v as AppRole })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(["admin", "operador", "visualizador"] as AppRole[]).map(r => (
+                  <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-2">
+            <Button type="submit" disabled={creating}>
+              {creating ? "Criando..." : "Criar usuário"}
+            </Button>
+          </div>
+        </form>
+      </Card>
 
       <Card className="p-4">
         <h2 className="font-semibold mb-3">Solicitações pendentes
