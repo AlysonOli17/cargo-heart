@@ -132,6 +132,30 @@ function AccessPage() {
         <p className="text-muted-foreground mt-1">Gerencie perfis e aprove solicitações</p>
       </div>
 
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground flex items-center gap-1"><Users className="h-3 w-3" />Total de pessoas</p>
+          <p className="text-2xl font-bold mt-1">{users.length}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">Administradores</p>
+          <p className="text-2xl font-bold mt-1">{counts.admin ?? 0}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">Operadores</p>
+          <p className="text-2xl font-bold mt-1">{counts.operador ?? 0}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">Visualizadores</p>
+          <p className="text-2xl font-bold mt-1">{counts.visualizador ?? 0}</p>
+        </Card>
+      </div>
+      {(counts.sem_perfil ?? 0) > 0 && (
+        <p className="text-xs text-[oklch(0.55_0.2_50)]">
+          {counts.sem_perfil} pessoa(s) sem perfil definido — selecione um perfil na lista abaixo para liberar o acesso.
+        </p>
+      )}
+
       <Card className="p-4">
         <h2 className="font-semibold mb-3 flex items-center gap-2">
           <UserPlus className="h-4 w-4 text-primary" />Cadastrar novo usuário
@@ -212,9 +236,9 @@ function AccessPage() {
                 <p className="font-medium truncate">{u.full_name ?? u.email ?? u.user_id.slice(0, 8)}</p>
                 {u.email && <p className="text-xs text-muted-foreground truncate">{u.email}</p>}
               </div>
-              <Select value={u.role} onValueChange={(v) => changeRole(u.user_id, v as AppRole)}
+              <Select value={u.role ?? undefined} onValueChange={(v) => changeRole(u.user_id, v as AppRole)}
                 disabled={u.user_id === user.id}>
-                <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-[180px]"><SelectValue placeholder="Sem perfil" /></SelectTrigger>
                 <SelectContent>
                   {(["admin", "operador", "visualizador"] as AppRole[]).map(r => (
                     <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
