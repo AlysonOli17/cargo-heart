@@ -15,10 +15,8 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const nav = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -30,18 +28,9 @@ function AuthPage() {
   const handle = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({
-        email, password,
-        options: { emailRedirectTo: `${window.location.origin}/`, data: { full_name: fullName } },
-      });
-      if (error) toast.error(error.message);
-      else { toast.success("Conta criada! Faça login."); setMode("signin"); }
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) toast.error(error.message);
-      else { toast.success("Bem-vindo!"); nav({ to: "/" }); }
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) toast.error(error.message);
+    else { toast.success("Bem-vindo!"); nav({ to: "/" }); }
     setLoading(false);
   };
 
@@ -54,15 +43,9 @@ function AuthPage() {
           </div>
           <span className="text-xl font-bold">Disponibilidade Frota Busato</span>
         </Link>
-        <h1 className="text-2xl font-bold mb-1">{mode === "signin" ? "Entrar" : "Criar conta"}</h1>
+        <h1 className="text-2xl font-bold mb-1">Entrar</h1>
         <p className="text-sm text-muted-foreground mb-6">Gestão de frota em tempo real</p>
         <form onSubmit={handle} className="space-y-4">
-          {mode === "signup" && (
-            <div>
-              <Label>Nome completo</Label>
-              <Input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
-            </div>
-          )}
           <div>
             <Label>Email</Label>
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -72,15 +55,12 @@ function AuthPage() {
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
           </div>
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Aguarde..." : mode === "signin" ? "Entrar" : "Criar conta"}
+            {loading ? "Aguarde..." : "Entrar"}
           </Button>
         </form>
-        <button
-          onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-          className="mt-4 text-sm text-primary hover:underline w-full text-center"
-        >
-          {mode === "signin" ? "Não tem conta? Cadastre-se" : "Já tem conta? Entrar"}
-        </button>
+        <p className="mt-4 text-xs text-muted-foreground text-center">
+          O cadastro de novos usuários é feito apenas por um administrador.
+        </p>
       </Card>
     </div>
   );
