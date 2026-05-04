@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Shield, Check, X, UserPlus } from "lucide-react";
+import { Shield, Check, X, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole, type AppRole } from "@/hooks/use-role";
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/acesso")({
   component: () => <AppLayout><AccessPage /></AppLayout>,
 });
 
-type UserRow = { user_id: string; role: AppRole; email: string | null; full_name: string | null };
+type UserRow = { user_id: string; role: AppRole | null; email: string | null; full_name: string | null };
 type RequestRow = {
   id: string; status: "pendente" | "aprovado" | "rejeitado";
   equipment_id: string; client_id: string; requested_by: string;
@@ -53,12 +53,13 @@ function AccessPage() {
       supabase.from("equipment").select("id,identifier"),
       supabase.from("clients").select("id,name"),
     ]);
-    const pm: Record<string, { email: string | null; full_name: string | null }> = {};
-    (profiles ?? []).forEach((p: any) => { pm[p.id] = { email: p.email, full_name: p.full_name }; });
-    setUsers((roles ?? []).map((r: any) => ({
-      user_id: r.user_id, role: r.role,
-      email: pm[r.user_id]?.email ?? null,
-      full_name: pm[r.user_id]?.full_name ?? null,
+    const roleMap: Record<string, AppRole> = {};
+    (roles ?? []).forEach((r: any) => { roleMap[r.user_id] = r.role; });
+    setUsers((profiles ?? []).map((p: any) => ({
+      user_id: p.id,
+      role: roleMap[p.id] ?? null,
+      email: p.email,
+      full_name: p.full_name,
     })));
     setRequests((reqs ?? []) as RequestRow[]);
     const em: Record<string, string> = {}; (equips ?? []).forEach((e: any) => { em[e.id] = e.identifier; });
@@ -115,6 +116,11 @@ function AccessPage() {
 
   const pending = requests.filter(r => r.status === "pendente");
   const history = requests.filter(r => r.status !== "pendente").slice(0, 20);
+  const counts = users.reduce((acc, u) => {
+    const k = u.role ?? "sem_perfil";
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
   return (
     <div className="space-y-6">
@@ -125,6 +131,30 @@ function AccessPage() {
         </h1>
         <p className="text-muted-foreground mt-1">Gerencie perfis e aprove solicitações</p>
       </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground flex items-center gap-1"><Users className="h-3 w-3" />Total de pessoas</p>
+          <p className="text-2xl font-bold mt-1">{users.length}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">Administradores</p>
+          <p className="text-2xl font-bold mt-1">{counts.admin ?? 0}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">Operadores</p>
+          <p className="text-2xl font-bold mt-1">{counts.operador ?? 0}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-muted-foreground">Visualizadores</p>
+          <p className="text-2xl font-bold mt-1">{counts.visualizador ?? 0}</p>
+        </Card>
+      </div>
+      {(counts.sem_perfil ?? 0) > 0 && (
+        <p className="text-xs text-[oklch(0.55_0.2_50)]">
+          {counts.sem_perfil} pessoa(s) sem perfil definido — selecione um perfil na lista abaixo para liberar o acesso.
+        </p>
+      )}
 
       <Card className="p-4">
         <h2 className="font-semibold mb-3 flex items-center gap-2">
@@ -206,9 +236,9 @@ function AccessPage() {
                 <p className="font-medium truncate">{u.full_name ?? u.email ?? u.user_id.slice(0, 8)}</p>
                 {u.email && <p className="text-xs text-muted-foreground truncate">{u.email}</p>}
               </div>
-              <Select value={u.role} onValueChange={(v) => changeRole(u.user_id, v as AppRole)}
+              <Select value={u.role ?? undefined} onValueChange={(v) => changeRole(u.user_id, v as AppRole)}
                 disabled={u.user_id === user.id}>
-                <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-[180px]"><SelectValue placeholder="Sem perfil" /></SelectTrigger>
                 <SelectContent>
                   {(["admin", "operador", "visualizador"] as AppRole[]).map(r => (
                     <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
