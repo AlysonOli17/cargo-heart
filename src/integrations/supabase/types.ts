@@ -64,6 +64,8 @@ export type Database = {
           hour_meter: number | null
           id: string
           identifier: string
+          maintenance_expected_return: string | null
+          maintenance_problem: string | null
           model: string | null
           notes: string | null
           owner_id: string
@@ -80,6 +82,8 @@ export type Database = {
           hour_meter?: number | null
           id?: string
           identifier: string
+          maintenance_expected_return?: string | null
+          maintenance_problem?: string | null
           model?: string | null
           notes?: string | null
           owner_id: string
@@ -96,6 +100,8 @@ export type Database = {
           hour_meter?: number | null
           id?: string
           identifier?: string
+          maintenance_expected_return?: string | null
+          maintenance_problem?: string | null
           model?: string | null
           notes?: string | null
           owner_id?: string

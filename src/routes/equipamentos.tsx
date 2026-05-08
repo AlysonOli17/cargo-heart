@@ -8,10 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, History } from "lucide-react";
+import { Plus, Pencil, Trash2, History, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS, STATUS_COLORS, type EquipmentStatus } from "@/lib/equipment";
+import { Textarea } from "@/components/ui/textarea";
 
 export const Route = createFileRoute("/equipamentos")({
   head: () => ({ meta: [{ title: "Equipamentos — Disponibilidade Frota Busato" }] }),
@@ -22,11 +23,12 @@ type Equipment = {
   id: string; identifier: string; type: string | null; brand: string | null; model: string | null;
   serial_number: string | null; year: number | null; hour_meter: number | null; notes: string | null;
   status: EquipmentStatus; current_client_id: string | null;
+  maintenance_problem: string | null; maintenance_expected_return: string | null;
 };
 type Client = { id: string; name: string };
 type Movement = {
   id: string; created_at: string; from_status: EquipmentStatus | null; to_status: EquipmentStatus;
-  from_client_id: string | null; to_client_id: string | null;
+  from_client_id: string | null; to_client_id: string | null; notes: string | null;
 };
 
 function EquipmentPage() {
@@ -119,6 +121,13 @@ function EquipmentPage() {
                 {eq.serial_number && <p>Série: {eq.serial_number}</p>}
                 <p>Cliente: <span className="text-foreground">{clientName(eq.current_client_id)}</span></p>
                 {eq.hour_meter != null && <p>Horímetro: {eq.hour_meter}h</p>}
+                {eq.status === "manutencao" && (eq.maintenance_problem || eq.maintenance_expected_return) && (
+                  <div className="mt-1 p-2 rounded bg-[oklch(0.65_0.2_50)]/10 border border-[oklch(0.65_0.2_50)]/30 text-foreground">
+                    <p className="flex items-center gap-1 font-medium"><Wrench className="h-3 w-3" />Manutenção</p>
+                    {eq.maintenance_problem && <p>Problema: {eq.maintenance_problem}</p>}
+                    {eq.maintenance_expected_return && <p>Previsão: {new Date(eq.maintenance_expected_return + "T00:00:00").toLocaleDateString("pt-BR")}</p>}
+                  </div>
+                )}
               </div>
               <div className="flex gap-1 pt-2">
                 <Button variant="outline" size="sm" className="flex-1" onClick={() => setHistoryFor(eq)}><History className="h-3 w-3 mr-1" />Hist.</Button>
@@ -162,6 +171,7 @@ function HistoryView({ equipmentId, clientName }: { equipmentId: string; clientN
           {(m.from_client_id || m.to_client_id) && (
             <p className="text-xs text-muted-foreground">Cliente: {clientName(m.from_client_id)} → {clientName(m.to_client_id)}</p>
           )}
+          {m.notes && <p className="text-xs text-foreground/80 italic mt-0.5">{m.notes}</p>}
         </div>
       ))}
     </div>
@@ -174,11 +184,22 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
     type: equipment?.type ?? "",
     model: equipment?.model ?? "",
     status: (equipment?.status ?? "disponivel") as EquipmentStatus,
+    current_client_id: equipment?.current_client_id ?? "",
+    maintenance_problem: equipment?.maintenance_problem ?? "",
+    maintenance_expected_return: equipment?.maintenance_expected_return ?? "",
   });
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (form.status === "manutencao" && !form.maintenance_problem.trim()) {
+      toast.error("Informe qual é o problema da manutenção");
+      return;
+    }
+    if (form.status === "com_cliente" && !form.current_client_id) {
+      toast.error("Selecione o cliente para o equipamento");
+      return;
+    }
     setLoading(true);
     const payload: any = {
       owner_id: userId,
@@ -186,6 +207,9 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
       type: form.type || null,
       model: form.model || null,
       status: form.status,
+      current_client_id: form.status === "com_cliente" ? form.current_client_id : null,
+      maintenance_problem: form.status === "manutencao" ? form.maintenance_problem.trim() : null,
+      maintenance_expected_return: form.status === "manutencao" && form.maintenance_expected_return ? form.maintenance_expected_return : null,
     };
     const { error } = equipment
       ? await supabase.from("equipment").update(payload).eq("id", equipment.id)
@@ -215,6 +239,37 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
           </Select>
         </div>
       </div>
+      {form.status === "com_cliente" && (
+        <div>
+          <Label>Cliente *</Label>
+          <Select value={form.current_client_id} onValueChange={(v) => setForm({ ...form, current_client_id: v })}>
+            <SelectTrigger><SelectValue placeholder="Selecione o cliente" /></SelectTrigger>
+            <SelectContent>
+              {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground mt-1">O equipamento permanecerá com este cliente até alguém alterar manualmente.</p>
+        </div>
+      )}
+      {form.status === "manutencao" && (
+        <div className="space-y-3 p-3 rounded-md bg-[oklch(0.65_0.2_50)]/10 border border-[oklch(0.65_0.2_50)]/30">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Wrench className="h-4 w-4" />Detalhes da manutenção
+          </div>
+          <div>
+            <Label>Qual é o problema? *</Label>
+            <Textarea required value={form.maintenance_problem}
+              onChange={(e) => setForm({ ...form, maintenance_problem: e.target.value })}
+              placeholder="Descreva o problema do equipamento" />
+          </div>
+          <div>
+            <Label>Previsão de retorno</Label>
+            <Input type="date" value={form.maintenance_expected_return}
+              onChange={(e) => setForm({ ...form, maintenance_expected_return: e.target.value })} />
+          </div>
+          <p className="text-xs text-muted-foreground">O equipamento só sairá da manutenção quando alguém liberar manualmente na tela de Manutenção.</p>
+        </div>
+      )}
       <Button type="submit" className="w-full" disabled={loading}>{loading ? "Salvando..." : "Salvar"}</Button>
     </form>
   );

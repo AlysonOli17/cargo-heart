@@ -99,7 +99,7 @@ function HistoryPage() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold">Movimentações ({filteredMovs.length})</h2>
           <button onClick={() => exportCSV(
-            [["Data/Hora", "Equipamento", "De", "Para", "Cliente origem", "Cliente destino"],
+            [["Data/Hora", "Equipamento", "De", "Para", "Cliente origem", "Cliente destino", "Detalhes"],
               ...filteredMovs.map(m => [
                 format(new Date(m.created_at), "dd/MM/yyyy HH:mm:ss"),
                 eqMap[m.equipment_id] ?? "",
@@ -107,6 +107,7 @@ function HistoryPage() {
                 STATUS_LABELS[m.to_status],
                 m.from_client_id ? (clientMap[m.from_client_id] ?? "") : "",
                 m.to_client_id ? (clientMap[m.to_client_id] ?? "") : "",
+                m.notes ?? "",
               ])],
             `movimentacoes_${format(new Date(), "yyyy-MM-dd")}.csv`)}
             className="text-xs underline text-muted-foreground hover:text-foreground">
@@ -123,11 +124,12 @@ function HistoryPage() {
                 <TableHead>Para</TableHead>
                 <TableHead>Cliente origem</TableHead>
                 <TableHead>Cliente destino</TableHead>
+                <TableHead>Detalhes</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredMovs.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">Sem registros.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">Sem registros.</TableCell></TableRow>
               ) : filteredMovs.map(m => (
                 <TableRow key={m.id}>
                   <TableCell className="font-mono text-xs whitespace-nowrap">{format(new Date(m.created_at), "dd/MM/yyyy HH:mm:ss")}</TableCell>
@@ -136,6 +138,7 @@ function HistoryPage() {
                   <TableCell>{STATUS_LABELS[m.to_status]}</TableCell>
                   <TableCell>{m.from_client_id ? (clientMap[m.from_client_id] ?? "—") : "—"}</TableCell>
                   <TableCell>{m.to_client_id ? (clientMap[m.to_client_id] ?? "—") : "—"}</TableCell>
+                  <TableCell className="text-xs max-w-[280px]" title={m.notes ?? ""}>{m.notes ?? "—"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
