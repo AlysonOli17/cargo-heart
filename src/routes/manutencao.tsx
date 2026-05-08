@@ -14,7 +14,10 @@ export const Route = createFileRoute("/manutencao")({
   component: () => <AppLayout><MaintenancePage /></AppLayout>,
 });
 
-type Equipment = { id: string; identifier: string; type: string | null; model: string | null };
+type Equipment = {
+  id: string; identifier: string; type: string | null; model: string | null;
+  maintenance_problem: string | null; maintenance_expected_return: string | null;
+};
 
 function MaintenancePage() {
   const { user } = useAuth();
@@ -25,7 +28,7 @@ function MaintenancePage() {
   const load = async () => {
     const { data } = await supabase
       .from("equipment")
-      .select("id,identifier,type,model")
+      .select("id,identifier,type,model,maintenance_problem,maintenance_expected_return")
       .eq("status", "manutencao")
       .order("identifier");
     setItems((data ?? []) as Equipment[]);
@@ -75,6 +78,14 @@ function MaintenancePage() {
                 <div className="font-mono font-semibold text-lg">{e.identifier}</div>
                 <div className="text-sm text-muted-foreground">
                   {[e.type, e.model].filter(Boolean).join(" • ") || "—"}
+                </div>
+              </div>
+              <div className="text-sm space-y-1 bg-[oklch(0.65_0.2_50)]/10 p-2 rounded">
+                <div><span className="font-medium">Problema:</span> {e.maintenance_problem || <span className="italic text-muted-foreground">não informado</span>}</div>
+                <div><span className="font-medium">Previsão de retorno:</span>{" "}
+                  {e.maintenance_expected_return
+                    ? new Date(e.maintenance_expected_return + "T00:00:00").toLocaleDateString("pt-BR")
+                    : <span className="italic text-muted-foreground">não informada</span>}
                 </div>
               </div>
               <Button
