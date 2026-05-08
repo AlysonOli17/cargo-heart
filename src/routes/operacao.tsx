@@ -26,7 +26,10 @@ export const Route = createFileRoute("/operacao")({
   component: () => <AppLayout><OperationPage /></AppLayout>,
 });
 
-type Equipment = { id: string; identifier: string; status: EquipmentStatus; current_client_id: string | null };
+type Equipment = {
+  id: string; identifier: string; status: EquipmentStatus; current_client_id: string | null;
+  maintenance_problem: string | null; maintenance_expected_return: string | null;
+};
 type Client = { id: string; name: string };
 
 function OperationPage() {
@@ -35,6 +38,7 @@ function OperationPage() {
   const [date, setDate] = useState<Date>(new Date());
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [maintStartedAt, setMaintStartedAt] = useState<Record<string, string>>({});
   const today = isSameDay(date, new Date());
   const [requestEq, setRequestEq] = useState<Equipment | null>(null);
   const [reqClient, setReqClient] = useState("");
@@ -46,11 +50,25 @@ function OperationPage() {
 
   const load = async () => {
     const [{ data: e }, { data: c }] = await Promise.all([
-      supabase.from("equipment").select("id,identifier,status,current_client_id"),
+      supabase.from("equipment").select("id,identifier,status,current_client_id,maintenance_problem,maintenance_expected_return"),
       supabase.from("clients").select("id,name"),
     ]);
     setEquipment((e ?? []) as Equipment[]);
     setClients((c ?? []) as Client[]);
+    const maintIds = ((e ?? []) as Equipment[]).filter(x => x.status === "manutencao").map(x => x.id);
+    if (maintIds.length) {
+      const { data: mv } = await supabase
+        .from("movements")
+        .select("equipment_id,created_at,to_status")
+        .in("equipment_id", maintIds)
+        .eq("to_status", "manutencao")
+        .order("created_at", { ascending: false });
+      const map: Record<string, string> = {};
+      (mv ?? []).forEach((m: any) => { if (!map[m.equipment_id]) map[m.equipment_id] = m.created_at; });
+      setMaintStartedAt(map);
+    } else {
+      setMaintStartedAt({});
+    }
   };
 
   useEffect(() => {
@@ -74,8 +92,10 @@ function OperationPage() {
   }, [clients, equipment]);
 
   const inMaintenance = useMemo(
-    () => equipment.filter((e) => e.status === "manutencao"),
-    [equipment]
+    () => equipment
+      .filter((e) => e.status === "manutencao")
+      .sort((a, b) => (maintStartedAt[b.id] ?? "").localeCompare(maintStartedAt[a.id] ?? "")),
+    [equipment, maintStartedAt]
   );
 
   const available = useMemo(
@@ -240,9 +260,26 @@ function OperationPage() {
             ) : (
               <ul className="space-y-2">
                 {inMaintenance.map((e) => (
-                  <li key={e.id} className="text-sm font-mono flex items-center gap-2 px-2 py-1.5 rounded bg-[oklch(0.65_0.2_50)]/10">
-                    <span className="text-[oklch(0.6_0.2_50)]">*</span>
-                    <span>{e.identifier}</span>
+                  <li key={e.id} className="text-sm px-2 py-2 rounded bg-[oklch(0.65_0.2_50)]/10 space-y-1">
+                    <div className="flex items-center gap-2 font-mono">
+                      <span className="text-[oklch(0.6_0.2_50)]">*</span>
+                      <span className="font-semibold">{e.identifier}</span>
+                      {maintStartedAt[e.id] && (
+                        <span className="ml-auto text-[10px] text-muted-foreground font-sans">
+                          desde {format(new Date(maintStartedAt[e.id]), "dd/MM/yyyy", { locale: ptBR })}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-foreground/80 pl-4">
+                      <span className="font-medium">Problema:</span>{" "}
+                      {e.maintenance_problem || <span className="italic text-muted-foreground">não informado</span>}
+                    </div>
+                    <div className="text-xs text-foreground/80 pl-4">
+                      <span className="font-medium">Previsão:</span>{" "}
+                      {e.maintenance_expected_return
+                        ? format(new Date(e.maintenance_expected_return + "T00:00:00"), "dd/MM/yyyy", { locale: ptBR })
+                        : <span className="italic text-muted-foreground">não informada</span>}
+                    </div>
                   </li>
                 ))}
               </ul>
