@@ -63,40 +63,78 @@ function Dashboard() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard de Equipamentos</h1>
-        <p className="text-muted-foreground flex items-center gap-2 mt-1">
-          <span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.18_150)] animate-pulse" />
-          Visão geral agrupada por tipo
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard de Frota</h1>
+          <p className="text-muted-foreground flex items-center gap-2 mt-1 italic">
+            <span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.18_150)] animate-pulse" />
+            Acompanhamento em tempo real por categoria
+          </p>
+        </div>
+        <div className="flex gap-4">
+           <Card className="px-4 py-2 bg-background/50 backdrop-blur border-dashed">
+              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Total Frota</p>
+              <p className="text-xl font-bold">{equipment.length}</p>
+           </Card>
+           <Card className="px-4 py-2 bg-[oklch(0.65_0.18_150)]/10 border-[oklch(0.65_0.18_150)]/20">
+              <p className="text-[10px] uppercase font-bold text-[oklch(0.55_0.18_150)] tracking-widest">Disponíveis</p>
+              <p className="text-xl font-bold text-[oklch(0.55_0.18_150)]">{equipment.filter(e => e.status === 'disponivel').length}</p>
+           </Card>
+        </div>
       </div>
 
-      <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
         {sortedTypes.length === 0 ? (
-          <Card className="p-8 text-center text-muted-foreground">Nenhum equipamento cadastrado ainda.</Card>
+          <div className="col-span-full py-20 text-center border-2 border-dashed rounded-2xl bg-muted/20">
+             <p className="text-muted-foreground">Nenhum equipamento cadastrado no sistema.</p>
+          </div>
         ) : (
           sortedTypes.map((type) => {
-            const availableCount = groupedEquipment[type].filter(e => e.status === "disponivel").length;
-            const maintenanceCount = groupedEquipment[type].filter(e => e.status === "manutencao").length;
+            const items = groupedEquipment[type];
+            const available = items.filter(e => e.status === "disponivel").length;
+            const inMaint = items.filter(e => e.status === "manutencao").length;
+            
             return (
-              <section key={type}>
-                <h2 className="text-xl font-semibold mb-3 border-b pb-2 flex items-center justify-between">
-                  <span>{type}</span>
-                  <span className="flex gap-4 text-sm font-medium">
-                    <span className="text-[oklch(0.55_0.18_150)] flex items-center gap-1">
-                      <CircleCheck className="h-4 w-4" /> {availableCount} Disponível
-                    </span>
-                    <span className="text-[oklch(0.6_0.2_50)] flex items-center gap-1">
-                      <Wrench className="h-4 w-4" /> {maintenanceCount} em Manutenção
-                    </span>
-                  </span>
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                  {groupedEquipment[type].map((eq) => (
-                    <EquipmentCard key={eq.id} eq={eq} />
-                  ))}
+              <Card key={type} className="overflow-hidden border-2 transition-all hover:border-primary/20 group">
+                <div className="bg-muted/40 p-4 border-b flex items-center justify-between">
+                  <div>
+                    <h2 className="text-lg font-bold uppercase tracking-tight">{type}</h2>
+                    <p className="text-xs text-muted-foreground">{items.length} unidades no total</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="text-center px-2 py-1 rounded bg-background border shadow-sm">
+                      <p className="text-[9px] font-bold text-muted-foreground uppercase leading-none">Disp</p>
+                      <p className="text-sm font-bold text-[oklch(0.55_0.18_150)]">{available}</p>
+                    </div>
+                    <div className="text-center px-2 py-1 rounded bg-background border shadow-sm">
+                      <p className="text-[9px] font-bold text-muted-foreground uppercase leading-none">Ofic</p>
+                      <p className="text-sm font-bold text-[oklch(0.6_0.2_50)]">{inMaint}</p>
+                    </div>
+                  </div>
                 </div>
-              </section>
+                <div className="p-4 bg-background/50">
+                   <div className="grid grid-cols-1 gap-2">
+                      {items.map((eq) => (
+                        <div key={eq.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20 border border-transparent hover:border-primary/10 hover:bg-muted/40 transition-all">
+                           <StatusIcon status={eq.status} />
+                           <div className="flex-1 min-w-0">
+                              <p className="font-mono font-bold text-sm">{eq.identifier}</p>
+                              <p className="text-[10px] text-muted-foreground truncate uppercase">
+                                {eq.brand} {eq.model}
+                              </p>
+                           </div>
+                           <div className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                              eq.status === 'disponivel' ? 'bg-[oklch(0.65_0.18_150)]/10 text-[oklch(0.55_0.18_150)]' :
+                              eq.status === 'manutencao' ? 'bg-[oklch(0.65_0.2_50)]/10 text-[oklch(0.6_0.2_50)]' :
+                              'bg-primary/10 text-primary'
+                           }`}>
+                              {STATUS_LABELS[eq.status]}
+                           </div>
+                        </div>
+                      ))}
+                   </div>
+                </div>
+              </Card>
             );
           })
         )}

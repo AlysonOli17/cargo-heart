@@ -43,19 +43,32 @@ function AuthPage() {
       });
       
       if (error) {
+        console.error("Signup error:", error);
         toast.error(error.message);
       } else if (data.user) {
-        toast.success("Conta criada com sucesso!", {
-          description: "Um administrador precisa aprovar seu acesso. Aguarde a liberação.",
-          duration: 6000,
-        });
-        setIsSignUp(false);
-        setPassword("");
+        console.log("Signup success:", data.user);
+        // Se a conta já existe mas não foi confirmada, o Supabase pode não retornar erro mas também não criar uma nova.
+        if (data.session) {
+           toast.success("Conta criada e logada!");
+           nav({ to: "/" });
+        } else {
+           toast.success("Solicitação enviada com sucesso!", {
+             description: "IMPORTANTE: Verifique seu email para confirmar o cadastro (caso necessário) e aguarde a liberação do administrador.",
+             duration: 10000,
+           });
+           setIsSignUp(false);
+           setPassword("");
+        }
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) toast.error(error.message);
-      else { toast.success("Bem-vindo!"); nav({ to: "/" }); }
+      if (error) {
+        console.error("Login error:", error);
+        toast.error(error.message);
+      } else { 
+        toast.success("Bem-vindo!"); 
+        nav({ to: "/" }); 
+      }
     }
     setLoading(false);
   };
