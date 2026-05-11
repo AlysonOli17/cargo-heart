@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Pencil, Trash2, History, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { useRole } from "@/hooks/use-role";
 import { STATUS_LABELS, STATUS_COLORS, type EquipmentStatus } from "@/lib/equipment";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -33,6 +34,7 @@ type Movement = {
 
 function EquipmentPage() {
   const { user } = useAuth();
+  const { isAdmin } = useRole();
   const [items, setItems] = useState<Equipment[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [open, setOpen] = useState(false);
@@ -79,7 +81,7 @@ function EquipmentPage() {
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" />Novo equipamento</Button></DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader><DialogTitle>{editing ? "Editar" : "Novo"} equipamento</DialogTitle></DialogHeader>
-            <EquipmentForm equipment={editing} clients={clients} userId={user!.id} onDone={() => { setOpen(false); setEditing(null); }} />
+            <EquipmentForm equipment={editing} clients={clients} userId={user!.id} isAdmin={isAdmin} onDone={() => { setOpen(false); setEditing(null); }} />
           </DialogContent>
         </Dialog>
       </div>
@@ -178,7 +180,10 @@ function HistoryView({ equipmentId, clientName }: { equipmentId: string; clientN
   );
 }
 
-function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equipment | null; clients: Client[]; userId: string; onDone: () => void }) {
+function EquipmentForm({ equipment, clients, userId, isAdmin, onDone }: { equipment: Equipment | null; clients: Client[]; userId: string; isAdmin: boolean; onDone: () => void }) {
+  let extraNotes: any = {};
+  try { if (equipment?.notes) extraNotes = JSON.parse(equipment.notes); } catch (e) {}
+
   const [form, setForm] = useState({
     identifier: equipment?.identifier ?? "",
     type: equipment?.type ?? "",
@@ -187,8 +192,13 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
     current_client_id: equipment?.current_client_id ?? "",
     maintenance_problem: equipment?.maintenance_problem ?? "",
     maintenance_expected_return: equipment?.maintenance_expected_return ?? "",
+    maintenance_location: extraNotes.maintenance_location ?? "Oficina Base",
+    maintenance_start_date: extraNotes.maintenance_start_date ?? new Date().toISOString().split("T")[0],
+    maintenance_type: extraNotes.maintenance_type ?? "Corretiva",
   });
   const [loading, setLoading] = useState(false);
+
+  const isAlreadyInMaintenance = equipment?.status === "manutencao";
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,6 +211,13 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
       return;
     }
     setLoading(true);
+
+    const extraData = {
+      maintenance_location: form.maintenance_location,
+      maintenance_start_date: form.maintenance_start_date,
+      maintenance_type: form.maintenance_type,
+    };
+
     const payload: any = {
       owner_id: userId,
       identifier: form.identifier,
@@ -210,6 +227,7 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
       current_client_id: form.status === "com_cliente" ? form.current_client_id : null,
       maintenance_problem: form.status === "manutencao" ? form.maintenance_problem.trim() : null,
       maintenance_expected_return: form.status === "manutencao" && form.maintenance_expected_return ? form.maintenance_expected_return : null,
+      notes: form.status === "manutencao" ? JSON.stringify(extraData) : null, // Clear maintenance notes if not in maintenance
     };
     const { error } = equipment
       ? await supabase.from("equipment").update(payload).eq("id", equipment.id)
@@ -232,9 +250,8 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
           <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as EquipmentStatus })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              {(Object.keys(STATUS_LABELS) as EquipmentStatus[]).map(s => (
-                <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
-              ))}
+              <SelectItem value="disponivel">{STATUS_LABELS["disponivel"]}</SelectItem>
+              <SelectItem value="manutencao">{STATUS_LABELS["manutencao"]}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -262,10 +279,36 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
               onChange={(e) => setForm({ ...form, maintenance_problem: e.target.value })}
               placeholder="Descreva o problema do equipamento" />
           </div>
-          <div>
-            <Label>Previsão de retorno</Label>
-            <Input type="date" value={form.maintenance_expected_return}
-              onChange={(e) => setForm({ ...form, maintenance_expected_return: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Tipo de Manutenção</Label>
+              <Select value={form.maintenance_type} onValueChange={(v) => setForm({ ...form, maintenance_type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Corretiva">Corretiva</SelectItem>
+                  <SelectItem value="MEV">MEV</SelectItem>
+                  <SelectItem value="Preventiva">Preventiva</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Local / Oficina</Label>
+              <Input value={form.maintenance_location}
+                onChange={(e) => setForm({ ...form, maintenance_location: e.target.value })} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Data de Início</Label>
+              <Input type="date" value={form.maintenance_start_date}
+                disabled={isAlreadyInMaintenance && !isAdmin}
+                onChange={(e) => setForm({ ...form, maintenance_start_date: e.target.value })} />
+            </div>
+            <div>
+              <Label>Previsão de retorno</Label>
+              <Input type="date" value={form.maintenance_expected_return}
+                onChange={(e) => setForm({ ...form, maintenance_expected_return: e.target.value })} />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">O equipamento só sairá da manutenção quando alguém liberar manualmente na tela de Manutenção.</p>
         </div>

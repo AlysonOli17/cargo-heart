@@ -27,8 +27,9 @@ export const Route = createFileRoute("/operacao")({
 });
 
 type Equipment = {
-  id: string; identifier: string; status: EquipmentStatus; current_client_id: string | null;
+  id: string; identifier: string; type?: string | null; status: EquipmentStatus; current_client_id: string | null;
   maintenance_problem: string | null; maintenance_expected_return: string | null;
+  notes?: string | null;
 };
 type Client = { id: string; name: string };
 
@@ -47,10 +48,13 @@ function OperationPage() {
   const [replacePlate, setReplacePlate] = useState("");
   const [replaceReason, setReplaceReason] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
+  const [maintEqDetails, setMaintEqDetails] = useState<Equipment | null>(null);
+
+  const [dayMovements, setDayMovements] = useState<any[]>([]);
 
   const load = async () => {
     const [{ data: e }, { data: c }] = await Promise.all([
-      supabase.from("equipment").select("id,identifier,status,current_client_id,maintenance_problem,maintenance_expected_return"),
+      supabase.from("equipment").select("id,identifier,type,status,current_client_id,maintenance_problem,maintenance_expected_return,notes"),
       supabase.from("clients").select("id,name"),
     ]);
     setEquipment((e ?? []) as Equipment[]);
@@ -71,16 +75,39 @@ function OperationPage() {
     }
   };
 
+  const loadDayMovements = async (selectedDate: Date) => {
+    const start = new Date(selectedDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(selectedDate);
+    end.setHours(23, 59, 59, 999);
+
+    const { data } = await supabase
+      .from("movements")
+      .select(`
+        id, created_at, from_status, to_status, notes,
+        equipment:equipment_id(identifier, type),
+        from_client:from_client_id(name),
+        to_client:to_client_id(name)
+      `)
+      .gte("created_at", start.toISOString())
+      .lte("created_at", end.toISOString())
+      .order("created_at", { ascending: false });
+    
+    setDayMovements(data || []);
+  };
+
   useEffect(() => {
     if (!user) return;
     load();
+    loadDayMovements(date);
+    
     if (!today) return;
     const ch = supabase.channel(`ops-${date.toDateString()}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [user, date.toDateString()]);
+  }, [user, date]);
 
   const byClient = useMemo(() => {
     return clients
@@ -173,6 +200,49 @@ function OperationPage() {
         </div>
       </div>
 
+      {!today && (
+        <Card className="p-6 border-[oklch(0.65_0.2_50)]/20 shadow-sm">
+          <h2 className="font-semibold mb-6 text-xl flex items-center gap-2">
+            <History className="h-5 w-5" /> Atividades do dia {format(date, "dd/MM/yyyy", { locale: ptBR })}
+          </h2>
+          {dayMovements.length === 0 ? (
+            <p className="text-center text-muted-foreground py-10 bg-muted/30 rounded-lg border border-dashed">
+              Nenhuma movimentação registrada neste dia.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {dayMovements.map(m => (
+                <div key={m.id} className="border-l-4 border-primary pl-4 py-3 bg-muted/20 rounded-r-lg hover:bg-muted/40 transition-colors">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-mono font-bold text-base">{m.equipment?.identifier || "Equipamento deletado"}</span>
+                    <span className="text-sm font-medium text-muted-foreground">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    {m.from_status && <span className="line-through opacity-60">{STATUS_LABELS[m.from_status as EquipmentStatus]}</span>}
+                    {m.from_status && <span className="text-muted-foreground">→</span>}
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${STATUS_COLORS[m.to_status as EquipmentStatus]}`}>
+                      {STATUS_LABELS[m.to_status as EquipmentStatus]}
+                    </span>
+                  </div>
+                  {(m.from_client?.name || m.to_client?.name) && (
+                    <div className="text-sm mt-3 flex items-center gap-2 bg-background p-2 rounded border">
+                      {m.from_client?.name && <span className="font-medium text-muted-foreground">De: <span className="text-foreground">{m.from_client.name}</span></span>}
+                      {m.from_client?.name && m.to_client?.name && <span className="text-muted-foreground mx-1">→</span>}
+                      {m.to_client?.name && <span className="font-medium text-muted-foreground">Para: <span className="text-foreground">{m.to_client.name}</span></span>}
+                    </div>
+                  )}
+                  {m.notes && (
+                    <p className="text-sm mt-3 text-foreground/80 italic border-l-2 pl-3 border-[oklch(0.65_0.18_150)]/50">
+                      "{m.notes}"
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       {today && (
         <Card className="p-4 border-[oklch(0.65_0.18_150)]/40">
           <h2 className="font-semibold mb-4 flex items-center gap-2">
@@ -260,7 +330,9 @@ function OperationPage() {
             ) : (
               <ul className="space-y-2">
                 {inMaintenance.map((e) => (
-                  <li key={e.id} className="text-sm px-2 py-2 rounded bg-[oklch(0.65_0.2_50)]/10 space-y-1">
+                  <li key={e.id} 
+                    onClick={() => setMaintEqDetails(e)}
+                    className="text-sm px-2 py-2 rounded bg-[oklch(0.65_0.2_50)]/10 space-y-1 cursor-pointer hover:bg-[oklch(0.65_0.2_50)]/20 transition-colors border border-transparent hover:border-[oklch(0.65_0.2_50)]/30">
                     <div className="flex items-center gap-2 font-mono">
                       <span className="text-[oklch(0.6_0.2_50)]">*</span>
                       <span className="font-semibold">{e.identifier}</span>
@@ -274,11 +346,8 @@ function OperationPage() {
                       <span className="font-medium">Problema:</span>{" "}
                       {e.maintenance_problem || <span className="italic text-muted-foreground">não informado</span>}
                     </div>
-                    <div className="text-xs text-foreground/80 pl-4">
-                      <span className="font-medium">Previsão:</span>{" "}
-                      {e.maintenance_expected_return
-                        ? format(new Date(e.maintenance_expected_return + "T00:00:00"), "dd/MM/yyyy", { locale: ptBR })
-                        : <span className="italic text-muted-foreground">não informada</span>}
+                    <div className="text-xs text-muted-foreground pl-4 mt-1 flex items-center">
+                       Clique para ver os detalhes
                     </div>
                   </li>
                 ))}
@@ -335,7 +404,94 @@ function OperationPage() {
           <ClientForm userId={user!.id} onDone={() => setClientOpen(false)} />
         </DialogContent>
       </Dialog>
+
+      <MaintDetailsDialog 
+        eq={maintEqDetails} 
+        open={!!maintEqDetails} 
+        onOpenChange={(o) => !o && setMaintEqDetails(null)} 
+      />
     </div>
+  );
+}
+
+import { differenceInDays } from "date-fns";
+
+function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+  if (!eq) return null;
+  
+  let extraNotes: any = {};
+  try { if (eq.notes) extraNotes = JSON.parse(eq.notes); } catch (e) {}
+
+  const startDate = extraNotes.maintenance_start_date ? new Date(extraNotes.maintenance_start_date + "T00:00:00") : null;
+  const daysStopped = startDate ? differenceInDays(new Date(), startDate) : 0;
+  
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-xl">
+            <span className="h-2 w-2 rounded-full bg-[oklch(0.6_0.2_50)]" />
+            Detalhes da Manutenção
+          </DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-4 pt-4">
+          <div className="grid grid-cols-2 gap-4 pb-4 border-b">
+            <div>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Equipamento</p>
+              <p className="font-mono font-bold text-lg">{eq.identifier}</p>
+              <p className="text-sm text-muted-foreground">{eq.type || "Sem tipo"}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Status Atual</p>
+              <StatusPill s={eq.status} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-muted/30 p-3 rounded-lg border">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Tipo de Manutenção</p>
+              <p className="font-semibold text-sm">{extraNotes.maintenance_type || "Não informado"}</p>
+            </div>
+            <div className="bg-muted/30 p-3 rounded-lg border">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Local / Oficina</p>
+              <p className="font-semibold text-sm">{extraNotes.maintenance_location || "Não informado"}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-muted/30 p-3 rounded-lg border">
+              <p className="text-xs text-muted-foreground font-medium mb-1">Data de Início</p>
+              <p className="font-semibold text-sm">
+                {startDate ? format(startDate, "dd/MM/yyyy", { locale: ptBR }) : "Não informada"}
+              </p>
+            </div>
+            <div className={`p-3 rounded-lg border ${daysStopped > 5 ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400" : "bg-muted/30"}`}>
+              <p className="text-xs opacity-70 font-medium mb-1">Tempo Parado</p>
+              <p className="font-semibold text-sm">
+                {startDate ? `${daysStopped} dia${daysStopped !== 1 ? 's' : ''}` : "—"}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-muted/30 p-3 rounded-lg border mt-2">
+             <p className="text-xs text-muted-foreground font-medium mb-1">Previsão de Retorno</p>
+             <p className="font-semibold text-sm">
+               {eq.maintenance_expected_return 
+                  ? format(new Date(eq.maintenance_expected_return + "T00:00:00"), "dd/MM/yyyy", { locale: ptBR }) 
+                  : "Não informada"}
+             </p>
+          </div>
+
+          <div className="pt-2">
+            <p className="text-xs text-muted-foreground font-medium mb-2">Problema Relatado</p>
+            <div className="bg-background border p-3 rounded-md text-sm whitespace-pre-wrap">
+              {eq.maintenance_problem || <span className="italic text-muted-foreground">Nenhum problema relatado.</span>}
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
