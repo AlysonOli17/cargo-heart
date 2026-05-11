@@ -156,40 +156,15 @@ function AccessPage() {
         </p>
       )}
 
-      <Card className="p-4">
-        <h2 className="font-semibold mb-3 flex items-center gap-2">
-          <UserPlus className="h-4 w-4 text-primary" />Cadastrar novo usuário
+      <Card className="p-4 bg-primary/5 border-primary/20">
+        <h2 className="font-semibold mb-2 flex items-center gap-2">
+          <UserPlus className="h-4 w-4 text-primary" /> Como cadastrar novos usuários?
         </h2>
-        <form onSubmit={createUser} className="grid gap-3 md:grid-cols-2">
-          <div>
-            <Label>Nome completo</Label>
-            <Input value={newUser.full_name} onChange={(e) => setNewUser({ ...newUser, full_name: e.target.value })} />
-          </div>
-          <div>
-            <Label>Email</Label>
-            <Input type="email" required value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
-          </div>
-          <div>
-            <Label>Senha provisória</Label>
-            <Input type="text" required minLength={6} value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
-          </div>
-          <div>
-            <Label>Perfil</Label>
-            <Select value={newUser.role} onValueChange={(v) => setNewUser({ ...newUser, role: v as AppRole })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(["admin", "operador", "visualizador"] as AppRole[]).map(r => (
-                  <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="md:col-span-2">
-            <Button type="submit" disabled={creating}>
-              {creating ? "Criando..." : "Criar usuário"}
-            </Button>
-          </div>
-        </form>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Para facilitar o cadastro sem depender de funções externas, agora os novos usuários podem clicar em <strong>"Criar conta"</strong> diretamente na tela de login do sistema. 
+          Após criarem a conta, eles aparecerão automaticamente na lista <strong>"Usuários e perfis"</strong> abaixo como "Sem perfil". 
+          Basta você selecionar o perfil desejado para liberar o acesso deles.
+        </p>
       </Card>
 
       <Card className="p-4">

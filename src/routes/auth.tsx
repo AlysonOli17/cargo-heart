@@ -17,7 +17,9 @@ function AuthPage() {
   const nav = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -28,39 +30,85 @@ function AuthPage() {
   const handle = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) toast.error(error.message);
-    else { toast.success("Bem-vindo!"); nav({ to: "/" }); }
+    
+    if (isSignUp) {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+          },
+        },
+      });
+      
+      if (error) {
+        toast.error(error.message);
+      } else if (data.user) {
+        toast.success("Conta criada com sucesso!", {
+          description: "Um administrador precisa aprovar seu acesso. Aguarde a liberação.",
+          duration: 6000,
+        });
+        setIsSignUp(false);
+        setPassword("");
+      }
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) toast.error(error.message);
+      else { toast.success("Bem-vindo!"); nav({ to: "/" }); }
+    }
     setLoading(false);
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background to-secondary">
       <Card className="w-full max-w-md p-8">
-        <Link to="/" className="flex items-center gap-2 mb-6">
+        <div className="flex items-center gap-2 mb-6">
           <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
             <Truck className="h-5 w-5 text-primary-foreground" />
           </div>
           <span className="text-xl font-bold">Disponibilidade Frota Busato</span>
-        </Link>
-        <h1 className="text-2xl font-bold mb-1">Entrar</h1>
-        <p className="text-sm text-muted-foreground mb-6">Gestão de frota em tempo real</p>
+        </div>
+        <h1 className="text-2xl font-bold mb-1">{isSignUp ? "Criar conta" : "Entrar"}</h1>
+        <p className="text-sm text-muted-foreground mb-6">
+          {isSignUp ? "Preencha os dados para solicitar acesso" : "Gestão de frota em tempo real"}
+        </p>
+        
         <form onSubmit={handle} className="space-y-4">
-          <div>
+          {isSignUp && (
+            <div className="space-y-2">
+              <Label>Nome completo</Label>
+              <Input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} required placeholder="Seu nome" />
+            </div>
+          )}
+          <div className="space-y-2">
             <Label>Email</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="exemplo@email.com" />
           </div>
-          <div>
+          <div className="space-y-2">
             <Label>Senha</Label>
-            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} placeholder="Mínimo 6 caracteres" />
           </div>
+          
           <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Aguarde..." : "Entrar"}
+            {loading ? "Processando..." : (isSignUp ? "Solicitar acesso" : "Entrar")}
           </Button>
         </form>
-        <p className="mt-4 text-xs text-muted-foreground text-center">
-          O cadastro de novos usuários é feito apenas por um administrador.
-        </p>
+
+        <div className="mt-6 pt-6 border-t text-center">
+          <button 
+            onClick={() => setIsSignUp(!isSignUp)}
+            className="text-sm text-primary hover:underline font-medium"
+          >
+            {isSignUp ? "Já tenho uma conta. Voltar para login" : "Não tem conta? Clique aqui para criar"}
+          </button>
+        </div>
+
+        {!isSignUp && (
+          <p className="mt-4 text-[10px] text-muted-foreground text-center">
+            * Novos cadastros ficam bloqueados até que um administrador aprove o perfil.
+          </p>
+        )}
       </Card>
     </div>
   );
