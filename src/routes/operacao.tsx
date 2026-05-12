@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info, CheckCircle, XCircle, Hourglass } from "lucide-react";
+import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info, CheckCircle, XCircle, Hourglass, MessageSquare } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
@@ -14,6 +14,7 @@ import { ptBR } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 export const Route = createFileRoute("/operacao")({
   head: () => ({ meta: [{ title: "Monitoramento de Agendamentos — Frota Busato" }] }),
@@ -37,9 +38,10 @@ function OperationPlanningPage() {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 0 }));
   
-  const [rescheduleData, setRescheduleData] = useState<{ id: string, eqId: string, type: string } | null>(null);
+  // Estado para Reagendamento (Sucesso ou Falha)
+  const [rescheduleData, setRescheduleData] = useState<{ id: string, eqId: string, type: string, mode: "success" | "fail" } | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState(format(addDays(new Date(), 1), "yyyy-MM-dd"));
-  const [rescheduleNotes, setRescheduleNotes] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
@@ -64,7 +66,7 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v10")
+    const ch = supabase.channel("op-schedule-v11")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .subscribe();
@@ -76,31 +78,45 @@ function OperationPlanningPage() {
     if (!error) {
       toast.success("Serviço concluído!");
       if (p.stop_type === "Lavador") {
-        setRescheduleData({ id: p.id, eqId: p.equipment_id, type: "Lavador" });
-        setRescheduleNotes("Lavagem recorrente");
+        setRescheduleData({ id: p.id, eqId: p.equipment_id, type: "Lavador", mode: "success" });
+        setRescheduleReason("Lavagem recorrente");
       } else { load(); }
     }
   };
 
-  const markNotRealized = async (p: Programming) => {
-    const confirm = window.confirm("Confirmar que este serviço NÃO foi realizado?");
-    if (!confirm) return;
-    await supabase.from("programming").delete().eq("id", p.id);
-    setRescheduleData({ id: p.id, eqId: p.equipment_id, type: p.stop_type });
-    setRescheduleNotes(`Reagendamento: ${p.stop_type} não realizado anteriormente.`);
+  const markNotRealized = (p: Programming) => {
+    // Apenas abre o modal, a deleção ocorre ao salvar o novo agendamento
+    setRescheduleData({ id: p.id, eqId: p.equipment_id, type: p.stop_type, mode: "fail" });
+    setRescheduleReason(""); // Limpa para obrigar a preencher
   };
 
   const handleReschedule = async () => {
     if (!rescheduleData) return;
+    if (rescheduleData.mode === "fail" && !rescheduleReason) {
+      toast.error("Por favor, informe o motivo do não realizado");
+      return;
+    }
+
+    // Se for modo falha, removemos o agendamento antigo
+    if (rescheduleData.mode === "fail") {
+      await supabase.from("programming").delete().eq("id", rescheduleData.id);
+    }
+
     const { error } = await supabase.from("programming").insert({
       equipment_id: rescheduleData.eqId,
       scheduled_date: rescheduleDate,
       day_of_week: "Calendário",
       stop_type: rescheduleData.type,
-      notes: rescheduleNotes,
+      notes: rescheduleData.mode === "fail" ? `NÃO REALIZADO: ${rescheduleReason}` : rescheduleReason,
       owner_id: user?.id
     });
-    if (!error) { toast.success("Reagendado!"); setRescheduleData(null); load(); }
+
+    if (!error) {
+      toast.success(rescheduleData.mode === "fail" ? "Serviço reagendado com sucesso!" : "Próxima lavagem agendada!");
+      setRescheduleData(null);
+      setRescheduleReason("");
+      load();
+    }
   };
 
   const deleteSchedule = async (id: string) => {
@@ -183,10 +199,10 @@ function OperationPlanningPage() {
                             <div><h4 className="font-mono font-black text-lg uppercase leading-none">{p.equipment?.identifier}</h4><p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{p.equipment?.type}</p></div>
                             <Badge className="bg-blue-600 text-[9px] font-black uppercase">{p.stop_type}</Badge>
                           </div>
-                          {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground">"{p.notes}"</div>}
+                          {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground border-l-2 border-primary">"{p.notes}"</div>}
                           <div className="pt-2 grid grid-cols-2 gap-2 border-t border-dashed">
-                             <Button onClick={() => confirmRealized(p)} className="h-8 bg-emerald-600 text-white font-black uppercase text-[9px]"><CheckCircle className="h-3 w-3 mr-1" /> Realizado</Button>
-                             <Button onClick={() => markNotRealized(p)} variant="outline" className="h-8 text-red-600 border-red-100 font-black uppercase text-[9px]"><XCircle className="h-3 w-3 mr-1" /> Não Realizado</Button>
+                             <Button onClick={() => confirmRealized(p)} className="h-9 bg-emerald-600 text-white font-black uppercase text-[9px] flex items-center justify-center gap-1"><CheckCircle className="h-3 w-3" /> Realizado</Button>
+                             <Button onClick={() => markNotRealized(p)} variant="outline" className="h-9 text-red-600 border-red-200 hover:bg-red-50 font-black uppercase text-[9px] flex items-center justify-center gap-1"><XCircle className="h-3 w-3" /> Não Realizado</Button>
                           </div>
                        </CardContent>
                     </Card>
@@ -197,7 +213,7 @@ function OperationPlanningPage() {
         ))}
       </Tabs>
 
-      {/* SEÇÃO DE QUEM JÁ ESTÁ NA OFICINA E QUANDO VOLTA */}
+      {/* SEÇÃO DE QUEM JÁ ESTÁ NA OFICINA */}
       <div className="pt-8 space-y-4 border-t-2 border-dashed">
          <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
            <Wrench className="h-5 w-5 text-orange-500" /> Em Intervenção Técnica
@@ -208,37 +224,63 @@ function OperationPlanningPage() {
                 <CardContent className="p-4">
                   <div className="flex justify-between items-start mb-3">
                     <span className="font-mono font-black text-lg">{e.identifier}</span>
-                    <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 text-[9px] font-black">NA OFICINA</Badge>
+                    <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 text-[9px] font-black uppercase">NA OFICINA</Badge>
                   </div>
                   {e.maintenance_expected_return ? (
                     <div className="bg-blue-50 border border-blue-200 p-2 rounded-lg flex items-center gap-2">
                       <Hourglass className="h-4 w-4 text-blue-600 animate-pulse" />
                       <div>
-                        <p className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão de Retorno</p>
+                        <p className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão Retorno</p>
                         <p className="text-xs font-black text-blue-800">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</p>
                       </div>
                     </div>
-                  ) : (
-                    <div className="bg-muted/50 p-2 rounded-lg flex items-center gap-2 text-muted-foreground italic text-xs font-medium">
-                      Sem previsão definida
-                    </div>
-                  )}
+                  ) : (<div className="bg-muted/50 p-2 rounded-lg text-muted-foreground italic text-[10px] font-bold uppercase">Sem previsão definida</div>)}
                 </CardContent>
               </Card>
             ))}
          </div>
       </div>
 
+      {/* DIALOG DE REAGENDAMENTO OBRIGATÓRIO (MOTIVO + NOVA DATA) */}
       <Dialog open={!!rescheduleData} onOpenChange={(o) => !o && setRescheduleData(null)}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="font-black uppercase text-primary">Reagendamento</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className={cn("font-black uppercase flex items-center gap-2", rescheduleData?.mode === "fail" ? "text-red-600" : "text-primary")}>
+              {rescheduleData?.mode === "fail" ? <AlertCircle className="h-5 w-5" /> : <CalendarIcon className="h-5 w-5" />}
+              {rescheduleData?.mode === "fail" ? "Justificar Não Realizado" : "Próximo Agendamento"}
+            </DialogTitle>
+          </DialogHeader>
           <div className="py-4 space-y-4">
              <div className="space-y-2">
-               <Label className="text-[10px] font-black uppercase">Nova Data</Label>
+               <Label className="text-[10px] font-black uppercase">Nova Data para Realização</Label>
                <Input type="date" value={rescheduleDate} onChange={(e) => setRescheduleDate(e.target.value)} className="h-12 font-bold" />
              </div>
+             <div className="space-y-2">
+               <Label className="text-[10px] font-black uppercase flex items-center gap-1">
+                 {rescheduleData?.mode === "fail" ? <MessageSquare className="h-3 w-3" /> : null}
+                 {rescheduleData?.mode === "fail" ? "Motivo do Não Realizado" : "Observações"}
+               </Label>
+               <Textarea 
+                 placeholder={rescheduleData?.mode === "fail" ? "Descreva por que o serviço não foi feito hoje..." : "Observações para o próximo agendamento..."} 
+                 value={rescheduleReason} 
+                 onChange={(e) => setRescheduleReason(e.target.value)} 
+                 className="h-24 text-xs font-medium" 
+               />
+               {rescheduleData?.mode === "fail" && !rescheduleReason && (
+                 <p className="text-[9px] text-red-500 font-bold uppercase">* O motivo é obrigatório para reagendar.</p>
+               )}
           </div>
-          <DialogFooter className="grid grid-cols-2 gap-2"><Button variant="outline" onClick={() => { setRescheduleData(null); load(); }}>Fechar</Button><Button onClick={handleReschedule} className="bg-primary text-white">Salvar</Button></DialogFooter>
+          </div>
+          <DialogFooter className="grid grid-cols-2 gap-2">
+            <Button variant="outline" onClick={() => { setRescheduleData(null); load(); }} className="font-black uppercase text-xs">Cancelar</Button>
+            <Button 
+              onClick={handleReschedule} 
+              disabled={rescheduleData?.mode === "fail" && !rescheduleReason}
+              className={cn("font-black uppercase text-xs text-white", rescheduleData?.mode === "fail" ? "bg-red-600 hover:bg-red-700" : "bg-primary")}
+            >
+              Confirmar Reagendamento
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
