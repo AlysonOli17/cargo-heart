@@ -70,10 +70,11 @@ function MaintenancePage() {
   });
 
   const load = async () => {
+    // Filtro ampliado: mostra TUDO que não for operacional ou que tenha problema de manutenção
     const { data } = await supabase
       .from("equipment")
       .select("*")
-      .in("status", ["manutencao", "indisponivel", "finalizacao", "programado"])
+      .or("status.not.in.(operacional,disponivel),maintenance_problem.not.is.null")
       .order("updated_at", { ascending: false });
     setItems((data ?? []) as Equipment[]);
 
@@ -87,7 +88,7 @@ function MaintenancePage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("manut-integrated")
+    const ch = supabase.channel("manut-refresh")
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -126,7 +127,7 @@ function MaintenancePage() {
         equipment_id: newMaint.equipment_id,
         to_status: newMaint.status,
         from_status: "operacional",
-        notes: `Entrada CCO: ${newMaint.problem}`,
+        notes: `Entrada Oficina: ${newMaint.problem}`,
         owner_id: user.id
       });
       toast.success("Registrado com sucesso");
@@ -138,7 +139,7 @@ function MaintenancePage() {
   };
 
   const release = async (eq: Equipment) => {
-    const report = prompt(`Relatório final de liberação do ${eq.identifier}:`);
+    const report = prompt(`Relatório de liberação do ${eq.identifier}:`);
     if (report === null) return;
 
     setBusy(eq.id);
@@ -204,7 +205,7 @@ function MaintenancePage() {
             <Clock className="h-7 w-7 text-primary" />
             Controle de Oficina
           </h1>
-          <p className="text-muted-foreground mt-1 font-medium italic">{items.length} máquinas em intervenção</p>
+          <p className="text-muted-foreground mt-1 font-medium italic">{items.length} máquinas em manutenção</p>
         </div>
 
         <Dialog open={isAdding} onOpenChange={setIsAdding}>
@@ -215,7 +216,7 @@ function MaintenancePage() {
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-xl">
-            <DialogHeader><DialogTitle>Registrar Entrada CCO/CCM</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>Registrar Entrada Oficina</DialogTitle></DialogHeader>
             <div className="grid grid-cols-2 gap-4 pt-4">
               <div className="col-span-2 space-y-2">
                 <Label>Equipamento *</Label>
@@ -300,24 +301,24 @@ function MaintenancePage() {
       </div>
 
       {sortedGroups.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground italic border-dashed">Nenhuma máquina na oficina no momento.</Card>
+        <Card className="p-10 text-center text-muted-foreground italic border-dashed">Nenhuma máquina em oficina.</Card>
       ) : (
         <div className="space-y-8">
           {sortedGroups.map(groupName => (
-            <section key={groupName} className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <section key={groupName} className="animate-in fade-in duration-500">
               <h2 className="text-xl font-bold mb-3 border-b-2 pb-2 flex items-center gap-2 uppercase tracking-tight text-foreground/80">
                 <Wrench className="h-5 w-5 text-primary" />
                 {groupName === 'MEV' ? 'Equipamentos em MEV' : `Frota: ${groupName}`}
                 <span className="text-xs font-normal text-muted-foreground ml-2">({grouped[groupName].length} UN)</span>
               </h2>
               
-              <Card className="overflow-hidden border-2 shadow-sm bg-card/50">
+              <Card className="overflow-hidden border shadow-sm bg-card/50">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left border-collapse">
                     <thead className="bg-muted/50 text-muted-foreground text-[10px] uppercase font-black tracking-widest">
                       <tr>
                         <th className="px-4 py-4">Equipamento</th>
-                        <th className="px-4 py-4 min-w-[250px]">Problema / Status CCO</th>
+                        <th className="px-4 py-4 min-w-[250px]">Problema / Status</th>
                         <th className="px-4 py-4 text-center">Responsável</th>
                         <th className="px-4 py-4 text-center">Início</th>
                         <th className="px-4 py-4 text-center">Previsão</th>
@@ -331,18 +332,14 @@ function MaintenancePage() {
                         .map((e) => {
                           const start = e.maintenance_started_at || e.updated_at;
                           const diasParado = getDiasParado(start);
-                          const priorityClass = PRIORITY_COLORS[e.maintenance_priority as keyof typeof PRIORITY_COLORS] || "bg-slate-100";
+                          const priorityColor = e.maintenance_priority === 'Crítica' ? 'bg-red-100 text-red-700' : 
+                                               e.maintenance_priority === 'Alta' ? 'bg-orange-100 text-orange-700' : 'bg-slate-100';
 
                           return (
                             <tr key={e.id} className="hover:bg-muted/20 bg-background transition-colors">
                               <td className="px-4 py-4">
-                                <div className="flex items-center gap-3">
-                                   <div className={`w-1 h-8 rounded-full ${STATUS_COLORS[e.status].split(' ')[0]}`} />
-                                   <div>
-                                      <p className="font-mono font-black text-base">{e.identifier}</p>
-                                      <p className="text-[10px] font-bold text-muted-foreground uppercase">{e.type || '—'}</p>
-                                   </div>
-                                </div>
+                                <p className="font-mono font-black text-base">{e.identifier}</p>
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase">{e.type || '—'}</p>
                               </td>
                               <td className="px-4 py-4">
                                 <div className="space-y-2">
@@ -350,11 +347,11 @@ function MaintenancePage() {
                                       {e.maintenance_problem || <span className="italic text-muted-foreground">Não informada</span>}
                                    </div>
                                    <div className="flex gap-2">
-                                      <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase ${priorityClass}`}>
-                                        {e.maintenance_priority || 'Baixa'}
+                                      <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase ${priorityColor}`}>
+                                        {e.maintenance_priority || 'Média'}
                                       </span>
                                       {e.is_preventive_overdue && (
-                                        <span className="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase bg-red-600 text-white animate-pulse">
+                                        <span className="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase bg-red-600 text-white">
                                           Vencida
                                         </span>
                                       )}
@@ -380,7 +377,6 @@ function MaintenancePage() {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => release(e)}
-                                  disabled={busy === e.id}
                                   className="hover:bg-primary hover:text-white font-bold border-2 rounded-xl"
                                 >
                                   Liberar
