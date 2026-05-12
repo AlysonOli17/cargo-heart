@@ -68,6 +68,7 @@ function MaintenancePage() {
   });
 
   const load = async () => {
+    // Carrega o que já está em intervenção
     const { data } = await supabase
       .from("equipment")
       .select("*")
@@ -75,10 +76,10 @@ function MaintenancePage() {
       .order("updated_at", { ascending: false });
     setItems((data ?? []) as Equipment[]);
 
+    // Carrega TODA a frota para o seletor (sem filtros restritivos)
     const { data: av } = await supabase
       .from("equipment")
       .select("id, identifier")
-      .in("status", ["disponivel", "operacional"])
       .order("identifier");
     setAvailableEqs(av ?? []);
   };
@@ -190,7 +191,7 @@ function MaintenancePage() {
               <div className="col-span-2 space-y-2">
                 <Label>Equipamento *</Label>
                 <Select value={newMaint.equipment_id} onValueChange={(v) => setNewMaint({...newMaint, equipment_id: v})}>
-                  <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Selecione o equipamento cadastrado..." /></SelectTrigger>
                   <SelectContent>
                     {availableEqs.map(eq => (
                       <SelectItem key={eq.id} value={eq.id}>{eq.identifier}</SelectItem>

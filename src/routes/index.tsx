@@ -53,8 +53,9 @@ function Dashboard() {
     const total = equipment.length;
     if (total === 0) return { availability: 0, maintenance: 0, critical: 0, preventive: 0 };
     
-    const operational = equipment.filter(e => e.status === 'operacional' || e.status === 'disponivel').length;
-    const maintenance = equipment.filter(e => e.status === 'manutencao' || e.status === 'indisponivel').length;
+    // Filtro expandido para operacional
+    const operational = equipment.filter(e => ['operacional', 'disponivel', 'com_cliente'].includes(e.status)).length;
+    const maintenance = equipment.filter(e => ['manutencao', 'indisponivel', 'finalizacao', 'programado'].includes(e.status)).length;
     const critical = equipment.filter(e => e.maintenance_priority === 'Crítica').length;
     const preventive = equipment.filter(e => e.is_preventive_overdue).length;
 
@@ -132,11 +133,11 @@ function Dashboard() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ABA OPERACIONAL */}
+        {/* ABA OPERACIONAL: Incluindo com_cliente e disponivel */}
         <TabsContent value="operacional" className="mt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {equipment
-              .filter(e => e.status === 'operacional' || e.status === 'disponivel')
+              .filter(e => ['operacional', 'disponivel', 'com_cliente'].includes(e.status))
               .map(e => (
                 <EquipmentCard key={e.id} e={e} />
               ))}
