@@ -10,6 +10,7 @@ import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircl
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
+import { cn } from "@/lib/utils";
 import { ptBR } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
