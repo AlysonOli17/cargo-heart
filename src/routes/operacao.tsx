@@ -10,12 +10,12 @@ import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircl
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
-import { cn } from "@/lib/utils";
 import { ptBR } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/operacao")({
   head: () => ({ meta: [{ title: "Monitoramento de Agendamentos — Frota Busato" }] }),
@@ -39,7 +39,6 @@ function OperationPlanningPage() {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 0 }));
   
-  // Estado para Reagendamento (Sucesso ou Falha)
   const [rescheduleData, setRescheduleData] = useState<{ id: string, eqId: string, type: string, mode: "success" | "fail" } | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState(format(addDays(new Date(), 1), "yyyy-MM-dd"));
   const [rescheduleReason, setRescheduleReason] = useState("");
@@ -67,7 +66,7 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v11")
+    const ch = supabase.channel("op-schedule-v12")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .subscribe();
@@ -78,6 +77,14 @@ function OperationPlanningPage() {
     const { error } = await supabase.from("programming").update({ is_completed: true }).eq("id", p.id);
     if (!error) {
       toast.success("Serviço concluído!");
+      
+      // Grava no histórico geral que foi realizado
+      await supabase.from("history").insert({
+        equipment_id: p.equipment_id,
+        status_to: "Realizado",
+        notes: `Serviço ${p.stop_type} concluído conforme planejado.`
+      });
+
       if (p.stop_type === "Lavador") {
         setRescheduleData({ id: p.id, eqId: p.equipment_id, type: "Lavador", mode: "success" });
         setRescheduleReason("Lavagem recorrente");
@@ -86,34 +93,43 @@ function OperationPlanningPage() {
   };
 
   const markNotRealized = (p: Programming) => {
-    // Apenas abre o modal, a deleção ocorre ao salvar o novo agendamento
     setRescheduleData({ id: p.id, eqId: p.equipment_id, type: p.stop_type, mode: "fail" });
-    setRescheduleReason(""); // Limpa para obrigar a preencher
+    setRescheduleReason(""); 
   };
 
   const handleReschedule = async () => {
     if (!rescheduleData) return;
     if (rescheduleData.mode === "fail" && !rescheduleReason) {
-      toast.error("Por favor, informe o motivo do não realizado");
+      toast.error("Por favor, informe o motivo");
       return;
     }
 
-    // Se for modo falha, removemos o agendamento antigo
+    const finalNote = rescheduleData.mode === "fail" ? `NÃO REALIZADO: ${rescheduleReason}` : rescheduleReason;
+
+    // Se for falha, deleta o atual e grava no histórico geral da máquina
     if (rescheduleData.mode === "fail") {
       await supabase.from("programming").delete().eq("id", rescheduleData.id);
+      
+      // REGISTRO NO HISTÓRICO GERAL (Aba Histórico)
+      await supabase.from("history").insert({
+        equipment_id: rescheduleData.eqId,
+        status_to: "Reagendado",
+        notes: `Agendamento de ${rescheduleData.type} não realizado. Motivo: ${rescheduleReason}. Reagendado para ${format(new Date(rescheduleDate), 'dd/MM/yyyy')}`
+      });
     }
 
+    // Insere o novo agendamento
     const { error } = await supabase.from("programming").insert({
       equipment_id: rescheduleData.eqId,
       scheduled_date: rescheduleDate,
       day_of_week: "Calendário",
       stop_type: rescheduleData.type,
-      notes: rescheduleData.mode === "fail" ? `NÃO REALIZADO: ${rescheduleReason}` : rescheduleReason,
+      notes: finalNote,
       owner_id: user?.id
     });
 
     if (!error) {
-      toast.success(rescheduleData.mode === "fail" ? "Serviço reagendado com sucesso!" : "Próxima lavagem agendada!");
+      toast.success("Operação registrada com sucesso!");
       setRescheduleData(null);
       setRescheduleReason("");
       load();
@@ -242,7 +258,6 @@ function OperationPlanningPage() {
          </div>
       </div>
 
-      {/* DIALOG DE REAGENDAMENTO OBRIGATÓRIO (MOTIVO + NOVA DATA) */}
       <Dialog open={!!rescheduleData} onOpenChange={(o) => !o && setRescheduleData(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -261,26 +276,13 @@ function OperationPlanningPage() {
                  {rescheduleData?.mode === "fail" ? <MessageSquare className="h-3 w-3" /> : null}
                  {rescheduleData?.mode === "fail" ? "Motivo do Não Realizado" : "Observações"}
                </Label>
-               <Textarea 
-                 placeholder={rescheduleData?.mode === "fail" ? "Descreva por que o serviço não foi feito hoje..." : "Observações para o próximo agendamento..."} 
-                 value={rescheduleReason} 
-                 onChange={(e) => setRescheduleReason(e.target.value)} 
-                 className="h-24 text-xs font-medium" 
-               />
-               {rescheduleData?.mode === "fail" && !rescheduleReason && (
-                 <p className="text-[9px] text-red-500 font-bold uppercase">* O motivo é obrigatório para reagendar.</p>
-               )}
+               <Textarea placeholder={rescheduleData?.mode === "fail" ? "Descreva por que o serviço não foi feito hoje..." : "Observações para o próximo agendamento..."} value={rescheduleReason} onChange={(e) => setRescheduleReason(e.target.value)} className="h-24 text-xs font-medium" />
+               {rescheduleData?.mode === "fail" && !rescheduleReason && (<p className="text-[9px] text-red-500 font-bold uppercase">* O motivo é obrigatório.</p>)}
           </div>
           </div>
           <DialogFooter className="grid grid-cols-2 gap-2">
             <Button variant="outline" onClick={() => { setRescheduleData(null); load(); }} className="font-black uppercase text-xs">Cancelar</Button>
-            <Button 
-              onClick={handleReschedule} 
-              disabled={rescheduleData?.mode === "fail" && !rescheduleReason}
-              className={cn("font-black uppercase text-xs text-white", rescheduleData?.mode === "fail" ? "bg-red-600 hover:bg-red-700" : "bg-primary")}
-            >
-              Confirmar Reagendamento
-            </Button>
+            <Button onClick={handleReschedule} disabled={rescheduleData?.mode === "fail" && !rescheduleReason} className={cn("font-black uppercase text-xs text-white", rescheduleData?.mode === "fail" ? "bg-red-600 hover:bg-red-700" : "bg-primary")}>Confirmar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
