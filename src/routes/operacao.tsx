@@ -6,10 +6,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
-import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
+import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/operacao")({
@@ -19,24 +19,22 @@ export const Route = createFileRoute("/operacao")({
 
 type Programming = {
   id: string; scheduled_date: string; stop_type: string; notes: string | null;
-  equipment: { identifier: string; type: string };
+  equipment_id: string;
+  equipment: { identifier: string; type: string } | null;
 };
 
 function OperationPlanningPage() {
   const { user } = useAuth();
   const [programming, setProgramming] = useState<Programming[]>([]);
   const [equipment, setEquipment] = useState<any[]>([]);
-  
-  // Pivot que define qual SEMANA estamos vendo (Sempre começa no domingo)
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 0 }));
 
-  // Gera os 7 dias da semana (Domingo a Sábado)
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
       const d = addDays(currentWeekStart, i);
       return {
         dateStr: format(d, "yyyy-MM-dd"),
-        label: format(d, "EEE", { locale: ptBR }), // Dom, Seg...
+        label: format(d, "EEE", { locale: ptBR }),
         fullLabel: format(d, "dd/MM (EEEE)", { locale: ptBR })
       };
     });
@@ -54,7 +52,7 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v5")
+    const ch = supabase.channel("op-schedule-v6")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -70,6 +68,12 @@ function OperationPlanningPage() {
     const ready = equipment.filter(e => e.status === 'disponivel' || e.status === 'operacional').length;
     return { activeMaint, ready, totalScheduled: programming.length };
   }, [equipment, programming]);
+
+  // Identifica agendamentos que NÃO estão na semana visualizada
+  const otherSchedules = useMemo(() => {
+    const weekStrings = weekDays.map(d => d.dateStr);
+    return programming.filter(p => !weekStrings.includes(p.scheduled_date));
+  }, [programming, weekDays]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
@@ -113,10 +117,10 @@ function OperationPlanningPage() {
       </div>
 
       <Tabs defaultValue={format(new Date(), "yyyy-MM-dd")} className="w-full">
-        <TabsList className="w-full h-14 bg-muted/50 p-1 rounded-xl">
+        <TabsList className="w-full h-14 bg-muted/50 p-1 rounded-xl overflow-x-auto no-scrollbar">
           {weekDays.map(day => (
-            <TabsTrigger key={day.dateStr} value={day.dateStr} className="flex-1 rounded-lg font-black uppercase text-[10px] flex flex-col gap-0.5 relative">
-              <span className={isSameDay(new Date(day.dateStr + "T12:00:00"), new Date()) ? "text-primary" : ""}>{day.label}</span>
+            <TabsTrigger key={day.dateStr} value={day.dateStr} className="flex-1 min-w-[60px] rounded-lg font-black uppercase text-[10px] flex flex-col gap-0.5 relative">
+              <span className={day.dateStr === format(new Date(), "yyyy-MM-dd") ? "text-primary" : ""}>{day.label}</span>
               <span className="opacity-60">{day.dateStr.split('-').reverse().slice(0,2).join('/')}</span>
               {programming.filter(p => p.scheduled_date === day.dateStr).length > 0 && (
                 <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full border border-white" />
@@ -133,26 +137,28 @@ function OperationPlanningPage() {
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {programming.filter(p => p.scheduled_date === day.dateStr).map(p => (
-                  <Card key={p.id} className="overflow-hidden border-2 hover:border-primary/30 transition-all group">
-                     <div className="h-1 bg-primary/20" />
-                     <CardContent className="p-4 space-y-3">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h4 className="font-mono font-black text-lg leading-none uppercase">{p.equipment?.identifier}</h4>
-                            <p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{p.equipment?.type}</p>
+                {programming
+                  .filter(p => p.scheduled_date === day.dateStr)
+                  .map(p => (
+                    <Card key={p.id} className="overflow-hidden border-2 hover:border-primary/30 transition-all">
+                       <div className="h-1 bg-primary/20" />
+                       <CardContent className="p-4 space-y-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="font-mono font-black text-lg leading-none uppercase">{p.equipment?.identifier || "NÃO IDENT."}</h4>
+                              <p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{p.equipment?.type || "DESCONHECIDO"}</p>
+                            </div>
+                            <Badge className="bg-blue-600 text-[9px] font-black uppercase">{p.stop_type}</Badge>
                           </div>
-                          <Badge className="bg-blue-600 text-[9px] font-black uppercase">{p.stop_type}</Badge>
-                        </div>
-                        {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground border-l-2 border-primary">"{p.notes}"</div>}
-                        <div className="pt-2 flex justify-between items-center border-t border-dashed">
-                           <span className="text-[9px] font-black text-muted-foreground flex items-center gap-1 uppercase">
-                              <AlertCircle className="h-3 w-3" /> Agendado
-                           </span>
-                           <Button variant="ghost" size="icon" onClick={() => deleteSchedule(p.id)} className="h-7 w-7 text-red-500"><Trash2 className="h-4 w-4" /></Button>
-                        </div>
-                     </CardContent>
-                  </Card>
+                          {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground border-l-2 border-primary">"{p.notes}"</div>}
+                          <div className="pt-2 flex justify-between items-center border-t border-dashed">
+                             <span className="text-[9px] font-black text-muted-foreground flex items-center gap-1 uppercase">
+                                <AlertCircle className="h-3 w-3" /> Agendado
+                             </span>
+                             <Button variant="ghost" size="icon" onClick={() => deleteSchedule(p.id)} className="h-7 w-7 text-red-500"><Trash2 className="h-4 w-4" /></Button>
+                          </div>
+                       </CardContent>
+                    </Card>
                 ))}
                 
                 {programming.filter(p => p.scheduled_date === day.dateStr).length === 0 && (
@@ -165,6 +171,27 @@ function OperationPlanningPage() {
           </TabsContent>
         ))}
       </Tabs>
+
+      {/* SEÇÃO DE SEGURANÇA PARA OUTRAS DATAS */}
+      {otherSchedules.length > 0 && (
+        <div className="mt-12 space-y-4">
+           <h3 className="font-black uppercase text-xs flex items-center gap-2 text-muted-foreground">
+             <Info className="h-4 w-4" /> Agendamentos em outras datas ({otherSchedules.length})
+           </h3>
+           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 opacity-70 hover:opacity-100 transition-opacity">
+              {otherSchedules.map(p => (
+                <Card key={p.id} className="p-3 border bg-muted/20">
+                   <div className="flex justify-between items-center mb-2">
+                     <span className="font-mono font-black text-xs">{p.equipment?.identifier}</span>
+                     <Badge variant="outline" className="text-[8px]">{p.scheduled_date.split('-').reverse().join('/')}</Badge>
+                   </div>
+                   <p className="text-[10px] font-bold uppercase text-primary">{p.stop_type}</p>
+                   <Button variant="ghost" size="sm" onClick={() => deleteSchedule(p.id)} className="h-6 w-full mt-2 text-red-500 text-[8px] font-black uppercase">REMOVER</Button>
+                </Card>
+              ))}
+           </div>
+        </div>
+      )}
     </div>
   );
 }
