@@ -19,12 +19,12 @@ type Equipment = {
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  "CAMINHÃO PIPA": "oklch(0.65_0.18_250)", 
-  "MALHA PENEIRA": "oklch(0.65_0.18_150)", 
-  "CAMINHÃO": "oklch(0.65_0.18_200)",      
-  "RETROESCAVADEIRA": "oklch(0.65_0.18_30)", 
-  "MINI CARREGADEIRA": "oklch(0.65_0.18_300)", 
-  "PENEIRA ROTATIVA": "oklch(0.65_0.18_100)", 
+  "CAMINHÃO PIPA": "oklch(0.55_0.18_250)", // Azul
+  "MALHA PENEIRA": "oklch(0.65_0.18_150)", // Verde
+  "CAMINHÃO": "oklch(0.6_0.15_200)",      // Ciano
+  "RETROESCAVADEIRA": "oklch(0.6_0.2_30)",  // Laranja
+  "MINI CARREGADEIRA": "oklch(0.5_0.2_300)", // Roxo
+  "PENEIRA ROTATIVA": "oklch(0.55_0.2_100)", // Oliva
 };
 
 const getColorForType = (type: string) => {
@@ -32,7 +32,7 @@ const getColorForType = (type: string) => {
   if (TYPE_COLORS[upper]) return TYPE_COLORS[upper];
   const hash = type.split("").reduce((acc, char) => char.charCodeAt(0) + acc, 0);
   const hue = hash % 360;
-  return `oklch(0.65 0.15 ${hue})`;
+  return `oklch(0.6 0.15 ${hue})`;
 };
 
 const StatusDot = ({ status }: { status: EquipmentStatus }) => {
@@ -85,21 +85,21 @@ function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-2 border-b">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-2 border-b">
         <div>
-          <h1 className="text-4xl font-black tracking-tighter text-foreground/90 uppercase">Frota Busato</h1>
-          <p className="text-muted-foreground flex items-center gap-2 mt-1 font-medium italic">
+          <h1 className="text-3xl font-bold text-foreground/90">Frota Busato</h1>
+          <p className="text-muted-foreground flex items-center gap-2 mt-1 font-medium">
              Gestão em tempo real de ativos
           </p>
         </div>
         <div className="flex items-center gap-3">
            <div className="text-right px-4 border-r">
-              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-tighter">Frota Total</p>
-              <p className="text-3xl font-black">{equipment.length}</p>
+              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Total</p>
+              <p className="text-3xl font-bold">{equipment.length}</p>
            </div>
-           <div className="text-right px-4 bg-[oklch(0.65_0.18_150)]/5 rounded-xl py-2 border border-[oklch(0.65_0.18_150)]/10">
-              <p className="text-[10px] uppercase font-bold text-[oklch(0.55_0.18_150)] tracking-tighter">Disponíveis</p>
-              <p className="text-3xl font-black text-[oklch(0.55_0.18_150)]">{equipment.filter(e => e.status === 'disponivel').length}</p>
+           <div className="text-right px-4 bg-muted/50 rounded-xl py-2 border">
+              <p className="text-[10px] uppercase font-bold text-[oklch(0.55_0.18_150)] tracking-widest">Disponíveis</p>
+              <p className="text-3xl font-bold text-[oklch(0.55_0.18_150)]">{equipment.filter(e => e.status === 'disponivel').length}</p>
            </div>
         </div>
       </div>
@@ -113,23 +113,23 @@ function Dashboard() {
           
           return (
             <Card key={type} 
-              style={{ borderColor: `${typeColor}20` }}
-              className="overflow-hidden border-2 shadow-xl shadow-foreground/5 bg-card/50 backdrop-blur-sm group transition-all hover:translate-y-[-2px]">
+              style={{ borderColor: `${typeColor}30` }}
+              className="overflow-hidden border shadow-sm bg-card/50 backdrop-blur-sm group transition-all hover:shadow-md">
               <div 
-                style={{ backgroundColor: `${typeColor}15` }}
+                style={{ backgroundColor: `${typeColor}10` }}
                 className="p-5 border-b flex items-center justify-between">
                 <div>
-                  <h2 style={{ color: typeColor }} className="text-xl font-black uppercase tracking-tighter">{type}</h2>
-                  <p className="text-[10px] font-bold text-muted-foreground/60 tracking-widest uppercase">{items.length} Unidades no total</p>
+                  <h2 style={{ color: typeColor }} className="text-xl font-bold uppercase tracking-tight">{type}</h2>
+                  <p className="text-[10px] font-semibold text-muted-foreground/80 uppercase">{items.length} Unidades no total</p>
                 </div>
                 <div className="flex gap-2">
-                  <div className="flex items-baseline gap-1 bg-background/80 px-3 py-1.5 rounded-xl border shadow-sm">
-                    <span className="text-sm font-black text-[oklch(0.55_0.18_150)]">{available}</span>
-                    <span className="text-[10px] font-bold text-muted-foreground/50 uppercase ml-1">OK</span>
+                  <div className="flex items-baseline gap-1 bg-background px-3 py-1.5 rounded-lg border shadow-sm">
+                    <span className="text-sm font-bold text-[oklch(0.55_0.18_150)]">{available}</span>
+                    <span className="text-[9px] font-bold text-muted-foreground/60 uppercase ml-1">OK</span>
                   </div>
-                  <div className="flex items-baseline gap-1 bg-background/80 px-3 py-1.5 rounded-xl border shadow-sm">
-                    <span className="text-sm font-black text-[oklch(0.65_0.2_50)]">{maintenance}</span>
-                    <span className="text-[10px] font-bold text-muted-foreground/50 uppercase ml-1">OFICINA</span>
+                  <div className="flex items-baseline gap-1 bg-background px-3 py-1.5 rounded-lg border shadow-sm">
+                    <span className="text-sm font-bold text-[oklch(0.65_0.2_50)]">{maintenance}</span>
+                    <span className="text-[9px] font-bold text-muted-foreground/60 uppercase ml-1">OFICINA</span>
                   </div>
                 </div>
               </div>
@@ -141,11 +141,11 @@ function Dashboard() {
                       const formattedDate = safeFormatDateShort(eq.maintenance_expected_return);
 
                       return (
-                        <div key={eq.id} className={`flex flex-col gap-1.5 p-3 rounded-2xl border transition-all ${
+                        <div key={eq.id} className={`flex flex-col gap-1.5 p-3 rounded-xl border transition-all ${
                           eq.status === 'disponivel' 
-                            ? 'bg-[oklch(0.65_0.18_150)]/5 border-transparent hover:border-[oklch(0.65_0.18_150)]/20 shadow-sm' 
+                            ? 'bg-[oklch(0.65_0.18_150)]/5 border-transparent hover:border-[oklch(0.65_0.18_150)]/30' 
                             : isMaint 
-                              ? 'bg-[oklch(0.65_0.2_50)]/5 border-[oklch(0.65_0.2_50)]/10'
+                              ? 'bg-[oklch(0.65_0.2_50)]/5 border-[oklch(0.65_0.2_50)]/20 shadow-sm'
                               : 'bg-muted/30 border-transparent hover:border-foreground/10'
                         }`}>
                            <div className="flex items-center justify-between">
@@ -157,8 +157,8 @@ function Dashboard() {
                                  </div>
                               )}
                            </div>
-                           <p className="font-black text-sm tracking-tight truncate uppercase">{eq.identifier}</p>
-                           <p className="text-[10px] font-bold text-muted-foreground/70 truncate uppercase leading-none">
+                           <p className="font-bold text-sm tracking-tight truncate uppercase">{eq.identifier}</p>
+                           <p className="text-[10px] font-semibold text-muted-foreground/70 truncate uppercase leading-none">
                              {eq.model || eq.brand || '—'}
                            </p>
                         </div>

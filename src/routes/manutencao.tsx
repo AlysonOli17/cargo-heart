@@ -175,22 +175,27 @@ function MaintenancePage() {
   };
 
   const grouped = items.reduce((acc, e) => {
-    const t = e.maintenance_type || "Geral";
-    if (!acc[t]) acc[t] = [];
-    acc[t].push(e);
+    // Nova regra de agrupamento: MEV independente do tipo, outros agrupam por tipo
+    const groupName = e.maintenance_type === "MEV" ? "MEV" : (e.type || "Geral");
+    if (!acc[groupName]) acc[groupName] = [];
+    acc[groupName].push(e);
     return acc;
   }, {} as Record<string, Equipment[]>);
 
-  const sortedTypes = Object.keys(grouped).sort();
+  const sortedGroups = Object.keys(grouped).sort((a, b) => {
+    if (a === "MEV") return -1;
+    if (b === "MEV") return 1;
+    return a.localeCompare(b);
+  });
 
   if (!user) return null;
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black flex items-center gap-2 text-foreground/90 uppercase tracking-tighter">
+          <h1 className="text-3xl font-bold flex items-center gap-2 text-foreground/90">
             <Wrench className="h-7 w-7 text-[oklch(0.65_0.2_50)]" />
-            SITUAÇÃO OFICINA
+            Oficina
           </h1>
           <p className="text-muted-foreground mt-1 font-medium italic">{items.length} máquinas paradas</p>
         </div>
@@ -198,13 +203,13 @@ function MaintenancePage() {
         <div className="flex items-center gap-3">
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
             <DialogTrigger asChild>
-              <Button disabled={!canWrite} className="bg-[oklch(0.65_0.2_50)] hover:bg-[oklch(0.55_0.2_50)] text-white font-bold shadow-lg uppercase tracking-tighter">
+              <Button disabled={!canWrite} className="bg-[oklch(0.65_0.2_50)] hover:bg-[oklch(0.55_0.2_50)] text-white font-bold shadow-lg">
                 <PlusCircle className="h-4 w-4 mr-2" />
                 Enviar para Oficina
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md">
-              <DialogHeader><DialogTitle>Enviar Equipamento para Oficina</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Enviar para Oficina</DialogTitle></DialogHeader>
               <div className="space-y-4 pt-4">
                 <div className="space-y-2">
                   <Label>Equipamento Disponível *</Label>
@@ -218,17 +223,17 @@ function MaintenancePage() {
                   </Select>
                 </div>
 
-                <div className="space-y-2 p-3 rounded-lg bg-[oklch(0.65_0.2_50)]/5 border border-[oklch(0.65_0.2_50)]/20">
-                  <Label className="text-[oklch(0.6_0.2_50)] font-bold">Qual é o problema? *</Label>
+                <div className="space-y-2 p-3 rounded-lg bg-muted/30 border">
+                  <Label className="font-semibold">Problema Detectado *</Label>
                   <Textarea required value={newMaint.problem}
                     onChange={(e) => setNewMaint({...newMaint, problem: e.target.value})}
-                    placeholder="Descreva o problema do equipamento" 
+                    placeholder="Descreva o problema" 
                     className="mt-1.5" />
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Tipo de Manutenção</Label>
+                    <Label>Tipo</Label>
                     <Select value={newMaint.type} onValueChange={(v) => setNewMaint({...newMaint, type: v})}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -239,92 +244,88 @@ function MaintenancePage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Local / Oficina</Label>
+                    <Label>Localização</Label>
                     <Input value={newMaint.location} onChange={(e) => setNewMaint({...newMaint, location: e.target.value})} />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Data de Início</Label>
+                    <Label>Início</Label>
                     <Input type="date" value={newMaint.started_at} onChange={(e) => setNewMaint({...newMaint, started_at: e.target.value})} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Previsão de Retorno</Label>
+                    <Label>Previsão</Label>
                     <Input type="date" value={newMaint.expected_return} onChange={(e) => setNewMaint({...newMaint, expected_return: e.target.value})} />
                   </div>
                 </div>
 
-                <p className="text-[10px] text-muted-foreground italic text-center">
-                  O equipamento mudará para o status "Manutenção" imediatamente.
-                </p>
-
-                <Button onClick={sendToMaintenance} className="w-full bg-[oklch(0.65_0.2_50)] text-white font-bold">CONFIRMAR ENTRADA</Button>
+                <Button onClick={sendToMaintenance} className="w-full bg-[oklch(0.65_0.2_50)] text-white font-bold">SALVAR ENTRADA</Button>
               </div>
             </DialogContent>
           </Dialog>
 
-          <div className="text-sm font-bold text-muted-foreground bg-muted/50 px-4 py-2 rounded-xl border">
+          <div className="text-sm font-semibold text-muted-foreground bg-muted/50 px-4 py-2 rounded-xl border">
             {new Date().toLocaleDateString('pt-BR')}
           </div>
         </div>
       </div>
 
-      {sortedTypes.length === 0 ? (
+      {sortedGroups.length === 0 ? (
         <Card className="p-10 text-center text-muted-foreground">Nenhum equipamento na oficina no momento.</Card>
       ) : (
         <div className="space-y-10">
-          {sortedTypes.map(mType => (
-            <section key={mType}>
-              <h2 className="text-xl font-bold mb-3 border-b-2 pb-2 text-[oklch(0.65_0.2_50)] flex items-center gap-2 uppercase tracking-tighter">
+          {sortedGroups.map(groupName => (
+            <section key={groupName} className="animate-in fade-in duration-300">
+              <h2 className={`text-xl font-bold mb-3 border-b-2 pb-2 flex items-center gap-2 uppercase tracking-tight ${groupName === 'MEV' ? 'text-primary border-primary/30' : 'text-[oklch(0.65_0.2_50)] border-[oklch(0.65_0.2_50)]/30'}`}>
                 <Wrench className="h-5 w-5" />
-                Manutenção {mType}
-                <span className="text-sm font-normal text-muted-foreground ml-2">({grouped[mType].length})</span>
+                {groupName === 'MEV' ? 'Manutenções MEV' : `Manutenção: ${groupName}`}
+                <span className="text-sm font-normal text-muted-foreground ml-2">({grouped[groupName].length})</span>
               </h2>
               
-              <Card className="overflow-hidden border-none shadow-xl bg-card/50">
+              <Card className="overflow-hidden border shadow-sm bg-card/50">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left border-collapse">
-                    <thead className="bg-muted/50 text-muted-foreground text-[10px] uppercase font-black tracking-widest">
+                    <thead className="bg-muted/50 text-muted-foreground text-xs uppercase font-bold">
                       <tr>
                         <th className="px-4 py-4">Equipamento</th>
-                        <th className="px-4 py-4 min-w-[250px]">Descrição Detalhada</th>
-                        <th className="px-4 py-4">Localização</th>
-                        <th className="px-4 py-4">Início</th>
-                        <th className="px-4 py-4">Previsão</th>
-                        <th className="px-4 py-4 text-center">Dias Parado</th>
+                        <th className="px-4 py-4 min-w-[250px]">Problema</th>
+                        <th className="px-4 py-4 text-center">Local</th>
+                        <th className="px-4 py-4 text-center">Início</th>
+                        <th className="px-4 py-4 text-center">Previsão</th>
+                        <th className="px-4 py-4 text-center">Dias</th>
                         <th className="px-4 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {grouped[mType]
+                      {grouped[groupName]
                         .sort((a, b) => (a.identifier || "").localeCompare(b.identifier || ""))
                         .map((e) => {
                           const start = e.maintenance_started_at || e.updated_at;
                           const diasParado = getDiasParado(start);
                           
                           return (
-                            <tr key={e.id} className="hover:bg-muted/20 bg-background transition-colors">
+                            <tr key={e.id} className="hover:bg-muted/10 bg-background transition-colors">
                               <td className="px-4 py-4">
-                                <p className="font-mono font-black text-base">{e.identifier}</p>
-                                <p className="text-[10px] font-bold text-muted-foreground uppercase">{e.type || '—'}</p>
+                                <p className="font-mono font-bold text-base">{e.identifier}</p>
+                                <p className="text-[10px] font-medium text-muted-foreground uppercase">{e.type || '—'}</p>
                               </td>
                               <td className="px-4 py-4">
-                                <div className="bg-muted/30 p-3 rounded-2xl border border-foreground/5 text-xs leading-relaxed font-medium">
+                                <div className="bg-muted/30 p-3 rounded-xl border border-foreground/5 text-xs leading-relaxed font-medium">
                                   {e.maintenance_problem || <span className="italic text-muted-foreground">Não informada</span>}
                                 </div>
                               </td>
-                              <td className="px-4 py-4 font-bold text-amber-600 uppercase text-xs">
+                              <td className="px-4 py-4 text-center font-bold text-amber-600 uppercase text-xs">
                                 {e.maintenance_location || "Oficina Base"}
                               </td>
-                              <td className="px-4 py-4 font-medium text-muted-foreground whitespace-nowrap">
+                              <td className="px-4 py-4 text-center font-medium text-muted-foreground whitespace-nowrap">
                                 {safeFormatDateFull(start)}
                               </td>
-                              <td className="px-4 py-4 font-bold whitespace-nowrap">
+                              <td className="px-4 py-4 text-center font-bold whitespace-nowrap">
                                 {safeFormatDateFull(e.maintenance_expected_return)}
                               </td>
                               <td className="px-4 py-4 text-center">
-                                <span className={`text-xl font-black ${diasParado > 5 ? "text-red-500" : "text-foreground/70"}`}>
+                                <span className={`text-xl font-bold ${diasParado > 5 ? "text-red-500" : "text-foreground/70"}`}>
                                   {diasParado}
                                 </span>
                               </td>
@@ -334,9 +335,8 @@ function MaintenancePage() {
                                   variant="outline"
                                   onClick={() => release(e)}
                                   disabled={!canWrite || busy === e.id}
-                                  className="hover:bg-[oklch(0.65_0.18_150)] hover:text-white font-bold border-2 rounded-xl"
+                                  className="hover:bg-primary hover:text-white font-bold border rounded-lg"
                                 >
-                                  <CheckCircle2 className="h-4 w-4 mr-1" />
                                   Liberar
                                 </Button>
                               </td>
