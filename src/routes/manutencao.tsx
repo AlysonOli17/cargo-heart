@@ -71,32 +71,16 @@ function MaintenancePage() {
     const doc = new jsPDF({ orientation: "l", unit: "mm", format: "a4" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const brandBlue = [44, 126, 189]; 
-
     doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(80, 80, 80); doc.text("BUSATO", 20, 20);
     doc.setFontSize(16); doc.setTextColor(60, 60, 60); doc.text("RELATÓRIO DE MANUTENÇÃO ATIVA", pageWidth - 20, 20, { align: "right" });
     doc.setDrawColor(brandBlue[0], brandBlue[1], brandBlue[2]); doc.setLineWidth(0.8); doc.line(20, 25, pageWidth - 20, 25);
-    doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, pageWidth - 20, 30, { align: "right" });
-
-    const tableData = items.map(e => [
-      e.identifier,
-      e.type || "—",
-      e.maintenance_problem || "Intervenção Técnica",
-      e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString("pt-BR") : "—",
-      e.maintenance_expected_return ? new Date(e.maintenance_expected_return).toLocaleDateString("pt-BR") : "S/ Previsão",
-      getDiasParado(e.maintenance_started_at || e.updated_at).toString() + " dias"
-    ]);
-
     autoTable(doc, {
       startY: 42,
       head: [["Equipamento", "Tipo", "Defeito / Observação", "Entrada", "Previsão Retorno", "Tempo Parado"]],
-      body: tableData,
-      theme: "grid",
-      headStyles: { fillColor: brandBlue as any, textColor: [255, 255, 255], fontStyle: "bold", halign: "center" },
-      styles: { fontSize: 8, cellPadding: 4 },
-      columnStyles: { 0: { fontStyle: "bold", halign: "center", cellWidth: 25 }, 2: { cellWidth: 100 } }
+      body: items.map(e => [e.identifier, e.type || "—", e.maintenance_problem || "Técnico", e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString("pt-BR") : "—", e.maintenance_expected_return ? new Date(e.maintenance_expected_return).toLocaleDateString("pt-BR") : "—", getDiasParado(e.maintenance_started_at || e.updated_at).toString() + " dias"]),
+      theme: "grid", headStyles: { fillColor: brandBlue as any, textColor: [255, 255, 255] }
     });
-
-    doc.save(`relatorio-oficina-${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`relatorio-oficina.pdf`);
   };
 
   const handleSubmit = async () => {
@@ -124,15 +108,25 @@ function MaintenancePage() {
     }
   };
 
-  const release = async (id: string) => {
-    const rep = prompt("Relatório de liberação:");
-    if (rep === null) return;
-    await supabase.from("equipment").update({ 
-      status: "operacional", 
+  const release = async (id: string, identifier: string) => {
+    const confirm = window.confirm(`Confirmar liberação do equipamento ${identifier}?`);
+    if (!confirm) return;
+
+    const { error } = await supabase.from("equipment").update({ 
+      status: "disponivel", // Mudado para disponivel para garantir que saia da lista de oficina
       maintenance_problem: null,
-      maintenance_expected_return: null 
+      maintenance_expected_return: null,
+      maintenance_priority: null,
+      maintenance_responsible: null,
+      maintenance_started_at: null
     }).eq("id", id);
-    load();
+
+    if (!error) {
+      toast.success(`Equipamento ${identifier} liberado com sucesso!`);
+      load();
+    } else {
+      toast.error("Erro ao liberar: " + error.message);
+    }
   };
 
   const getDiasParado = (dateStr: string | null) => {
@@ -253,7 +247,9 @@ function MaintenancePage() {
                           ) : <span className="text-muted-foreground/30 text-[10px] font-bold italic">NÃO INF.</span>}
                         </td>
                         <td className="px-4 py-4 text-center"><span className="text-lg font-black">{getDiasParado(e.maintenance_started_at || e.updated_at)}</span></td>
-                        <td className="px-4 py-4 text-right"><Button variant="outline" size="sm" onClick={() => release(e.id)} className="font-black border-2 h-8 text-[10px]">LIBERAR</Button></td>
+                        <td className="px-4 py-4 text-right">
+                          <Button variant="outline" size="sm" onClick={() => release(e.id, e.identifier)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
