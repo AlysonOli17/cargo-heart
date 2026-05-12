@@ -30,16 +30,13 @@ type Equipment = {
   updated_at: string; status: "manutencao"; current_client_id: string | null; notes: string | null;
 };
 
-// Função de formatação ultra segura
 const safeFormatDateFull = (dateStr: string | null) => {
   if (!dateStr || dateStr === "" || dateStr === "null") return "—";
   try {
     const d = new Date(dateStr.includes("T") ? dateStr : dateStr + "T00:00:00");
     if (isNaN(d.getTime())) return "—";
     return d.toLocaleDateString("pt-BR");
-  } catch (e) {
-    return "—";
-  }
+  } catch (e) { return "—"; }
 };
 
 function MaintenancePage() {
@@ -54,6 +51,7 @@ function MaintenancePage() {
     problem: "",
     type: "Corretiva",
     location: "Oficina Base",
+    started_at: new Date().toISOString().split("T")[0],
     expected_return: ""
   });
 
@@ -97,11 +95,16 @@ function MaintenancePage() {
       .from("equipment")
       .update({
         status: "manutencao",
-        maintenance_problem: newMaint.problem,
+        maintenance_problem: newMaint.problem.trim(),
         maintenance_type: newMaint.type,
         maintenance_location: newMaint.location,
         maintenance_expected_return: newMaint.expected_return || null,
-        maintenance_started_at: new Date().toISOString()
+        maintenance_started_at: newMaint.started_at ? newMaint.started_at + "T12:00:00Z" : new Date().toISOString(),
+        notes: JSON.stringify({
+          maintenance_location: newMaint.location,
+          maintenance_start_date: newMaint.started_at,
+          maintenance_type: newMaint.type
+        })
       })
       .eq("id", newMaint.equipment_id);
 
@@ -113,9 +116,13 @@ function MaintenancePage() {
         notes: `Entrada na oficina: ${newMaint.problem}`,
         owner_id: user.id
       });
-      toast.success("Equipamento enviado para manutenção");
+      toast.success("Equipamento enviado para oficina");
       setIsAdding(false);
-      setNewMaint({ equipment_id: "", problem: "", type: "Corretiva", location: "Oficina Base", expected_return: "" });
+      setNewMaint({ 
+        equipment_id: "", problem: "", type: "Corretiva", 
+        location: "Oficina Base", started_at: new Date().toISOString().split("T")[0], 
+        expected_return: "" 
+      });
       load();
     } else {
       toast.error(error.message);
@@ -153,7 +160,7 @@ function MaintenancePage() {
 
     setBusy(null);
     if (error) toast.error(error.message);
-    else toast.success(`${eq.identifier} liberado para disponível`);
+    else toast.success(`${eq.identifier} liberado com sucesso`);
   };
 
   const getDiasParado = (dateString: string | null) => {
@@ -191,18 +198,18 @@ function MaintenancePage() {
         <div className="flex items-center gap-3">
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
             <DialogTrigger asChild>
-              <Button disabled={!canWrite} className="bg-[oklch(0.65_0.2_50)] hover:bg-[oklch(0.55_0.2_50)] text-white font-bold shadow-lg">
+              <Button disabled={!canWrite} className="bg-[oklch(0.65_0.2_50)] hover:bg-[oklch(0.55_0.2_50)] text-white font-bold shadow-lg uppercase tracking-tighter">
                 <PlusCircle className="h-4 w-4 mr-2" />
                 Enviar para Oficina
               </Button>
             </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Entrada de Equipamento</DialogTitle></DialogHeader>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Enviar Equipamento para Oficina</DialogTitle></DialogHeader>
               <div className="space-y-4 pt-4">
                 <div className="space-y-2">
-                  <Label>Equipamento *</Label>
+                  <Label>Equipamento Disponível *</Label>
                   <Select value={newMaint.equipment_id} onValueChange={(v) => setNewMaint({...newMaint, equipment_id: v})}>
-                    <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Selecione o equipamento..." /></SelectTrigger>
                     <SelectContent>
                       {availableEqs.map(eq => (
                         <SelectItem key={eq.id} value={eq.id}>{eq.identifier}</SelectItem>
@@ -210,37 +217,49 @@ function MaintenancePage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="space-y-2 p-3 rounded-lg bg-[oklch(0.65_0.2_50)]/5 border border-[oklch(0.65_0.2_50)]/20">
+                  <Label className="text-[oklch(0.6_0.2_50)] font-bold">Qual é o problema? *</Label>
+                  <Textarea required value={newMaint.problem}
+                    onChange={(e) => setNewMaint({...newMaint, problem: e.target.value})}
+                    placeholder="Descreva o problema do equipamento" 
+                    className="mt-1.5" />
+                </div>
                 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Tipo</Label>
+                    <Label>Tipo de Manutenção</Label>
                     <Select value={newMaint.type} onValueChange={(v) => setNewMaint({...newMaint, type: v})}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Corretiva">Corretiva</SelectItem>
+                        <SelectItem value="MEV">MEV</SelectItem>
                         <SelectItem value="Preventiva">Preventiva</SelectItem>
-                        <SelectItem value="Preditiva">Preditiva</SelectItem>
-                        <SelectItem value="Pintura">Pintura/Estética</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Localização</Label>
-                    <Input value={newMaint.location} onChange={(e) => setNewMaint({...newMaint, location: e.target.value})} placeholder="Onde?" />
+                    <Label>Local / Oficina</Label>
+                    <Input value={newMaint.location} onChange={(e) => setNewMaint({...newMaint, location: e.target.value})} />
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Problema *</Label>
-                  <Textarea value={newMaint.problem} onChange={(e) => setNewMaint({...newMaint, problem: e.target.value})} placeholder="Descreva o defeito" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Data de Início</Label>
+                    <Input type="date" value={newMaint.started_at} onChange={(e) => setNewMaint({...newMaint, started_at: e.target.value})} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Previsão de Retorno</Label>
+                    <Input type="date" value={newMaint.expected_return} onChange={(e) => setNewMaint({...newMaint, expected_return: e.target.value})} />
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Previsão</Label>
-                  <Input type="date" value={newMaint.expected_return} onChange={(e) => setNewMaint({...newMaint, expected_return: e.target.value})} />
-                </div>
+                <p className="text-[10px] text-muted-foreground italic text-center">
+                  O equipamento mudará para o status "Manutenção" imediatamente.
+                </p>
 
-                <Button onClick={sendToMaintenance} className="w-full bg-[oklch(0.65_0.2_50)] text-white font-bold">Salvar Entrada</Button>
+                <Button onClick={sendToMaintenance} className="w-full bg-[oklch(0.65_0.2_50)] text-white font-bold">CONFIRMAR ENTRADA</Button>
               </div>
             </DialogContent>
           </Dialog>
