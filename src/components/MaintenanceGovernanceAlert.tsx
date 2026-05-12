@@ -1,0 +1,124 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
+import { AlertCircle, ArrowRight, CheckCircle2, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+type CriticalEquipment = {
+  id: string;
+  identifier: string;
+  maintenance_problem: string;
+  days_stopped: number;
+};
+
+export function MaintenanceGovernanceAlert() {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<{ department: string; receives_alerts: boolean } | null>(null);
+  const [criticalItems, setCriticalItems] = useState<CriticalEquipment[]>([]);
+  const [isTimeToShow, setIsTimeToShow] = useState(false);
+
+  const check = async () => {
+    if (!user) return;
+
+    // 1. Carrega perfil do usuário logado
+    const { data: prof } = await supabase.from("profiles").select("department, receives_alerts").eq("id", user.id).maybeSingle();
+    setProfile(prof);
+
+    // 2. Verifica se já passou das 10h (ou se deve mostrar o dia todo após as 10h)
+    const now = new Date();
+    const currentHour = now.getHours();
+    setIsTimeToShow(currentHour >= 10);
+
+    // 3. Busca equipamentos em manutenção há mais de 5 dias que NÃO foram verificados hoje
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const { data: eqs } = await supabase.from("equipment")
+      .select("id, identifier, maintenance_problem, maintenance_started_at, last_verified_at")
+      .in("status", ["manutencao", "indisponivel"]);
+
+    const critical = (eqs ?? []).filter(e => {
+      if (!e.maintenance_started_at) return false;
+      
+      const start = new Date(e.maintenance_started_at);
+      const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 3600 * 24));
+      
+      const lastVerified = e.last_verified_at ? new Date(e.last_verified_at) : null;
+      const verifiedToday = lastVerified && lastVerified >= todayStart;
+
+      return diffDays >= 5 && !verifiedToday;
+    }).map(e => ({
+      id: e.id,
+      identifier: e.identifier,
+      maintenance_problem: e.maintenance_problem || "Sem descrição",
+      days_stopped: Math.floor((now.getTime() - new Date(e.maintenance_started_at!).getTime()) / (1000 * 3600 * 24))
+    }));
+
+    setCriticalItems(critical);
+  };
+
+  const verify = async (id: string, identifier: string) => {
+    const { error } = await supabase.from("equipment").update({
+      last_verified_at: new Date().toISOString()
+    }).eq("id", id);
+
+    if (!error) {
+      toast.success(`Situação de ${identifier} confirmada para hoje!`);
+      check();
+    }
+  };
+
+  useEffect(() => {
+    check();
+    const interval = setInterval(check, 1000 * 60 * 5); // Verifica a cada 5 min
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // Regra de exibição: 
+  // - Precisa ser 10h ou mais
+  // - Usuário deve estar marcado para receber alertas
+  // - Usuário deve ser da Manutenção ou Operação (ou Admin)
+  // - Deve haver itens críticos
+  if (!isTimeToShow || !profile?.receives_alerts || criticalItems.length === 0) return null;
+
+  return (
+    <div className="bg-red-600 text-white animate-in slide-in-from-top duration-500 z-[100] sticky top-0 shadow-2xl">
+      <div className="container mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="bg-white/20 p-2 rounded-full animate-pulse">
+            <AlertCircle className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <p className="font-black uppercase text-xs tracking-widest leading-none">Alerta de Governança — {new Date().toLocaleDateString('pt-BR')}</p>
+            <h2 className="text-sm font-bold">Existem {criticalItems.length} equipamentos parados há mais de 5 dias sem atualização hoje.</h2>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 justify-center">
+          {criticalItems.slice(0, 3).map(item => (
+            <div key={item.id} className="bg-black/20 hover:bg-black/30 transition-colors p-2 rounded-lg flex items-center gap-3 border border-white/10 group">
+              <div className="text-left">
+                <p className="font-mono font-black text-xs leading-none">{item.identifier}</p>
+                <p className="text-[10px] font-bold opacity-80 uppercase">{item.days_stopped} dias parado</p>
+              </div>
+              <Button 
+                onClick={() => verify(item.id, item.identifier)}
+                size="sm" 
+                className="h-8 bg-white text-red-600 hover:bg-red-50 font-black text-[9px] uppercase px-3"
+              >
+                <CheckCircle2 className="h-3 w-3 mr-1" /> Confirmar Verificação
+              </Button>
+            </div>
+          ))}
+          {criticalItems.length > 3 && (
+            <div className="text-[10px] font-black uppercase opacity-60 ml-2">
+              + {criticalItems.length - 3} máquinas
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
