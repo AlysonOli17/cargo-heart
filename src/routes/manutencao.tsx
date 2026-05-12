@@ -71,51 +71,49 @@ function MaintenancePage() {
       return;
     }
 
-    const doc = new jsPDF();
+    // Configurado para 'l' (Landscape - Paisagem)
+    const doc = new jsPDF({ orientation: "l", unit: "mm", format: "a4" });
     const pageWidth = doc.internal.pageSize.getWidth();
-    const brandBlue = [44, 126, 189]; // #2C7EBD
+    const brandBlue = [44, 126, 189]; 
 
     // --- CABEÇALHO PADRÃO BUSATO ---
-    // Simulação do Logo
     doc.setFont("helvetica", "bold");
     doc.setFontSize(22);
     doc.setTextColor(80, 80, 80);
-    doc.text("BUSATO", 25, 25);
+    doc.text("BUSATO", 20, 20);
     
-    // Título à direita
     doc.setFontSize(16);
     doc.setTextColor(60, 60, 60);
-    doc.text("RELATÓRIO DE MANUTENÇÃO", pageWidth - 14, 25, { align: "right" });
+    doc.text("RELATÓRIO DE MANUTENÇÃO ATIVA", pageWidth - 20, 20, { align: "right" });
     
-    // Linha Azul Divisória
     doc.setDrawColor(brandBlue[0], brandBlue[1], brandBlue[2]);
-    doc.setLineWidth(1);
-    doc.line(14, 32, pageWidth - 14, 32);
+    doc.setLineWidth(0.8);
+    doc.line(20, 25, pageWidth - 20, 25);
 
-    // Data de Geração
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(150, 150, 150);
-    doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, pageWidth - 14, 38, { align: "right" });
+    doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, pageWidth - 20, 30, { align: "right" });
 
-    // Título da Seção
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
     doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
-    doc.text("RESUMO POR EQUIPAMENTO", 14, 48);
+    doc.text("QUADRO GERAL DE OFICINA", 20, 38);
 
     // --- TABELA ---
     const tableData = items.map(e => [
       e.identifier,
       e.type || "—",
       e.maintenance_problem || "Intervenção Técnica",
+      e.maintenance_priority || "Média",
+      e.maintenance_responsible || "Técnico Base",
       e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString("pt-BR") : "—",
-      getDiasParado(e.maintenance_started_at || e.updated_at).toString()
+      getDiasParado(e.maintenance_started_at || e.updated_at).toString() + " dias"
     ]);
 
     autoTable(doc, {
-      startY: 52,
-      head: [["Equipamento", "Tipo", "Defeito / Observação", "Data Início", "Dias Parado"]],
+      startY: 42,
+      head: [["Equipamento", "Tipo", "Defeito / Observação", "Prioridade", "Responsável", "Entrada", "Tempo Parado"]],
       body: tableData,
       theme: "grid",
       headStyles: { 
@@ -127,32 +125,35 @@ function MaintenancePage() {
       },
       styles: { 
         fontSize: 8, 
-        cellPadding: 3,
+        cellPadding: 4,
         valign: "middle",
         lineColor: [220, 220, 220],
         lineWidth: 0.1
       },
       columnStyles: {
-        0: { fontStyle: "bold", halign: "center", cellWidth: 30 },
+        0: { fontStyle: "bold", halign: "center", cellWidth: 25 },
         1: { halign: "center", cellWidth: 25 },
-        2: { cellWidth: 80 },
+        2: { cellWidth: 100 },
         3: { halign: "center", cellWidth: 25 },
-        4: { halign: "center", fontStyle: "bold" }
+        4: { halign: "center", cellWidth: 35 },
+        5: { halign: "center", cellWidth: 25 },
+        6: { halign: "center", fontStyle: "bold" }
       },
       alternateRowStyles: {
         fillColor: [250, 250, 250]
-      }
+      },
+      margin: { left: 20, right: 20 }
     });
 
-    // --- RODAPÉ ---
-    const finalY = (doc as any).lastAutoTable.finalY || 52;
+    const finalY = (doc as any).lastAutoTable.finalY || 42;
     doc.setFontSize(7);
     doc.setTextColor(180, 180, 180);
-    doc.text("Controle Central de Operações - Frota Busato", 14, finalY + 10);
-    doc.text("Página 1 de 1", pageWidth - 14, finalY + 10, { align: "right" });
+    doc.text("Sistema Cargo-Heart - Controle Central de Operações Busato", 20, finalY + 10);
+    doc.text("Relatório Confidencial", pageWidth / 2, finalY + 10, { align: "center" });
+    doc.text("Página 1 de 1", pageWidth - 20, finalY + 10, { align: "right" });
 
-    doc.save(`relatorio-busato-${new Date().toISOString().split('T')[0]}.pdf`);
-    toast.success("Relatório gerado no padrão Busato!");
+    doc.save(`relatorio-oficina-paisagem-${new Date().toISOString().split('T')[0]}.pdf`);
+    toast.success("Relatório gerado em formato paisagem!");
   };
 
   const handleSubmit = async () => {
@@ -218,7 +219,7 @@ function MaintenancePage() {
 
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={exportToPDF} className="font-bold border-2 h-10 uppercase text-xs hover:bg-primary hover:text-white transition-all">
-            <FileDown className="h-4 w-4 mr-2" /> Exportar PDF
+            <FileDown className="h-4 w-4 mr-2" /> Exportar Paisagem
           </Button>
 
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
