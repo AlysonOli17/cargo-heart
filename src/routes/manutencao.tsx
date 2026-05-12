@@ -124,7 +124,7 @@ function MaintenancePage() {
   const release = async (id: string, identifier: string) => {
     const confirm = window.confirm(`Confirmar liberação do equipamento ${identifier}?`);
     if (!confirm) return;
-    const { error } = await supabase.from("equipment").update({ status: "disponivel", maintenance_problem: null, maintenance_expected_return: null, maintenance_priority: null, maintenance_responsible: null, maintenance_started_at: null }).eq("id", id);
+    const { error } = await supabase.from("equipment").update({ status: "operacional", maintenance_problem: null, maintenance_expected_return: null, maintenance_priority: null, maintenance_responsible: null, maintenance_started_at: null }).eq("id", id);
     if (!error) { toast.success(`${identifier} liberado!`); load(); }
   };
 
