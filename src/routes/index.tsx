@@ -6,8 +6,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
-import { LayoutDashboard, Truck, Wrench, AlertTriangle, CheckCircle2, Search, Filter, Hourglass } from "lucide-react";
+import { LayoutDashboard, Truck, Wrench, AlertTriangle, CheckCircle2, Search, Filter, Hourglass, Calendar } from "lucide-react";
 import { STATUS_LABELS, type EquipmentStatus } from "@/lib/equipment";
+import { format } from "date-fns";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "CCO Dashboard — Frota Busato" }] }),
@@ -19,28 +20,50 @@ type Equipment = {
   maintenance_problem: string | null; maintenance_expected_return: string | null;
 };
 
-// Função auxiliar para garantir cores consistentes em todo o dashboard
-const getStatusColor = (status: string) => {
-  if (status === 'operacional' || status === 'disponivel') return '#10b981'; // Verde
-  if (status === 'programado') return '#f59e0b'; // Amarelo/Laranja
-  return '#ef4444'; // Vermelho (Manutenção/Indisponível)
+type Programming = {
+  equipment_id: string;
+  stop_type: string;
 };
 
 function Dashboard() {
   const [items, setItems] = useState<Equipment[]>([]);
+  const [todayProgramming, setTodayProgramming] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const load = async () => {
-    const { data } = await supabase.from("equipment").select("*").order("identifier");
-    setItems(data ?? []);
+    const today = format(new Date(), "yyyy-MM-dd");
+    const [{ data: eqs }, { data: prog }] = await Promise.all([
+      supabase.from("equipment").select("*").order("identifier"),
+      supabase.from("programming")
+        .select("equipment_id, stop_type")
+        .eq("scheduled_date", today)
+        .eq("is_completed", false)
+    ]);
+
+    setItems(eqs ?? []);
+    
+    // Mapeia agendamentos de hoje para consulta rápida
+    const progMap: Record<string, string> = {};
+    (prog ?? []).forEach(p => { progMap[p.equipment_id] = p.stop_type; });
+    setTodayProgramming(progMap);
   };
 
   useEffect(() => {
     load();
-    const ch = supabase.channel("dashboard-v12").on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load).subscribe();
+    const ch = supabase.channel("dashboard-v13")
+      .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
+      .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, []);
+
+  const getStatusColor = (status: string, hasProgToday: boolean) => {
+    if (hasProgToday) return '#ef4444'; // Sempre vermelho se tiver agendamento hoje
+    if (status === 'operacional' || status === 'disponivel') return '#10b981'; // Verde
+    if (status === 'programado') return '#f59e0b'; // Amarelo
+    return '#ef4444'; // Vermelho
+  };
 
   const filtered = useMemo(() => {
     return items.filter(e => {
@@ -55,10 +78,10 @@ function Dashboard() {
 
   const stats = useMemo(() => ({
     total: items.length,
-    operacional: items.filter(e => e.status === 'operacional' || e.status === 'disponivel').length,
-    manutencao: items.filter(e => e.status === 'manutencao' || e.status === 'indisponivel').length,
+    operacional: items.filter(e => !todayProgramming[e.id] && (e.status === 'operacional' || e.status === 'disponivel')).length,
+    manutencao: items.filter(e => !!todayProgramming[e.id] || e.status === 'manutencao' || e.status === 'indisponivel').length,
     preventiva: items.filter(e => e.status === 'programado').length,
-  }), [items]);
+  }), [items, todayProgramming]);
 
   return (
     <div className="space-y-6">
@@ -71,46 +94,63 @@ function Dashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <KPI card={{ label: "Total Frota", val: stats.total, icon: Truck, color: "bg-slate-900 text-white border-slate-800" }} />
-        <KPI card={{ label: "Operacional", val: stats.operacional, icon: CheckCircle2, color: "bg-[#10b981] text-white border-[#059669]" }} />
-        <KPI card={{ label: "Oficina/Parado", val: stats.manutencao, icon: Wrench, color: "bg-[#ef4444] text-white border-[#dc2626]" }} />
-        <KPI card={{ label: "Preventiva", val: stats.preventiva, icon: AlertTriangle, color: "bg-[#f59e0b] text-white border-[#d97706]" }} />
+        <KPI card={{ label: "Operacional Hoje", val: stats.operacional, icon: CheckCircle2, color: "bg-[#10b981] text-white border-[#059669]" }} />
+        <KPI card={{ label: "Indisponível Hoje", val: stats.manutencao, icon: Wrench, color: "bg-[#ef4444] text-white border-[#dc2626]" }} />
+        <KPI card={{ label: "Preventivas", val: stats.preventiva, icon: AlertTriangle, color: "bg-[#f59e0b] text-white border-[#d97706]" }} />
       </div>
 
       <Tabs defaultValue="all" onValueChange={setStatusFilter}>
         <TabsList className="bg-muted/50 p-1 h-12 rounded-xl">
           <TabsTrigger value="all" className="font-bold text-[10px] uppercase px-6">Tudo</TabsTrigger>
           <TabsTrigger value="operacional" className="font-bold text-[10px] uppercase px-6">Operacional</TabsTrigger>
-          <TabsTrigger value="manutencao" className="font-bold text-[10px] uppercase px-6">Oficina</TabsTrigger>
+          <TabsTrigger value="manutencao" className="font-bold text-[10px] uppercase px-6">Oficina / Indisponível</TabsTrigger>
           <TabsTrigger value="programado" className="font-bold text-[10px] uppercase px-6">Preventiva</TabsTrigger>
         </TabsList>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-          {filtered.map(e => (
-            <Card key={e.id} className="overflow-hidden border-2 shadow-sm hover:border-primary/40 transition-all group">
-              <div className="h-2" style={{ backgroundColor: getStatusColor(e.status) }} />
-              <CardContent className="p-4 space-y-3">
-                <div className="flex justify-between items-start">
-                   <div><h3 className="font-mono font-black text-xl leading-none uppercase group-hover:text-primary transition-colors">{e.identifier}</h3><p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{e.type}</p></div>
-                   <Badge className="text-[9px] font-black uppercase text-white border-none" style={{ backgroundColor: getStatusColor(e.status) }}>{STATUS_LABELS[e.status]}</Badge>
-                </div>
-
-                {(e.status === 'manutencao' || e.status === 'indisponivel') && (
-                  <div className="space-y-2 pt-1">
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase leading-tight bg-muted/50 p-1.5 rounded line-clamp-2 min-h-[2.5rem]">Defeito: {e.maintenance_problem || 'Não relatado'}</p>
-                    {e.maintenance_expected_return && (
-                       <div className="flex items-center gap-1.5 bg-blue-50 p-1.5 rounded-lg border border-blue-200">
-                          <Hourglass className="h-3.5 w-3.5 text-blue-600 animate-pulse" />
-                          <div className="flex flex-col">
-                            <span className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão Retorno</span>
-                            <span className="text-[11px] font-black text-blue-800">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</span>
-                          </div>
-                       </div>
-                    )}
+          {filtered.map(e => {
+            const hasProgToday = !!todayProgramming[e.id];
+            const progType = todayProgramming[e.id];
+            
+            return (
+              <Card key={e.id} className="overflow-hidden border-2 shadow-sm hover:border-primary/40 transition-all group relative">
+                <div className="h-2" style={{ backgroundColor: getStatusColor(e.status, hasProgToday) }} />
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex justify-between items-start">
+                     <div><h3 className="font-mono font-black text-xl leading-none uppercase group-hover:text-primary transition-colors">{e.identifier}</h3><p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{e.type}</p></div>
+                     <Badge className="text-[9px] font-black uppercase text-white border-none" style={{ backgroundColor: getStatusColor(e.status, hasProgToday) }}>
+                       {hasProgToday ? `AGENDADO: ${progType}` : STATUS_LABELS[e.status]}
+                     </Badge>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+
+                  {hasProgToday && (
+                    <div className="bg-red-50 border border-red-200 p-2 rounded-lg flex items-center gap-2">
+                       <Calendar className="h-4 w-4 text-red-600 animate-bounce" />
+                       <div>
+                         <p className="text-[8px] font-black text-red-700 uppercase leading-none">Indisponível Hoje</p>
+                         <p className="text-xs font-black text-red-800">Parada para: {progType}</p>
+                       </div>
+                    </div>
+                  )}
+
+                  {(e.status === 'manutencao' || e.status === 'indisponivel') && !hasProgToday && (
+                    <div className="space-y-2 pt-1">
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase leading-tight bg-muted/50 p-1.5 rounded line-clamp-2 min-h-[2.5rem]">Defeito: {e.maintenance_problem || 'Não relatado'}</p>
+                      {e.maintenance_expected_return && (
+                         <div className="flex items-center gap-1.5 bg-blue-50 p-1.5 rounded-lg border border-blue-200">
+                            <Hourglass className="h-3.5 w-3.5 text-blue-600 animate-pulse" />
+                            <div className="flex flex-col">
+                              <span className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão Retorno</span>
+                              <span className="text-[11px] font-black text-blue-800">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</span>
+                            </div>
+                         </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </Tabs>
     </div>
