@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
-import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay, parseISO } from "date-fns";
+import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/operacao")({
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/operacao")({
 });
 
 type Programming = {
-  id: string; scheduled_date: string; stop_type: string; notes: string | null;
+  id: string; scheduled_date: string | null; stop_type: string; notes: string | null;
   equipment_id: string;
   equipment: { identifier: string; type: string } | null;
 };
@@ -52,7 +52,7 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v6")
+    const ch = supabase.channel("op-schedule-v7")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -69,10 +69,9 @@ function OperationPlanningPage() {
     return { activeMaint, ready, totalScheduled: programming.length };
   }, [equipment, programming]);
 
-  // Identifica agendamentos que NÃO estão na semana visualizada
   const otherSchedules = useMemo(() => {
     const weekStrings = weekDays.map(d => d.dateStr);
-    return programming.filter(p => !weekStrings.includes(p.scheduled_date));
+    return programming.filter(p => !p.scheduled_date || !weekStrings.includes(p.scheduled_date));
   }, [programming, weekDays]);
 
   return (
@@ -172,18 +171,19 @@ function OperationPlanningPage() {
         ))}
       </Tabs>
 
-      {/* SEÇÃO DE SEGURANÇA PARA OUTRAS DATAS */}
       {otherSchedules.length > 0 && (
         <div className="mt-12 space-y-4">
            <h3 className="font-black uppercase text-xs flex items-center gap-2 text-muted-foreground">
-             <Info className="h-4 w-4" /> Agendamentos em outras datas ({otherSchedules.length})
+             <Info className="h-4 w-4" /> Agendamentos pendentes ou outras datas ({otherSchedules.length})
            </h3>
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 opacity-70 hover:opacity-100 transition-opacity">
               {otherSchedules.map(p => (
                 <Card key={p.id} className="p-3 border bg-muted/20">
                    <div className="flex justify-between items-center mb-2">
-                     <span className="font-mono font-black text-xs">{p.equipment?.identifier}</span>
-                     <Badge variant="outline" className="text-[8px]">{p.scheduled_date.split('-').reverse().join('/')}</Badge>
+                     <span className="font-mono font-black text-xs">{p.equipment?.identifier || "S/ ID"}</span>
+                     <Badge variant="outline" className="text-[8px]">
+                       {p.scheduled_date ? p.scheduled_date.split('-').reverse().join('/') : "SEM DATA"}
+                     </Badge>
                    </div>
                    <p className="text-[10px] font-bold uppercase text-primary">{p.stop_type}</p>
                    <Button variant="ghost" size="sm" onClick={() => deleteSchedule(p.id)} className="h-6 w-full mt-2 text-red-500 text-[8px] font-black uppercase">REMOVER</Button>
