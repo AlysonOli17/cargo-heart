@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Wrench, CheckCircle2, PlusCircle, Clock, ShieldAlert, User, Calendar } from "lucide-react";
+import { Wrench, CheckCircle2, PlusCircle, Clock, Search, User, Tag, Calendar, Check, ChevronsUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
@@ -15,6 +15,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/manutencao")({
   head: () => ({ meta: [{ title: "Controle de Oficina — Frota Busato" }] }),
@@ -50,12 +53,16 @@ function MaintenancePage() {
   const { user } = useAuth();
   const { canWrite } = useRole();
   const [items, setItems] = useState<Equipment[]>([]);
-  const [availableEqs, setAvailableEqs] = useState<any[]>([]);
+  const [availableEqs, setAvailableEqs] = useState<{id: string, identifier: string}[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   
+  // Estados do seletor com busca (Combobox)
+  const [openCombo, setOpenCombo] = useState(false);
+  const [selectedEqId, setSelectedEqId] = useState("");
+
   const [newMaint, setNewMaint] = useState({
-    equipment_id: "",
     status: "manutencao" as EquipmentStatus,
     sub_status: "Em reparo",
     problem: "",
@@ -70,19 +77,11 @@ function MaintenancePage() {
   });
 
   const load = async () => {
-    // TESTE RADICAL: Busca TODOS os equipamentos sem filtro nenhum
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("equipment")
       .select("*")
       .order("updated_at", { ascending: false });
       
-    if (error) {
-      console.error("Erro ao carregar:", error);
-      toast.error("Erro ao carregar dados do banco");
-      return;
-    }
-
-    // Filtra no código para ter certeza absoluta
     const filtered = (data ?? []).filter(e => 
       ['manutencao', 'indisponivel', 'finalizacao', 'programado'].includes(e.status) ||
       e.maintenance_problem !== null
@@ -100,14 +99,14 @@ function MaintenancePage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("manut-global")
+    const ch = supabase.channel("manut-searchable")
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [user]);
 
   const sendToMaintenance = async () => {
-    if (!newMaint.equipment_id || !newMaint.problem) {
+    if (!selectedEqId || !newMaint.problem) {
       toast.error("Informe o equipamento e o problema");
       return;
     }
@@ -127,18 +126,19 @@ function MaintenancePage() {
         maintenance_started_at: newMaint.started_at ? newMaint.started_at + "T12:00:00Z" : new Date().toISOString(),
         is_preventive_overdue: newMaint.preventive_overdue
       })
-      .eq("id", newMaint.equipment_id);
+      .eq("id", selectedEqId);
 
     if (!error) {
       await supabase.from("movements").insert({
-        equipment_id: newMaint.equipment_id,
+        equipment_id: selectedEqId,
         to_status: newMaint.status,
         from_status: "operacional",
-        notes: `CCO Entry: ${newMaint.problem}`,
+        notes: `Entrada CCO: ${newMaint.problem}`,
         owner_id: user.id
       });
-      toast.success("Salvo com sucesso");
+      toast.success("Registrado com sucesso");
       setIsAdding(false);
+      setSelectedEqId("");
       load();
     } else {
       toast.error(error.message);
@@ -189,7 +189,13 @@ function MaintenancePage() {
     } catch (e) { return 0; }
   };
 
-  const grouped = items.reduce((acc, e) => {
+  // Filtragem da tabela por busca
+  const tableFiltered = items.filter(e => 
+    e.identifier.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (e.type || "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const grouped = tableFiltered.reduce((acc, e) => {
     const groupName = e.maintenance_type === "MEV" ? "MEV" : (e.type || "Geral");
     if (!acc[groupName]) acc[groupName] = [];
     acc[groupName].push(e);
@@ -205,12 +211,24 @@ function MaintenancePage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Clock className="h-7 w-7 text-primary" />
-            Controle de Oficina
-          </h1>
-          <p className="text-muted-foreground mt-1 font-medium italic">{items.length} máquinas em manutenção</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h1 className="text-3xl font-bold flex items-center gap-2">
+              <Clock className="h-7 w-7 text-primary" />
+              Controle de Oficina
+            </h1>
+            <p className="text-muted-foreground mt-1 font-medium italic">{items.length} máquinas em manutenção</p>
+          </div>
+          
+          <div className="relative max-w-xs hidden md:block">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input 
+              placeholder="Buscar na oficina..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 bg-muted/50 border-none h-10 w-64 rounded-xl"
+            />
+          </div>
         </div>
 
         <Dialog open={isAdding} onOpenChange={setIsAdding}>
@@ -223,22 +241,59 @@ function MaintenancePage() {
           <DialogContent className="max-w-xl">
             <DialogHeader><DialogTitle>Registrar Entrada Oficina</DialogTitle></DialogHeader>
             <div className="grid grid-cols-2 gap-4 pt-4">
-              <div className="col-span-2 space-y-2">
+              
+              {/* SELETOR COM BUSCA (COMBOBOX) */}
+              <div className="col-span-2 space-y-2 flex flex-col">
                 <Label>Equipamento *</Label>
-                <Select value={newMaint.equipment_id} onValueChange={(v) => setNewMaint({...newMaint, equipment_id: v})}>
-                  <SelectTrigger><SelectValue placeholder="Selecione o equipamento..." /></SelectTrigger>
-                  <SelectContent>
-                    {availableEqs.map(eq => (
-                      <SelectItem key={eq.id} value={eq.id}>{eq.identifier}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover open={openCombo} onOpenChange={setOpenCombo}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={openCombo}
+                      className="w-full justify-between h-12 text-base font-medium"
+                    >
+                      {selectedEqId
+                        ? availableEqs.find((eq) => eq.id === selectedEqId)?.identifier
+                        : "Pesquise pelo prefixo ou nome..."}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                    <Command>
+                      <CommandInput placeholder="Digite o prefixo (Ex: EH-194)..." />
+                      <CommandList>
+                        <CommandEmpty>Nenhum equipamento encontrado.</CommandEmpty>
+                        <CommandGroup>
+                          {availableEqs.map((eq) => (
+                            <CommandItem
+                              key={eq.id}
+                              value={eq.identifier}
+                              onSelect={() => {
+                                setSelectedEqId(eq.id);
+                                setOpenCombo(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  selectedEqId === eq.id ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              {eq.identifier}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="space-y-2">
                 <Label>Status Principal</Label>
                 <Select value={newMaint.status} onValueChange={(v) => setNewMaint({...newMaint, status: v as EquipmentStatus})}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="programado">🟡 Manut. Programada</SelectItem>
                     <SelectItem value="manutencao">🟠 Em Manutenção</SelectItem>
@@ -251,7 +306,7 @@ function MaintenancePage() {
               <div className="space-y-2">
                 <Label>Prioridade</Label>
                 <Select value={newMaint.priority} onValueChange={(v) => setNewMaint({...newMaint, priority: v})}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Baixa">Baixa</SelectItem>
                     <SelectItem value="Média">Média</SelectItem>
@@ -269,7 +324,7 @@ function MaintenancePage() {
               <div className="space-y-2">
                 <Label>Tipo de Serviço</Label>
                 <Select value={newMaint.m_type} onValueChange={(v) => setNewMaint({...newMaint, m_type: v})}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Corretiva">Corretiva</SelectItem>
                     <SelectItem value="MEV">MEV</SelectItem>
@@ -306,7 +361,9 @@ function MaintenancePage() {
       </div>
 
       {sortedGroups.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground italic border-dashed">Nenhuma máquina em oficina no momento.</Card>
+        <Card className="p-10 text-center text-muted-foreground italic border-dashed">
+          {searchQuery ? "Nenhum resultado para sua busca." : "Nenhuma máquina em oficina no momento."}
+        </Card>
       ) : (
         <div className="space-y-8">
           {sortedGroups.map(groupName => (
