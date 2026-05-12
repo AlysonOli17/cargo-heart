@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { STATUS_LABELS, type EquipmentStatus } from "@/lib/equipment";
-import { Wrench, Users, CircleCheck, Activity } from "lucide-react";
+import { Wrench, Users, CircleCheck, Activity, Calendar } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { format } from "date-fns";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "Dashboard — Disponibilidade Frota Busato" }] }),
@@ -15,21 +16,34 @@ export const Route = createFileRoute("/")({
 type Equipment = {
   id: string; identifier: string; type: string | null; brand: string | null; model: string | null;
   status: EquipmentStatus; current_client_id: string | null;
+  maintenance_expected_return: string | null;
 };
 
-const StatusIcon = ({ status }: { status: EquipmentStatus }) => {
-  switch (status) {
-    case "disponivel":
-      return <CircleCheck className="h-5 w-5 text-[oklch(0.55_0.18_150)]" />;
-    case "com_cliente":
-      return <Users className="h-5 w-5 text-[oklch(0.55_0.18_250)]" />;
-    case "manutencao":
-      return <Wrench className="h-5 w-5 text-[oklch(0.6_0.2_50)]" />;
-    case "em_atendimento":
-      return <Activity className="h-5 w-5 text-[oklch(0.55_0.2_300)]" />;
-    default:
-      return <CircleCheck className="h-5 w-5 text-muted-foreground" />;
-  }
+const TYPE_COLORS: Record<string, string> = {
+  "CAMINHÃO PIPA": "oklch(0.65_0.18_250)", // Azul
+  "MALHA PENEIRA": "oklch(0.65_0.18_150)", // Verde
+  "CAMINHÃO": "oklch(0.65_0.18_200)",      // Ciano
+  "RETROESCAVADEIRA": "oklch(0.65_0.18_30)", // Laranja/Ouro
+  "MINI CARREGADEIRA": "oklch(0.65_0.18_300)", // Roxo
+  "PENEIRA ROTATIVA": "oklch(0.65_0.18_100)", // Amarelo Lima
+};
+
+const getColorForType = (type: string) => {
+  const upper = type.toUpperCase();
+  if (TYPE_COLORS[upper]) return TYPE_COLORS[upper];
+  const hash = type.split("").reduce((acc, char) => char.charCodeAt(0) + acc, 0);
+  const hue = hash % 360;
+  return `oklch(0.65 0.15 ${hue})`;
+};
+
+const StatusDot = ({ status }: { status: EquipmentStatus }) => {
+  const colors: Record<EquipmentStatus, string> = {
+    disponivel: "bg-[oklch(0.65_0.18_150)]",
+    com_cliente: "bg-[oklch(0.55_0.18_250)]",
+    manutencao: "bg-[oklch(0.65_0.2_50)]",
+    em_atendimento: "bg-[oklch(0.55_0.2_300)]"
+  };
+  return <div className={`h-2.5 w-2.5 rounded-full ${colors[status]} shadow-sm`} />;
 };
 
 function Dashboard() {
@@ -37,7 +51,9 @@ function Dashboard() {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
 
   const load = async () => {
-    const { data: e } = await supabase.from("equipment").select("id,identifier,type,brand,model,status,current_client_id").order("identifier");
+    const { data: e } = await supabase.from("equipment")
+      .select("id,identifier,type,brand,model,status,current_client_id,maintenance_expected_return")
+      .order("identifier");
     setEquipment((e ?? []) as Equipment[]);
   };
 
@@ -50,7 +66,6 @@ function Dashboard() {
     return () => { supabase.removeChannel(ch); };
   }, [user]);
 
-  // Agrupando por tipo
   const groupedEquipment = equipment.reduce((acc, eq) => {
     const type = eq.type || "Outros";
     if (!acc[type]) acc[type] = [];
@@ -58,102 +73,91 @@ function Dashboard() {
     return acc;
   }, {} as Record<string, Equipment[]>);
 
-  // Ordenando os tipos alfabeticamente
   const sortedTypes = Object.keys(groupedEquipment).sort();
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-2 border-b">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard de Frota</h1>
-          <p className="text-muted-foreground flex items-center gap-2 mt-1 italic">
-            <span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.18_150)] animate-pulse" />
-            Acompanhamento em tempo real por categoria
+          <h1 className="text-4xl font-extrabold tracking-tight text-foreground/90">Monitoramento de Frota</h1>
+          <p className="text-muted-foreground flex items-center gap-2 mt-2 font-medium">
+             Gestão em tempo real Busato Locações
           </p>
         </div>
-        <div className="flex gap-4">
-           <Card className="px-4 py-2 bg-background/50 backdrop-blur border-dashed">
-              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Total Frota</p>
-              <p className="text-xl font-bold">{equipment.length}</p>
-           </Card>
-           <Card className="px-4 py-2 bg-[oklch(0.65_0.18_150)]/10 border-[oklch(0.65_0.18_150)]/20">
-              <p className="text-[10px] uppercase font-bold text-[oklch(0.55_0.18_150)] tracking-widest">Disponíveis</p>
-              <p className="text-xl font-bold text-[oklch(0.55_0.18_150)]">{equipment.filter(e => e.status === 'disponivel').length}</p>
-           </Card>
+        <div className="flex items-center gap-3">
+           <div className="text-right px-4 border-r">
+              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-tighter">Frota Total</p>
+              <p className="text-3xl font-black">{equipment.length}</p>
+           </div>
+           <div className="text-right px-4 bg-[oklch(0.65_0.18_150)]/5 rounded-xl py-2">
+              <p className="text-[10px] uppercase font-bold text-[oklch(0.55_0.18_150)] tracking-tighter">Disponíveis</p>
+              <p className="text-3xl font-black text-[oklch(0.55_0.18_150)]">{equipment.filter(e => e.status === 'disponivel').length}</p>
+           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {sortedTypes.length === 0 ? (
-          <div className="col-span-full py-20 text-center border-2 border-dashed rounded-2xl bg-muted/20">
-             <p className="text-muted-foreground">Nenhum equipamento cadastrado no sistema.</p>
+          <div className="col-span-full py-32 text-center border-2 border-dashed rounded-3xl bg-muted/10">
+             <p className="text-muted-foreground font-medium">Aguardando cadastro de equipamentos...</p>
           </div>
         ) : (
           sortedTypes.map((type) => {
             const items = groupedEquipment[type];
             const available = items.filter(e => e.status === "disponivel").length;
-            const inMaint = items.filter(e => e.status === "manutencao").length;
+            const typeColor = getColorForType(type);
             
             return (
-              <Card key={type} className="overflow-hidden border-2 transition-all hover:border-primary/20 group">
-                <div className="bg-muted/40 p-4 border-b flex items-center justify-between">
+              <Card key={type} 
+                style={{ borderColor: `${typeColor}20` }}
+                className="overflow-hidden border-2 shadow-xl shadow-foreground/5 bg-card/50 backdrop-blur-sm group transition-all hover:translate-y-[-2px]">
+                <div 
+                  style={{ backgroundColor: `${typeColor}15` }}
+                  className="p-5 border-b flex items-center justify-between">
                   <div>
-                    <h2 className="text-lg font-bold uppercase tracking-tight">{type}</h2>
-                    <p className="text-xs text-muted-foreground">{items.length} unidades no total</p>
+                    <h2 style={{ color: typeColor }} className="text-xl font-black uppercase tracking-tighter">{type}</h2>
+                    <p className="text-xs font-bold text-muted-foreground/60">{items.length} UNIDADES</p>
                   </div>
-                  <div className="flex gap-2">
-                    <div className="text-center px-2 py-1 rounded bg-background border shadow-sm">
-                      <p className="text-[9px] font-bold text-muted-foreground uppercase leading-none">Disp</p>
-                      <p className="text-sm font-bold text-[oklch(0.55_0.18_150)]">{available}</p>
-                    </div>
-                    <div className="text-center px-2 py-1 rounded bg-background border shadow-sm">
-                      <p className="text-[9px] font-bold text-muted-foreground uppercase leading-none">Ofic</p>
-                      <p className="text-sm font-bold text-[oklch(0.6_0.2_50)]">{inMaint}</p>
-                    </div>
+                  <div className="flex items-baseline gap-1 bg-background/80 px-3 py-1.5 rounded-full border shadow-sm">
+                    <span className="text-sm font-black text-[oklch(0.55_0.18_150)]">{available}</span>
+                    <span className="text-[10px] font-bold text-muted-foreground/50 uppercase ml-1">Disponíveis</span>
                   </div>
                 </div>
-                <div className="p-4 bg-background/50">
-                   <div className="grid grid-cols-1 gap-2">
-                      {items.map((eq) => (
-                        <div key={eq.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20 border border-transparent hover:border-primary/10 hover:bg-muted/40 transition-all">
-                           <StatusIcon status={eq.status} />
-                           <div className="flex-1 min-w-0">
-                              <p className="font-mono font-bold text-sm">{eq.identifier}</p>
-                              <p className="text-[10px] text-muted-foreground truncate uppercase">
-                                {eq.brand} {eq.model}
-                              </p>
-                           </div>
-                           <div className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                              eq.status === 'disponivel' ? 'bg-[oklch(0.65_0.18_150)]/10 text-[oklch(0.55_0.18_150)]' :
-                              eq.status === 'manutencao' ? 'bg-[oklch(0.65_0.2_50)]/10 text-[oklch(0.6_0.2_50)]' :
-                              'bg-primary/10 text-primary'
-                           }`}>
-                              {STATUS_LABELS[eq.status]}
-                           </div>
-                        </div>
-                      ))}
+                
+                <div className="p-5">
+                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {items.map((eq) => {
+                        const isMaint = eq.status === 'manutencao';
+                        return (
+                          <div key={eq.id} className={`flex flex-col gap-1.5 p-3 rounded-2xl border transition-all ${
+                            eq.status === 'disponivel' 
+                              ? 'bg-[oklch(0.65_0.18_150)]/5 border-transparent hover:border-[oklch(0.65_0.18_150)]/20' 
+                              : isMaint 
+                                ? 'bg-[oklch(0.65_0.2_50)]/5 border-[oklch(0.65_0.2_50)]/10'
+                                : 'bg-muted/30 border-transparent hover:border-foreground/10'
+                          }`}>
+                             <div className="flex items-center justify-between">
+                                <StatusDot status={eq.status} />
+                                {isMaint && eq.maintenance_expected_return && (
+                                   <div className="flex items-center gap-1 text-[9px] font-bold text-[oklch(0.6_0.2_50)] bg-background/80 px-1.5 py-0.5 rounded-md border border-[oklch(0.65_0.2_50)]/20">
+                                      <Calendar className="h-2.5 w-2.5" />
+                                      {format(new Date(eq.maintenance_expected_return + "T00:00:00"), "dd/MM")}
+                                   </div>
+                                )}
+                             </div>
+                             <p className="font-black text-sm tracking-tight truncate">{eq.identifier}</p>
+                             <p className="text-[10px] font-bold text-muted-foreground/70 truncate uppercase leading-none">
+                               {eq.model || eq.brand || '—'}
+                             </p>
+                          </div>
+                        );
+                      })}
                    </div>
                 </div>
               </Card>
             );
           })
         )}
-      </div>
-    </div>
-  );
-}
-
-function EquipmentCard({ eq }: { eq: Equipment }) {
-  return (
-    <div className="border rounded-lg p-4 bg-background hover:shadow-md transition-shadow flex items-center gap-3">
-      <div title={`Status: ${STATUS_LABELS[eq.status]}`}>
-        <StatusIcon status={eq.status} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="font-semibold text-base truncate">{eq.identifier}</p>
-        <p className="text-sm text-muted-foreground truncate">
-          {[eq.brand, eq.model].filter(Boolean).join(" ") || "Sem modelo definido"}
-        </p>
       </div>
     </div>
   );

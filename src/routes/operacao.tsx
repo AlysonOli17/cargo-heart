@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { format, addDays, isSameDay } from "date-fns";
+import { format, addDays, isSameDay, differenceInDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, Activity, UserPlus } from "lucide-react";
+import { CalendarIcon, ChevronLeft, ChevronRight, Activity, UserPlus, History } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
@@ -29,6 +29,7 @@ export const Route = createFileRoute("/operacao")({
 type Equipment = {
   id: string; identifier: string; type?: string | null; status: EquipmentStatus; current_client_id: string | null;
   maintenance_problem: string | null; maintenance_expected_return: string | null;
+  maintenance_type: string | null; maintenance_location: string | null; maintenance_started_at: string | null;
   notes?: string | null;
 };
 type Client = { id: string; name: string };
@@ -54,25 +55,24 @@ function OperationPage() {
 
   const load = async () => {
     const [{ data: e }, { data: c }] = await Promise.all([
-      supabase.from("equipment").select("id,identifier,type,status,current_client_id,maintenance_problem,maintenance_expected_return,notes"),
+      supabase.from("equipment").select(`
+        id, identifier, type, status, current_client_id, 
+        maintenance_problem, maintenance_expected_return, 
+        maintenance_type, maintenance_location, maintenance_started_at, 
+        notes
+      `),
       supabase.from("clients").select("id,name"),
     ]);
     setEquipment((e ?? []) as Equipment[]);
     setClients((c ?? []) as Client[]);
-    const maintIds = ((e ?? []) as Equipment[]).filter(x => x.status === "manutencao").map(x => x.id);
-    if (maintIds.length) {
-      const { data: mv } = await supabase
-        .from("movements")
-        .select("equipment_id,created_at,to_status")
-        .in("equipment_id", maintIds)
-        .eq("to_status", "manutencao")
-        .order("created_at", { ascending: false });
-      const map: Record<string, string> = {};
-      (mv ?? []).forEach((m: any) => { if (!map[m.equipment_id]) map[m.equipment_id] = m.created_at; });
-      setMaintStartedAt(map);
-    } else {
-      setMaintStartedAt({});
-    }
+    
+    const maintMap: Record<string, string> = {};
+    (e ?? []).forEach((eq: any) => {
+      if (eq.status === "manutencao" && eq.maintenance_started_at) {
+        maintMap[eq.id] = eq.maintenance_started_at;
+      }
+    });
+    setMaintStartedAt(maintMap);
   };
 
   const loadDayMovements = async (selectedDate: Date) => {
@@ -346,9 +346,6 @@ function OperationPage() {
                       <span className="font-medium">Problema:</span>{" "}
                       {e.maintenance_problem || <span className="italic text-muted-foreground">não informado</span>}
                     </div>
-                    <div className="text-xs text-muted-foreground pl-4 mt-1 flex items-center">
-                       Clique para ver os detalhes
-                    </div>
                   </li>
                 ))}
               </ul>
@@ -414,15 +411,10 @@ function OperationPage() {
   );
 }
 
-import { differenceInDays } from "date-fns";
-
 function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   if (!eq) return null;
   
-  let extraNotes: any = {};
-  try { if (eq.notes) extraNotes = JSON.parse(eq.notes); } catch (e) {}
-
-  const startDate = extraNotes.maintenance_start_date ? new Date(extraNotes.maintenance_start_date + "T00:00:00") : null;
+  const startDate = eq.maintenance_started_at ? new Date(eq.maintenance_started_at) : null;
   const daysStopped = startDate ? differenceInDays(new Date(), startDate) : 0;
   
   return (
@@ -451,11 +443,11 @@ function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-muted/30 p-3 rounded-lg border">
               <p className="text-xs text-muted-foreground font-medium mb-1">Tipo de Manutenção</p>
-              <p className="font-semibold text-sm">{extraNotes.maintenance_type || "Não informado"}</p>
+              <p className="font-semibold text-sm">{eq.maintenance_type || "Não informado"}</p>
             </div>
             <div className="bg-muted/30 p-3 rounded-lg border">
               <p className="text-xs text-muted-foreground font-medium mb-1">Local / Oficina</p>
-              <p className="font-semibold text-sm">{extraNotes.maintenance_location || "Não informado"}</p>
+              <p className="font-semibold text-sm">{eq.maintenance_location || "Não informado"}</p>
             </div>
           </div>
 
