@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info, CheckCircle } from "lucide-react";
+import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info, CheckCircle, XCircle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
@@ -32,10 +32,10 @@ function OperationPlanningPage() {
   const [equipment, setEquipment] = useState<any[]>([]);
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 0 }));
   
-  // Estados para o fluxo de nova lavagem
-  const [washConfirmId, setWashConfirmId] = useState<string | null>(null);
-  const [nextWashDate, setNextWashDate] = useState(format(addDays(new Date(), 7), "yyyy-MM-dd"));
-  const [washTargetEq, setWashTargetEq] = useState<string | null>(null);
+  // Fluxo de Reagendamento (Para Não Realizado ou Lavagem Recorrente)
+  const [rescheduleData, setRescheduleData] = useState<{ id: string, eqId: string, type: string } | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState(format(addDays(new Date(), 1), "yyyy-MM-dd"));
+  const [rescheduleNotes, setRescheduleNotes] = useState("");
 
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
@@ -60,7 +60,7 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v8")
+    const ch = supabase.channel("op-schedule-v9")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -69,31 +69,40 @@ function OperationPlanningPage() {
   const confirmRealized = async (p: Programming) => {
     const { error } = await supabase.from("programming").update({ is_completed: true }).eq("id", p.id);
     if (!error) {
-      toast.success("Serviço marcado como realizado!");
-      
-      // Fluxo especial para Lavador
+      toast.success("Serviço concluído!");
       if (p.stop_type === "Lavador") {
-        setWashTargetEq(p.equipment_id);
-        setWashConfirmId(p.id);
+        setRescheduleData({ id: p.id, eqId: p.equipment_id, type: "Lavador" });
+        setRescheduleNotes("Lavagem recorrente");
       } else {
         load();
       }
     }
   };
 
-  const scheduleNextWash = async () => {
-    if (!washTargetEq) return;
+  const markNotRealized = async (p: Programming) => {
+    const confirm = window.confirm("Confirmar que este serviço NÃO foi realizado?");
+    if (!confirm) return;
+    
+    // Remove o atual e pergunta se quer reagendar
+    await supabase.from("programming").delete().eq("id", p.id);
+    setRescheduleData({ id: p.id, eqId: p.equipment_id, type: p.stop_type });
+    setRescheduleNotes(`Reagendamento: ${p.stop_type} não realizado anteriormente.`);
+    toast.info("Serviço marcado como não realizado. Deseja reagendar?");
+  };
+
+  const handleReschedule = async () => {
+    if (!rescheduleData) return;
     const { error } = await supabase.from("programming").insert({
-      equipment_id: washTargetEq,
-      scheduled_date: nextWashDate,
+      equipment_id: rescheduleData.eqId,
+      scheduled_date: rescheduleDate,
       day_of_week: "Calendário",
-      stop_type: "Lavador",
-      notes: "Lavagem recorrente (agendada após realização)",
+      stop_type: rescheduleData.type,
+      notes: rescheduleNotes,
       owner_id: user?.id
     });
     if (!error) {
-      toast.success("Próxima lavagem agendada!");
-      setWashConfirmId(null);
+      toast.success("Serviço reagendado com sucesso!");
+      setRescheduleData(null);
       load();
     }
   };
@@ -109,20 +118,15 @@ function OperationPlanningPage() {
     return { activeMaint, ready, totalScheduled: programming.length };
   }, [equipment, programming]);
 
-  const otherSchedules = useMemo(() => {
-    const weekStrings = weekDays.map(d => d.dateStr);
-    return programming.filter(p => !p.scheduled_date || !weekStrings.includes(p.scheduled_date));
-  }, [programming, weekDays]);
-
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90">
             <LayoutDashboard className="h-8 w-8 text-primary" />
-            Monitoramento
+            Central de Monitoramento
           </h1>
-          <p className="text-muted-foreground font-medium uppercase text-[10px] tracking-widest">Controle de Paradas Agendadas</p>
+          <p className="text-muted-foreground font-medium uppercase text-[10px] tracking-widest">Controle de Frota e Oficinas</p>
         </div>
 
         <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-xl border">
@@ -172,10 +176,8 @@ function OperationPlanningPage() {
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {programming
-                  .filter(p => p.scheduled_date === day.dateStr)
-                  .map(p => (
-                    <Card key={p.id} className="overflow-hidden border-2 hover:border-primary/30 transition-all group">
+                {programming.filter(p => p.scheduled_date === day.dateStr).map(p => (
+                    <Card key={p.id} className="overflow-hidden border-2 hover:border-primary/30 transition-all">
                        <div className="h-1 bg-primary/20" />
                        <CardContent className="p-4 space-y-3">
                           <div className="flex justify-between items-start">
@@ -186,71 +188,55 @@ function OperationPlanningPage() {
                             <Badge className="bg-blue-600 text-[9px] font-black uppercase">{p.stop_type}</Badge>
                           </div>
                           {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground border-l-2 border-primary">"{p.notes}"</div>}
+                          
                           <div className="pt-2 flex flex-col gap-2 border-t border-dashed">
-                             <Button onClick={() => confirmRealized(p)} className="w-full h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[10px] flex items-center gap-2">
-                               <CheckCircle className="h-4 w-4" /> Realizado
-                             </Button>
+                             <div className="grid grid-cols-2 gap-2">
+                               <Button onClick={() => confirmRealized(p)} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[9px] flex items-center justify-center gap-1">
+                                 <CheckCircle className="h-3 w-3" /> Realizado
+                               </Button>
+                               <Button onClick={() => markNotRealized(p)} variant="outline" className="h-8 border-red-200 text-red-600 hover:bg-red-50 font-black uppercase text-[9px] flex items-center justify-center gap-1">
+                                 <XCircle className="h-3 w-3" /> Não Realizado
+                               </Button>
+                             </div>
                              <div className="flex justify-between items-center opacity-60">
-                               <span className="text-[9px] font-black text-muted-foreground uppercase flex items-center gap-1">
-                                  <AlertCircle className="h-3 w-3" /> Agendado
-                               </span>
-                               <Button variant="ghost" size="icon" onClick={() => deleteSchedule(p.id)} className="h-7 w-7 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>
+                               <span className="text-[8px] font-black text-muted-foreground uppercase flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Agendado</span>
+                               <Button variant="ghost" size="icon" onClick={() => deleteSchedule(p.id)} className="h-6 w-6 text-muted-foreground hover:text-red-500"><Trash2 className="h-3 w-3" /></Button>
                              </div>
                           </div>
                        </CardContent>
                     </Card>
                 ))}
-                {programming.filter(p => p.scheduled_date === day.dateStr).length === 0 && (
-                  <div className="col-span-full p-12 border-2 border-dashed rounded-3xl text-center text-muted-foreground/50 italic font-bold uppercase text-xs">Nenhuma parada agendada.</div>
-                )}
               </div>
             </div>
           </TabsContent>
         ))}
       </Tabs>
 
-      {/* DIALOG DE REAGENDAMENTO DE LAVAGEM */}
-      <Dialog open={!!washConfirmId} onOpenChange={(o) => !o && setWashConfirmId(null)}>
+      {/* DIALOG DE REAGENDAMENTO (USADO PARA LAVADOR OU NÃO REALIZADOS) */}
+      <Dialog open={!!rescheduleData} onOpenChange={(o) => !o && setRescheduleData(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-black uppercase flex items-center gap-2 text-primary">
-              <CheckCircle2 className="h-5 w-5" /> Lavagem Realizada!
+              <CalendarIcon className="h-5 w-5" /> Reagendamento de Frota
             </DialogTitle>
           </DialogHeader>
           <div className="py-4 space-y-4">
-             <p className="text-sm font-medium">Deseja agendar a **próxima lavagem** para este equipamento agora?</p>
+             <p className="text-sm font-medium">Defina a nova data para realizar este serviço (**{rescheduleData?.type}**):</p>
              <div className="space-y-2">
-               <Label className="text-[10px] font-black uppercase">Data da Próxima Lavagem</Label>
-               <Input type="date" value={nextWashDate} onChange={(e) => setNextWashDate(e.target.value)} className="h-12 font-bold" />
+               <Label className="text-[10px] font-black uppercase">Nova Data Planejada</Label>
+               <Input type="date" value={rescheduleDate} onChange={(e) => setRescheduleDate(e.target.value)} className="h-12 font-bold" />
+             </div>
+             <div className="space-y-2">
+               <Label className="text-[10px] font-black uppercase">Motivo / Observação</Label>
+               <Input value={rescheduleNotes} onChange={(e) => setRescheduleNotes(e.target.value)} className="text-xs" />
              </div>
           </div>
           <DialogFooter className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => { setWashConfirmId(null); load(); }} className="font-black uppercase text-xs">Não, apenas concluir</Button>
-            <Button onClick={scheduleNextWash} className="font-black uppercase text-xs bg-primary text-white">Sim, Agendar</Button>
+            <Button variant="outline" onClick={() => { setRescheduleData(null); load(); }} className="font-black uppercase text-xs">Apenas Fechar</Button>
+            <Button onClick={handleReschedule} className="font-black uppercase text-xs bg-primary text-white">Salvar Nova Data</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {otherSchedules.length > 0 && (
-        <div className="mt-12 space-y-4">
-           <h3 className="font-black uppercase text-xs flex items-center gap-2 text-muted-foreground"><Info className="h-4 w-4" /> Agendamentos pendentes ou outras datas ({otherSchedules.length})</h3>
-           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 opacity-70 hover:opacity-100 transition-opacity">
-              {otherSchedules.map(p => (
-                <Card key={p.id} className="p-3 border bg-muted/20">
-                   <div className="flex justify-between items-center mb-2">
-                     <span className="font-mono font-black text-xs">{p.equipment?.identifier || "S/ ID"}</span>
-                     <Badge variant="outline" className="text-[8px]">{p.scheduled_date ? p.scheduled_date.split('-').reverse().join('/') : "SEM DATA"}</Badge>
-                   </div>
-                   <p className="text-[10px] font-bold uppercase text-primary mb-2">{p.stop_type}</p>
-                   <div className="flex gap-1">
-                     <Button onClick={() => confirmRealized(p)} className="h-7 flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[8px] font-black uppercase">REALIZADO</Button>
-                     <Button variant="ghost" size="icon" onClick={() => deleteSchedule(p.id)} className="h-7 w-7 text-red-500"><Trash2 className="h-4 w-4" /></Button>
-                   </div>
-                </Card>
-              ))}
-           </div>
-        </div>
-      )}
     </div>
   );
 }
