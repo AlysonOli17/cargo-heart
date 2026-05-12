@@ -4,8 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge"; // Corrigido: Importação do Badge adicionada
-import { Wrench, CheckCircle2, PlusCircle, Clock, Calendar as CalendarIcon, Tag, Check, ChevronsUpDown, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Wrench, CheckCircle2, PlusCircle, Clock, Calendar as CalendarIcon, Tag, Check, ChevronsUpDown, Search, FileDown } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
@@ -19,6 +19,8 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 export const Route = createFileRoute("/manutencao")({
   head: () => ({ meta: [{ title: "CCO Manutenção — Frota Busato" }] }),
@@ -62,6 +64,61 @@ function MaintenancePage() {
   };
 
   useEffect(() => { if (user) load(); }, [user]);
+
+  const exportToPDF = () => {
+    if (items.length === 0) {
+      toast.error("Não há dados para exportar");
+      return;
+    }
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Cabeçalho
+    doc.setFontSize(20);
+    doc.setTextColor(40, 40, 40);
+    doc.text("FROTA BUSATO", 14, 22);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text("RELATÓRIO TÉCNICO DE OFICINA - CCO/CCM", 14, 28);
+    doc.text(`Extraído em: ${new Date().toLocaleString("pt-BR")}`, 14, 33);
+    
+    doc.setDrawColor(200, 200, 200);
+    doc.line(14, 37, pageWidth - 14, 37);
+
+    // Tabela
+    const tableData = items.map(e => [
+      e.identifier,
+      e.type || "—",
+      e.maintenance_problem || "Não informado",
+      e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString("pt-BR") : "—",
+      e.maintenance_priority || "Média",
+      getDiasParado(e.maintenance_started_at || e.updated_at).toString()
+    ]);
+
+    autoTable(doc, {
+      startY: 45,
+      head: [["Placa", "Tipo", "Problema / Defeito", "Início", "Prioridade", "Dias"]],
+      body: tableData,
+      theme: "striped",
+      headStyles: { fillColor: [44, 62, 80], textColor: [255, 255, 255], fontStyle: "bold" },
+      styles: { fontSize: 8, cellPadding: 3 },
+      columnStyles: {
+        0: { fontStyle: "bold", cellWidth: 20 },
+        2: { cellWidth: 80 }
+      }
+    });
+
+    // Rodapé
+    const finalY = (doc as any).lastAutoTable.finalY || 45;
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text("Sistema Cargo-Heart - Controle de Frota Busato", 14, finalY + 10);
+
+    doc.save(`relatorio-oficina-${new Date().toISOString().split('T')[0]}.pdf`);
+    toast.success("PDF gerado com sucesso!");
+  };
 
   const handleSubmit = async () => {
     if (!selectedEqId) { toast.error("Selecione o equipamento"); return; }
@@ -124,13 +181,17 @@ function MaintenancePage() {
           <p className="text-muted-foreground font-medium italic">{items.length} máquinas em intervenção</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative hidden md:block">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Buscar placa..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 h-10 w-48 rounded-xl border-none bg-muted/50" />
-          </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={exportToPDF} className="font-bold border-2 h-10 uppercase text-xs">
+            <FileDown className="h-4 w-4 mr-2" /> Exportar PDF
+          </Button>
+
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
-            <DialogTrigger asChild><Button className="font-bold uppercase shadow-lg"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
+            <DialogTrigger asChild>
+              <Button className="font-bold uppercase shadow-lg h-10 text-xs">
+                <PlusCircle className="h-4 w-4 mr-2" /> Nova Intervenção
+              </Button>
+            </DialogTrigger>
             <DialogContent className="max-w-md">
               <DialogHeader><DialogTitle className="font-black uppercase">Controle de Frota</DialogTitle></DialogHeader>
               <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
