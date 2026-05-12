@@ -108,6 +108,7 @@ function Dashboard() {
         {sortedTypes.map((type) => {
           const items = groupedEquipment[type];
           const available = items.filter(e => e.status === "disponivel").length;
+          const maintenance = items.filter(e => e.status === "manutencao").length;
           const typeColor = getColorForType(type);
           
           return (
@@ -119,11 +120,17 @@ function Dashboard() {
                 className="p-5 border-b flex items-center justify-between">
                 <div>
                   <h2 style={{ color: typeColor }} className="text-xl font-black uppercase tracking-tighter">{type}</h2>
-                  <p className="text-xs font-bold text-muted-foreground/60 tracking-widest">{items.length} UNIDADES</p>
+                  <p className="text-[10px] font-bold text-muted-foreground/60 tracking-widest uppercase">{items.length} Unidades no total</p>
                 </div>
-                <div className="flex items-baseline gap-1 bg-background/80 px-3 py-1.5 rounded-full border shadow-sm">
-                  <span className="text-sm font-black text-[oklch(0.55_0.18_150)]">{available}</span>
-                  <span className="text-[10px] font-bold text-muted-foreground/50 uppercase ml-1">Disponíveis</span>
+                <div className="flex gap-2">
+                  <div className="flex items-baseline gap-1 bg-background/80 px-3 py-1.5 rounded-xl border shadow-sm">
+                    <span className="text-sm font-black text-[oklch(0.55_0.18_150)]">{available}</span>
+                    <span className="text-[10px] font-bold text-muted-foreground/50 uppercase ml-1">OK</span>
+                  </div>
+                  <div className="flex items-baseline gap-1 bg-background/80 px-3 py-1.5 rounded-xl border shadow-sm">
+                    <span className="text-sm font-black text-[oklch(0.65_0.2_50)]">{maintenance}</span>
+                    <span className="text-[10px] font-bold text-muted-foreground/50 uppercase ml-1">OFICINA</span>
+                  </div>
                 </div>
               </div>
               
