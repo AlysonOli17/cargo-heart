@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
-import { format, addDays, startOfDay, subDays } from "date-fns";
+import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/operacao")({
@@ -27,20 +27,20 @@ function OperationPlanningPage() {
   const [programming, setProgramming] = useState<Programming[]>([]);
   const [equipment, setEquipment] = useState<any[]>([]);
   
-  // Estado para controlar o início da semana visualizada
-  const [pivotDate, setPivotDate] = useState<Date>(new Date());
+  // Pivot que define qual SEMANA estamos vendo (Sempre começa no domingo)
+  const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 0 }));
 
-  // Gera os 7 dias a partir da pivotDate
+  // Gera os 7 dias da semana (Domingo a Sábado)
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
-      const d = addDays(pivotDate, i - 3); // Mostra 3 dias antes e 3 dias depois do pivot
+      const d = addDays(currentWeekStart, i);
       return {
         dateStr: format(d, "yyyy-MM-dd"),
-        label: format(d, "EEE", { locale: ptBR }),
+        label: format(d, "EEE", { locale: ptBR }), // Dom, Seg...
         fullLabel: format(d, "dd/MM (EEEE)", { locale: ptBR })
       };
     });
-  }, [pivotDate]);
+  }, [currentWeekStart]);
 
   const load = async () => {
     const [{ data: p }, { data: e }] = await Promise.all([
@@ -54,7 +54,7 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v4")
+    const ch = supabase.channel("op-schedule-v5")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -77,37 +77,37 @@ function OperationPlanningPage() {
         <div>
           <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90">
             <LayoutDashboard className="h-8 w-8 text-primary" />
-            Monitoramento
+            Central de Monitoramento
           </h1>
-          <p className="text-muted-foreground font-medium">Navegue pelas datas de parada</p>
+          <p className="text-muted-foreground font-medium uppercase text-[10px] tracking-widest">Controle de Paradas Agendadas</p>
         </div>
 
         <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-xl border">
-           <Button variant="ghost" size="icon" onClick={() => setPivotDate(subDays(pivotDate, 7))} className="h-9 w-9 rounded-lg">
+           <Button variant="ghost" size="icon" onClick={() => setCurrentWeekStart(subWeeks(currentWeekStart, 1))} className="h-9 w-9 rounded-lg">
              <ChevronLeft className="h-4 w-4" />
            </Button>
-           <div className="px-4 font-bold text-xs uppercase flex items-center gap-2">
-             <CalendarIcon className="h-4 w-4 opacity-40" />
-             {format(pivotDate, "MMMM yyyy", { locale: ptBR })}
+           <div className="px-4 font-black text-[10px] uppercase flex items-center gap-2">
+             <CalendarIcon className="h-3 w-3 opacity-40" />
+             Semana de {format(currentWeekStart, "dd/MM")} a {format(endOfWeek(currentWeekStart, { weekStartsOn: 0 }), "dd/MM")}
            </div>
-           <Button variant="ghost" size="icon" onClick={() => setPivotDate(addDays(pivotDate, 7))} className="h-9 w-9 rounded-lg">
+           <Button variant="ghost" size="icon" onClick={() => setCurrentWeekStart(addWeeks(currentWeekStart, 1))} className="h-9 w-9 rounded-lg">
              <ChevronRight className="h-4 w-4" />
            </Button>
-           <Button variant="secondary" onClick={() => setPivotDate(new Date())} className="h-9 px-3 text-[10px] font-black uppercase">Hoje</Button>
+           <Button variant="secondary" onClick={() => setCurrentWeekStart(startOfWeek(new Date(), { weekStartsOn: 0 }))} className="h-9 px-3 text-[9px] font-black uppercase">Hoje</Button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="bg-emerald-50 border-emerald-200 p-5 flex items-center justify-between">
-          <div><p className="text-[10px] font-black text-emerald-600 uppercase">Frota Operacional</p><h2 className="text-4xl font-black text-emerald-700">{stats.ready}</h2></div>
+          <div><p className="text-[9px] font-black text-emerald-600 uppercase">Frota Operacional</p><h2 className="text-4xl font-black text-emerald-700">{stats.ready}</h2></div>
           <Truck className="h-10 w-10 text-emerald-500 opacity-30" />
         </Card>
         <Card className="bg-orange-50 border-orange-200 p-5 flex items-center justify-between">
-          <div><p className="text-[10px] font-black text-orange-600 uppercase">Na Oficina</p><h2 className="text-4xl font-black text-orange-700">{stats.activeMaint}</h2></div>
+          <div><p className="text-[9px] font-black text-orange-600 uppercase">Em Oficina</p><h2 className="text-4xl font-black text-orange-700">{stats.activeMaint}</h2></div>
           <Wrench className="h-10 w-10 text-orange-500 opacity-30" />
         </Card>
         <Card className="bg-blue-50 border-blue-200 p-5 flex items-center justify-between">
-          <div><p className="text-[10px] font-black text-blue-600 uppercase">Agendamentos Totais</p><h2 className="text-4xl font-black text-blue-700">{stats.totalScheduled}</h2></div>
+          <div><p className="text-[9px] font-black text-blue-600 uppercase">Agendamentos</p><h2 className="text-4xl font-black text-blue-700">{stats.totalScheduled}</h2></div>
           <Clock className="h-10 w-10 text-blue-500 opacity-30" />
         </Card>
       </div>
@@ -116,13 +116,10 @@ function OperationPlanningPage() {
         <TabsList className="w-full h-14 bg-muted/50 p-1 rounded-xl">
           {weekDays.map(day => (
             <TabsTrigger key={day.dateStr} value={day.dateStr} className="flex-1 rounded-lg font-black uppercase text-[10px] flex flex-col gap-0.5 relative">
-              <span className={day.dateStr === format(new Date(), "yyyy-MM-dd") ? "text-primary" : ""}>{day.label}</span>
+              <span className={isSameDay(new Date(day.dateStr + "T12:00:00"), new Date()) ? "text-primary" : ""}>{day.label}</span>
               <span className="opacity-60">{day.dateStr.split('-').reverse().slice(0,2).join('/')}</span>
               {programming.filter(p => p.scheduled_date === day.dateStr).length > 0 && (
                 <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full border border-white" />
-              )}
-              {day.dateStr === format(new Date(), "yyyy-MM-dd") && (
-                <div className="absolute bottom-1 w-1 h-1 bg-primary rounded-full" />
               )}
             </TabsTrigger>
           ))}
@@ -132,12 +129,12 @@ function OperationPlanningPage() {
           <TabsContent key={day.dateStr} value={day.dateStr} className="mt-6">
             <div className="space-y-4">
               <h3 className="font-black uppercase text-sm flex items-center gap-2">
-                <CalendarIcon className="h-4 w-4 text-primary" /> Programação de {day.fullLabel}
+                <CalendarIcon className="h-4 w-4 text-primary" /> Planejamento de {day.fullLabel}
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {programming.filter(p => p.scheduled_date === day.dateStr).map(p => (
-                  <Card key={p.id} className="overflow-hidden border-2 hover:border-primary/30 transition-all">
+                  <Card key={p.id} className="overflow-hidden border-2 hover:border-primary/30 transition-all group">
                      <div className="h-1 bg-primary/20" />
                      <CardContent className="p-4 space-y-3">
                         <div className="flex justify-between items-start">
@@ -147,10 +144,10 @@ function OperationPlanningPage() {
                           </div>
                           <Badge className="bg-blue-600 text-[9px] font-black uppercase">{p.stop_type}</Badge>
                         </div>
-                        {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] italic text-muted-foreground">"{p.notes}"</div>}
+                        {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground border-l-2 border-primary">"{p.notes}"</div>}
                         <div className="pt-2 flex justify-between items-center border-t border-dashed">
                            <span className="text-[9px] font-black text-muted-foreground flex items-center gap-1 uppercase">
-                              <AlertCircle className="h-3 w-3" /> Programado
+                              <AlertCircle className="h-3 w-3" /> Agendado
                            </span>
                            <Button variant="ghost" size="icon" onClick={() => deleteSchedule(p.id)} className="h-7 w-7 text-red-500"><Trash2 className="h-4 w-4" /></Button>
                         </div>
@@ -159,7 +156,7 @@ function OperationPlanningPage() {
                 ))}
                 
                 {programming.filter(p => p.scheduled_date === day.dateStr).length === 0 && (
-                  <div className="col-span-full p-12 border-2 border-dashed rounded-3xl text-center text-muted-foreground/50 italic">
+                  <div className="col-span-full p-12 border-2 border-dashed rounded-3xl text-center text-muted-foreground/50 italic font-bold uppercase text-xs">
                     Nenhuma parada agendada para este dia.
                   </div>
                 )}

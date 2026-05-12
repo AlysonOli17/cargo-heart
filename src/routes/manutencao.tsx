@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Wrench, CheckCircle2, PlusCircle, Clock, Calendar as CalendarIcon, Tag, Check, ChevronsUpDown } from "lucide-react";
+import { Wrench, CheckCircle2, PlusCircle, Clock, Calendar as CalendarIcon, Tag, Check, ChevronsUpDown, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
@@ -14,13 +14,10 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/command"; // Fixed path
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-// Redefining local command if needed but better use correct imports
-import { Command as CommandUI, CommandInput as CommandInputUI, CommandItem as CommandItemUI, CommandList as CommandListUI, CommandEmpty as CommandEmptyUI, CommandGroup as CommandGroupUI } from "@/components/ui/command";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export const Route = createFileRoute("/manutencao")({
   head: () => ({ meta: [{ title: "CCO Manutenção — Frota Busato" }] }),
@@ -29,7 +26,9 @@ export const Route = createFileRoute("/manutencao")({
 
 type Equipment = {
   id: string; identifier: string; type: string | null; status: EquipmentStatus;
-  maintenance_problem: string | null; maintenance_started_at: string | null;
+  maintenance_problem: string | null; maintenance_started_at: string | null; maintenance_expected_return: string | null;
+  maintenance_priority: string | null; maintenance_responsible: string | null; maintenance_type: string | null;
+  updated_at: string;
 };
 
 const STOP_TYPES = ["Lavador", "Mola", "Borracharia", "Preventiva", "Manutenção Programada", "Elétrica", "Motor", "Solda"];
@@ -41,6 +40,7 @@ function MaintenancePage() {
   const [availableEqs, setAvailableEqs] = useState<{id: string, identifier: string}[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [mode, setMode] = useState<"now" | "schedule">("now");
+  const [searchQuery, setSearchQuery] = useState("");
   
   const [openCombo, setOpenCombo] = useState(false);
   const [selectedEqId, setSelectedEqId] = useState("");
@@ -64,7 +64,6 @@ function MaintenancePage() {
 
   const handleSubmit = async () => {
     if (!selectedEqId) { toast.error("Selecione o equipamento"); return; }
-
     if (mode === "now") {
       const { error } = await supabase.from("equipment").update({
         status: form.status,
@@ -78,140 +77,138 @@ function MaintenancePage() {
       const { error } = await supabase.from("programming").insert({
         equipment_id: selectedEqId,
         scheduled_date: form.scheduledDate,
-        day_of_week: "Calendário", // Legado
+        day_of_week: "Calendário",
         stop_type: form.stopType,
         notes: form.problem,
         owner_id: user?.id
       });
       if (!error) { toast.success("Agendamento realizado!"); setIsAdding(false); }
-      else toast.error(error.message);
     }
   };
 
   const release = async (id: string) => {
+    const rep = prompt("Relatório de liberação:");
+    if (rep === null) return;
     await supabase.from("equipment").update({ status: "operacional", maintenance_problem: null }).eq("id", id);
     load();
   };
 
+  const getDiasParado = (dateStr: string | null) => {
+    if (!dateStr) return 0;
+    const diff = new Date().getTime() - new Date(dateStr).getTime();
+    return Math.max(0, Math.floor(diff / (1000 * 3600 * 24)));
+  };
+
+  const filtered = items.filter(e => 
+    e.identifier.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (e.type || "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const grouped = filtered.reduce((acc, e) => {
+    const group = e.maintenance_type === "MEV" ? "MEV" : (e.type || "Geral");
+    if (!acc[group]) acc[group] = [];
+    acc[group].push(e);
+    return acc;
+  }, {} as Record<string, Equipment[]>);
+
+  const sortedGroups = Object.keys(grouped).sort((a, b) => a === "MEV" ? -1 : b === "MEV" ? 1 : a.localeCompare(b));
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter"><Wrench className="h-8 w-8 text-primary" /> Oficina CCO</h1>
-        <Dialog open={isAdding} onOpenChange={setIsAdding}>
-          <DialogTrigger asChild><Button className="font-bold shadow-lg"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
-          <DialogContent className="max-w-md">
-            <DialogHeader><DialogTitle className="font-black uppercase">Controle de Parada</DialogTitle></DialogHeader>
-            
-            <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
-              <TabsList className="grid grid-cols-2 w-full mb-4 h-12">
-                <TabsTrigger value="now" className="font-bold uppercase text-[10px]">PARAR AGORA</TabsTrigger>
-                <TabsTrigger value="schedule" className="font-bold uppercase text-[10px]">AGENDAR DATA</TabsTrigger>
-              </TabsList>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90">
+            <Wrench className="h-8 w-8 text-primary" /> CCO Manutenção
+          </h1>
+          <p className="text-muted-foreground font-medium italic">{items.length} máquinas em intervenção</p>
+        </div>
 
-              <div className="space-y-4">
-                <div className="flex flex-col space-y-2">
-                  <Label className="font-bold uppercase text-[10px]">Equipamento / Placa</Label>
-                  <Popover open={openCombo} onOpenChange={setOpenCombo}>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" role="combobox" className="w-full justify-between h-12 text-sm font-bold">
-                        {selectedEqId ? availableEqs.find(x => x.id === selectedEqId)?.identifier : "PESQUISAR PLACA..."}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                      <CommandUI>
-                        <CommandInputUI placeholder="Ex: EH-194..." />
-                        <CommandListUI>
-                          <CommandEmptyUI>Não encontrado.</CommandEmptyUI>
-                          <CommandGroupUI>
-                            {availableEqs.map((eq) => (
-                              <CommandItemUI key={eq.id} onSelect={() => { setSelectedEqId(eq.id); setOpenCombo(false); }}>
-                                <Check className={cn("mr-2 h-4 w-4", selectedEqId === eq.id ? "opacity-100" : "opacity-0")} />
-                                {eq.identifier}
-                              </CommandItemUI>
-                            ))}
-                          </CommandGroupUI>
-                        </CommandListUI>
-                      </CommandUI>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                {mode === "now" ? (
-                  <>
+        <div className="flex items-center gap-3">
+          <div className="relative hidden md:block">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Buscar placa..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9 h-10 w-48 rounded-xl border-none bg-muted/50" />
+          </div>
+          <Dialog open={isAdding} onOpenChange={setIsAdding}>
+            <DialogTrigger asChild><Button className="font-bold uppercase shadow-lg"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle className="font-black uppercase">Controle de Frota</DialogTitle></DialogHeader>
+              <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
+                <TabsList className="grid grid-cols-2 w-full mb-4 h-12">
+                  <TabsTrigger value="now" className="font-bold text-[10px]">PARAR AGORA</TabsTrigger>
+                  <TabsTrigger value="schedule" className="font-bold text-[10px]">AGENDAR PARADA</TabsTrigger>
+                </TabsList>
+                <div className="space-y-4">
+                  <div className="flex flex-col space-y-2">
+                    <Label className="text-[10px] font-black uppercase">Equipamento</Label>
+                    <Popover open={openCombo} onOpenChange={setOpenCombo}>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full justify-between h-12 font-bold">{selectedEqId ? availableEqs.find(x => x.id === selectedEqId)?.identifier : "PESQUISAR PLACA..."}<ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" /></Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                        <Command><CommandInput placeholder="Digite a placa..." /><CommandList><CommandEmpty>Não encontrado.</CommandEmpty><CommandGroup>
+                          {availableEqs.map((eq) => (<CommandItem key={eq.id} onSelect={() => { setSelectedEqId(eq.id); setOpenCombo(false); }}><Check className={cn("mr-2 h-4 w-4", selectedEqId === eq.id ? "opacity-100" : "opacity-0")} />{eq.identifier}</CommandItem>))}
+                        </CommandGroup></CommandList></Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  {mode === "now" ? (
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label className="font-bold uppercase text-[10px]">Status</Label>
-                        <Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}>
-                          <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="manutencao">Em Manutenção</SelectItem>
-                            <SelectItem value="indisponivel">Indisponível</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="font-bold uppercase text-[10px]">Prioridade</Label>
-                        <Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}>
-                          <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Média">Média</SelectItem>
-                            <SelectItem value="Crítica">Crítica</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Status</Label><Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manutencao">Manutenção</SelectItem><SelectItem value="indisponivel">Indisponível</SelectItem></SelectContent></Select></div>
+                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Prioridade</Label><Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Média">Média</SelectItem><SelectItem value="Crítica">Crítica</SelectItem></SelectContent></Select></div>
                     </div>
-                  </>
-                ) : (
-                  <>
+                  ) : (
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label className="font-bold uppercase text-[10px]">Data da Parada</Label>
-                        <Input type="date" className="h-10 font-bold" value={form.scheduledDate} onChange={(e) => setForm({...form, scheduledDate: e.target.value})} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="font-bold uppercase text-[10px]">Tipo de Parada</Label>
-                        <Select value={form.stopType} onValueChange={(v) => setForm({...form, stopType: v})}>
-                          <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {STOP_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Data</Label><Input type="date" value={form.scheduledDate} onChange={(e) => setForm({...form, scheduledDate: e.target.value})} className="h-10 font-bold" /></div>
+                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Tipo</Label><Select value={form.stopType} onValueChange={(v) => setForm({...form, stopType: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent>{STOP_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
                     </div>
-                  </>
-                )}
-                
-                <div className="space-y-2">
-                  <Label className="font-bold uppercase text-[10px]">Observações / Defeito</Label>
-                  <Textarea value={form.problem} onChange={(e) => setForm({...form, problem: e.target.value})} placeholder="Descreva o serviço..." className="text-sm" />
+                  )}
+                  <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Observações</Label><Textarea value={form.problem} onChange={(e) => setForm({...form, problem: e.target.value})} placeholder="Defeito relatado..." /></div>
+                  <Button onClick={handleSubmit} className="w-full h-12 font-black uppercase bg-primary text-white">CONFIRMAR REGISTRO</Button>
                 </div>
-
-                <Button onClick={handleSubmit} className="w-full h-12 font-black uppercase bg-primary text-white text-xs">
-                  {mode === "now" ? "CONFIRMAR ENTRADA" : "AGENDAR NO CALENDÁRIO"}
-                </Button>
-              </div>
-            </Tabs>
-          </DialogContent>
-        </Dialog>
+              </Tabs>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
-      <div className="space-y-4">
-        <h2 className="text-xl font-black border-b-2 pb-2 uppercase tracking-tighter">Veículos em Manutenção</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {items.map(e => (
-            <Card key={e.id} className="p-4 border-2 hover:border-primary/20 transition-all">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="font-mono font-black text-lg">{e.identifier}</p>
-                  <p className="text-[10px] font-bold text-muted-foreground uppercase">{e.maintenance_problem || 'Manutenção Ativa'}</p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => release(e.id)} className="font-black border-2 h-8 text-[10px]">LIBERAR</Button>
+      <div className="space-y-8">
+        {sortedGroups.map(group => (
+          <section key={group} className="animate-in fade-in duration-500">
+            <h2 className="text-lg font-black uppercase mb-3 flex items-center gap-2 border-b-2 pb-2 text-foreground/70">
+              <Tag className="h-4 w-4 text-primary" /> {group === 'MEV' ? 'Equipamentos em MEV' : `Frota: ${group}`}
+            </h2>
+            <Card className="overflow-hidden border shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left border-collapse">
+                  <thead className="bg-muted/50 text-[10px] uppercase font-black tracking-widest text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-4">Equipamento</th>
+                      <th className="px-4 py-4 min-w-[250px]">Problema</th>
+                      <th className="px-4 py-4 text-center">Início</th>
+                      <th className="px-4 py-4 text-center">Dias</th>
+                      <th className="px-4 py-4 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {grouped[group].map(e => (
+                      <tr key={e.id} className="hover:bg-muted/20 transition-colors">
+                        <td className="px-4 py-4"><p className="font-mono font-black text-base">{e.identifier}</p><p className="text-[9px] font-bold text-muted-foreground uppercase">{e.type}</p></td>
+                        <td className="px-4 py-4">
+                          <div className="bg-muted/30 p-2 rounded-lg text-xs font-medium border mb-1">{e.maintenance_problem || '—'}</div>
+                          <Badge variant={e.maintenance_priority === 'Crítica' ? 'destructive' : 'secondary'} className="text-[9px] font-bold">{e.maintenance_priority || 'Média'}</Badge>
+                        </td>
+                        <td className="px-4 py-4 text-center font-medium text-muted-foreground">{e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString('pt-BR') : '—'}</td>
+                        <td className="px-4 py-4 text-center"><span className="text-lg font-black">{getDiasParado(e.maintenance_started_at || e.updated_at)}</span></td>
+                        <td className="px-4 py-4 text-right"><Button variant="outline" size="sm" onClick={() => release(e.id)} className="font-black border-2 h-8 text-[10px]">LIBERAR</Button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </Card>
-          ))}
-          {items.length === 0 && <div className="col-span-full p-10 text-center text-muted-foreground italic border-2 border-dashed rounded-3xl uppercase text-xs font-bold">Oficina Vazia</div>}
-        </div>
+          </section>
+        ))}
+        {items.length === 0 && <div className="p-20 text-center border-2 border-dashed rounded-3xl text-muted-foreground italic uppercase font-bold">Oficina Vazia</div>}
       </div>
     </div>
   );
