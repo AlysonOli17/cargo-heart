@@ -1,532 +1,308 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { format, addDays, isSameDay, differenceInDays, isValid } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { CalendarIcon, ChevronLeft, ChevronRight, Activity, UserPlus, History } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { cn } from "@/lib/utils";
+import { Activity, Calendar, LayoutDashboard, PlusCircle, Truck, Users, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useRole } from "@/hooks/use-role";
 import { toast } from "sonner";
-import { STATUS_LABELS, STATUS_COLORS, type EquipmentStatus } from "@/lib/equipment";
+import { Progress } from "@/components/ui/progress";
 
 export const Route = createFileRoute("/operacao")({
-  head: () => ({ meta: [{ title: "Operação ao vivo — Disponibilidade Frota Busato" }] }),
-  component: () => <AppLayout><OperationPage /></AppLayout>,
+  head: () => ({ meta: [{ title: "Central de Programação — Frota Busato" }] }),
+  component: () => <AppLayout><OperationPlanningPage /></AppLayout>,
 });
 
+type Programming = {
+  id: string;
+  day_of_week: string;
+  client_name: string;
+  equipment_type: string;
+  quantity_needed: number;
+  quantity_allocated: number;
+};
+
 type Equipment = {
-  id: string; identifier: string; type?: string | null; status: EquipmentStatus; current_client_id: string | null;
-  maintenance_problem: string | null; maintenance_expected_return: string | null;
-  maintenance_type: string | null; maintenance_location: string | null; maintenance_started_at: string | null;
-  notes?: string | null;
-};
-type Client = { id: string; name: string };
-
-const safeFormat = (date: Date | null, formatStr: string) => {
-  if (!date || !isValid(date)) return "—";
-  try {
-    return format(date, formatStr, { locale: ptBR });
-  } catch (e) {
-    return "—";
-  }
+  id: string; identifier: string; type: string | null; status: string; current_client_id: string | null;
 };
 
-function OperationPage() {
+const DAYS = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
+
+function OperationPlanningPage() {
   const { user } = useAuth();
-  const { isAdmin, canWrite } = useRole();
-  const [date, setDate] = useState<Date>(new Date());
+  const [programming, setProgramming] = useState<Programming[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [maintStartedAt, setMaintStartedAt] = useState<Record<string, string>>({});
-  const today = isSameDay(date, new Date());
-  const [requestEq, setRequestEq] = useState<Equipment | null>(null);
-  const [reqClient, setReqClient] = useState("");
-  const [reqNotes, setReqNotes] = useState("");
-  const [isReplace, setIsReplace] = useState(false);
-  const [replacePlate, setReplacePlate] = useState("");
-  const [replaceReason, setReplaceReason] = useState("");
-  const [clientOpen, setClientOpen] = useState(false);
-  const [maintEqDetails, setMaintEqDetails] = useState<Equipment | null>(null);
-
-  const [dayMovements, setDayMovements] = useState<any[]>([]);
+  const [isAdding, setIsAdding] = useState(false);
+  
+  const [newPlan, setNewPlan] = useState({
+    day: "Segunda",
+    client: "",
+    type: "CAMINHÃO BASCULANTE",
+    qty: 1
+  });
 
   const load = async () => {
-    const [{ data: e }, { data: c }] = await Promise.all([
-      supabase.from("equipment").select(`
-        id, identifier, type, status, current_client_id, 
-        maintenance_problem, maintenance_expected_return, 
-        maintenance_type, maintenance_location, maintenance_started_at, 
-        notes
-      `),
-      supabase.from("clients").select("id,name"),
+    const [{ data: p }, { data: e }] = await Promise.all([
+      supabase.from("programming").select("*"),
+      supabase.from("equipment").select("id, identifier, type, status, current_client_id")
     ]);
+    setProgramming((p ?? []) as Programming[]);
     setEquipment((e ?? []) as Equipment[]);
-    setClients((c ?? []) as Client[]);
-    
-    const maintMap: Record<string, string> = {};
-    (e ?? []).forEach((eq: any) => {
-      if (eq.status === "manutencao" && eq.maintenance_started_at) {
-        maintMap[eq.id] = eq.maintenance_started_at;
-      }
-    });
-    setMaintStartedAt(maintMap);
-  };
-
-  const loadDayMovements = async (selectedDate: Date) => {
-    const start = new Date(selectedDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(selectedDate);
-    end.setHours(23, 59, 59, 999);
-
-    const { data } = await supabase
-      .from("movements")
-      .select(`
-        id, created_at, from_status, to_status, notes,
-        equipment:equipment_id(identifier, type),
-        from_client:from_client_id(name),
-        to_client:to_client_id(name)
-      `)
-      .gte("created_at", start.toISOString())
-      .lte("created_at", end.toISOString())
-      .order("created_at", { ascending: false });
-    
-    setDayMovements(data || []);
   };
 
   useEffect(() => {
     if (!user) return;
     load();
-    loadDayMovements(date);
-    
-    if (!today) return;
-    const ch = supabase.channel(`ops-${date.toDateString()}`)
+    const ch = supabase.channel("op-planning")
+      .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "clients" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [user, date]);
+  }, [user]);
 
-  const byClient = useMemo(() => {
-    return clients
-      .map((c) => ({
-        client: c,
-        items: equipment.filter((e) => e.current_client_id === c.id && e.status !== "manutencao"),
-      }))
-      .sort((a, b) => b.items.length - a.items.length);
-  }, [clients, equipment]);
-
-  const inMaintenance = useMemo(
-    () => equipment
-      .filter((e) => e.status === "manutencao")
-      .sort((a, b) => (maintStartedAt[b.id] ?? "").localeCompare(maintStartedAt[a.id] ?? "")),
-    [equipment, maintStartedAt]
-  );
-
-  const available = useMemo(
-    () => equipment.filter((e) => e.status === "disponivel"),
-    [equipment]
-  );
-
-  const submitRequest = async () => {
-    if (!requestEq || !reqClient || !user) return;
-    if (isReplace && (!replacePlate.trim() || !replaceReason.trim())) {
-      toast.error("Informe a placa substituída e o motivo");
-      return;
-    }
-    const { error } = await supabase.from("equipment_requests").insert({
-      equipment_id: requestEq.id, client_id: reqClient,
-      requested_by: user.id, owner_id: user.id, notes: reqNotes || null,
-      is_replacement: isReplace,
-      replacement_plate: isReplace ? replacePlate.trim() : null,
-      replacement_reason: isReplace ? replaceReason.trim() : null,
+  const addProgramming = async () => {
+    if (!newPlan.client || newPlan.qty <= 0) return;
+    const { error } = await supabase.from("programming").insert({
+      day_of_week: newPlan.day,
+      client_name: newPlan.client,
+      equipment_type: newPlan.type,
+      quantity_needed: newPlan.qty,
+      owner_id: user?.id
     });
-    if (error) toast.error(error.message);
-    else {
-      toast.success("Solicitação enviada — aguardando aprovação");
-      setRequestEq(null); setReqClient(""); setReqNotes("");
-      setIsReplace(false); setReplacePlate(""); setReplaceReason("");
+    if (!error) {
+      toast.success("Programação adicionada");
+      setIsAdding(false);
+      load();
     }
   };
 
+  // Cálculos de Demanda vs Disponibilidade
+  const stats = useMemo(() => {
+    const totalAvailable = equipment.filter(e => e.status === 'disponivel' || e.status === 'operacional').length;
+    const totalNeeded = programming.reduce((acc, p) => acc + p.quantity_needed, 0);
+    const types = Array.from(new Set(equipment.map(e => e.type).filter(Boolean)));
+    
+    return {
+      totalAvailable,
+      totalNeeded,
+      gap: totalNeeded - totalAvailable,
+      byType: types.map(t => ({
+        type: t,
+        available: equipment.filter(e => e.type === t && (e.status === 'disponivel' || e.status === 'operacional')).length,
+        needed: programming.filter(p => p.equipment_type === t).reduce((acc, p) => acc + p.quantity_needed, 0)
+      }))
+    };
+  }, [equipment, programming]);
+
   return (
-    !user ? null :
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6 animate-in fade-in duration-700">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Activity className="h-7 w-7 text-primary" />
-            Operação
+          <h1 className="text-3xl font-black tracking-tight flex items-center gap-2 uppercase">
+            <LayoutDashboard className="h-8 w-8 text-primary" />
+            Central de Programação
           </h1>
-          <p className="text-muted-foreground flex items-center gap-2 mt-1">
-            {today ? (
-              <><span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.18_150)] animate-pulse" />Ao vivo</>
-            ) : (
-              <>Visualizando {safeFormat(date, "dd 'de' MMMM 'de' yyyy")}</>
-            )}
-          </p>
+          <p className="text-muted-foreground font-medium">Monitoramento de Demanda e Alocação Semanal</p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {isAdmin && (
-            <Button variant="outline" onClick={() => setClientOpen(true)}>
-              <UserPlus className="h-4 w-4 mr-2" />Cadastrar cliente
+        <Dialog open={isAdding} onOpenChange={setIsAdding}>
+          <DialogTrigger asChild>
+            <Button className="bg-primary hover:bg-primary/90 font-bold shadow-lg">
+              <PlusCircle className="h-4 w-4 mr-2" />
+              Nova Programação
             </Button>
-          )}
-          <Button variant="outline" size="icon" onClick={() => setDate(addDays(date, -1))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="min-w-[200px] justify-start">
-                <CalendarIcon className="h-4 w-4 mr-2" />
-                {safeFormat(date, "dd 'de' MMM, yyyy")}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
-              <Calendar mode="single" selected={date} onSelect={(d) => d && setDate(d)}
-                disabled={(d) => d > new Date()} initialFocus
-                locale={ptBR}
-                className={cn("p-3 pointer-events-auto")} />
-            </PopoverContent>
-          </Popover>
-          <Button variant="outline" size="icon" disabled={today}
-            onClick={() => setDate(addDays(date, 1))}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          {!today && <Button variant="secondary" onClick={() => setDate(new Date())}>Hoje</Button>}
-        </div>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Programar Demanda</DialogTitle></DialogHeader>
+            <div className="space-y-4 pt-4">
+               <div>
+                 <Label>Dia da Semana</Label>
+                 <Select value={newPlan.day} onValueChange={(v) => setNewPlan({...newPlan, day: v})}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {DAYS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                    </SelectContent>
+                 </Select>
+               </div>
+               <div>
+                 <Label>Cliente / Frente de Trabalho</Label>
+                 <Input value={newPlan.client} onChange={(e) => setNewPlan({...newPlan, client: e.target.value})} placeholder="Ex: Obra BR-101" />
+               </div>
+               <div className="grid grid-cols-2 gap-3">
+                 <div>
+                   <Label>Tipo de Equipamento</Label>
+                   <Select value={newPlan.type} onValueChange={(v) => setNewPlan({...newPlan, type: v})}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CAMINHÃO BASCULANTE">Caminhão Basculante</SelectItem>
+                        <SelectItem value="CAMINHÃO PIPA">Caminhão Pipa</SelectItem>
+                        <SelectItem value="RETROESCAVADEIRA">Retroescavadeira</SelectItem>
+                        <SelectItem value="CARREGADEIRA">Carregadeira</SelectItem>
+                      </SelectContent>
+                   </Select>
+                 </div>
+                 <div>
+                   <Label>Quantidade Necessária</Label>
+                   <Input type="number" value={newPlan.qty} onChange={(e) => setNewPlan({...newPlan, qty: Number(e.target.value)})} />
+                 </div>
+               </div>
+               <Button onClick={addProgramming} className="w-full font-bold">SALVAR PROGRAMAÇÃO</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      {!today && (
-        <Card className="p-6 border-[oklch(0.65_0.2_50)]/20 shadow-sm">
-          <h2 className="font-semibold mb-6 text-xl flex items-center gap-2">
-            <History className="h-5 w-5" /> Atividades do dia {safeFormat(date, "dd/MM/yyyy")}
-          </h2>
-          {dayMovements.length === 0 ? (
-            <p className="text-center text-muted-foreground py-10 bg-muted/30 rounded-lg border border-dashed">
-              Nenhuma movimentação registrada neste dia.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {dayMovements.map(m => (
-                <div key={m.id} className="border-l-4 border-primary pl-4 py-3 bg-muted/20 rounded-r-lg hover:bg-muted/40 transition-colors">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-mono font-bold text-base">{m.equipment?.identifier || "Equipamento deletado"}</span>
-                    <span className="text-sm font-medium text-muted-foreground">{safeFormat(new Date(m.created_at), "HH:mm")}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    {m.from_status && <span className="line-through opacity-60">{STATUS_LABELS[m.from_status as EquipmentStatus]}</span>}
-                    {m.from_status && <span className="text-muted-foreground">→</span>}
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${STATUS_COLORS[m.to_status as EquipmentStatus]}`}>
-                      {STATUS_LABELS[m.to_status as EquipmentStatus]}
-                    </span>
-                  </div>
-                  {(m.from_client?.name || m.to_client?.name) && (
-                    <div className="text-sm mt-3 flex items-center gap-2 bg-background p-2 rounded border">
-                      {m.from_client?.name && <span className="font-medium text-muted-foreground">De: <span className="text-foreground">{m.from_client.name}</span></span>}
-                      {m.from_client?.name && m.to_client?.name && <span className="text-muted-foreground mx-1">→</span>}
-                      {m.to_client?.name && <span className="font-medium text-muted-foreground">Para: <span className="text-foreground">{m.to_client.name}</span></span>}
-                    </div>
-                  )}
-                  {m.notes && (
-                    <p className="text-sm mt-3 text-foreground/80 italic border-l-2 pl-3 border-[oklch(0.65_0.18_150)]/50">
-                      "{m.notes}"
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+      {/* PAINEL DE MONITORAMENTO (KPIs) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card className="bg-primary/5 border-primary/20">
+          <CardContent className="p-6">
+             <div className="flex justify-between items-start">
+               <div>
+                 <p className="text-xs font-black text-primary uppercase">Demanda Total</p>
+                 <h2 className="text-4xl font-black">{stats.totalNeeded}</h2>
+                 <p className="text-[10px] text-muted-foreground mt-1">Máquinas programadas para a semana</p>
+               </div>
+               <Users className="h-8 w-8 text-primary/40" />
+             </div>
+          </CardContent>
         </Card>
-      )}
 
-      {today && (
-        <Card className="p-4 border-[oklch(0.65_0.18_150)]/40">
-          <h2 className="font-semibold mb-4 flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.18_150)]" />
-            Equipamentos disponíveis
-            <span className="ml-auto text-xs text-muted-foreground">
-              {available.length}
-            </span>
-          </h2>
-          {available.length === 0 ? (
-            <p className="text-center text-muted-foreground py-6 text-sm">
-              Nenhum equipamento disponível.
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-              {available.map((e) => (
-                <button key={e.id} type="button" disabled={!canWrite}
-                  onClick={() => setRequestEq(e)}
-                  className="px-3 py-2 rounded bg-[oklch(0.65_0.18_150)]/10 border border-[oklch(0.65_0.18_150)]/30 text-sm font-mono text-center hover:bg-[oklch(0.65_0.18_150)]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                  {e.identifier}
-                </button>
-              ))}
-            </div>
-          )}
+        <Card className="bg-emerald-50 border-emerald-200">
+          <CardContent className="p-6">
+             <div className="flex justify-between items-start">
+               <div>
+                 <p className="text-xs font-black text-emerald-600 uppercase">Disponível Agora</p>
+                 <h2 className="text-4xl font-black text-emerald-700">{stats.totalAvailable}</h2>
+                 <p className="text-[10px] text-emerald-600/70 mt-1">Frota pronta para trabalho (Verde)</p>
+               </div>
+               <Truck className="h-8 w-8 text-emerald-500/40" />
+             </div>
+          </CardContent>
         </Card>
-      )}
 
-      {today && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <Card className="p-4 lg:col-span-2">
-            <h2 className="font-semibold mb-4">Operação por cliente</h2>
-            {byClient.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8 text-sm">
-                Nenhum cliente cadastrado.
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {byClient.map(({ client, items }) => (
-                  <div key={client.id} className="border rounded-lg overflow-hidden">
-                    <div className="bg-muted/60 px-3 py-2 text-center font-semibold text-sm uppercase tracking-wide border-b">
-                      {client.name}
-                    </div>
-                    <div className="p-3 min-h-[80px]">
-                      {items.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center italic py-2">
-                          Sem equipamentos
-                        </p>
-                      ) : (
-                        <ul className="space-y-1">
-                          {items.map((e) => (
-                            <li key={e.id} className="text-sm font-mono flex items-center gap-2">
-                              <span className="text-primary">*</span>
-                              <span>{e.identifier}</span>
-                              {e.status === "em_atendimento" && (
-                                <StatusPill s={e.status} />
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
+        <Card className={stats.gap > 0 ? "bg-red-50 border-red-200" : "bg-blue-50 border-blue-200"}>
+          <CardContent className="p-6">
+             <div className="flex justify-between items-start">
+               <div>
+                 <p className="text-xs font-black text-foreground/70 uppercase">Necessidade Crítica</p>
+                 <h2 className={`text-4xl font-black ${stats.gap > 0 ? "text-red-700" : "text-blue-700"}`}>
+                   {stats.gap > 0 ? stats.gap : 0}
+                 </h2>
+                 <p className="text-[10px] text-muted-foreground mt-1">Caminhões faltando para fechar a escala</p>
+               </div>
+               <AlertCircle className="h-8 w-8 opacity-40" />
+             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* QUADRO SEMANAL */}
+      <Tabs defaultValue="Segunda" className="w-full">
+        <TabsList className="w-full h-14 bg-muted/50 p-1 rounded-xl">
+          {DAYS.map(day => (
+            <TabsTrigger key={day} value={day} className="flex-1 rounded-lg font-bold uppercase text-[10px]">
+              {day}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {DAYS.map(day => (
+          <TabsContent key={day} value={day} className="mt-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* COLUNA: PROGRAMAÇÃO DO DIA */}
+              <div className="lg:col-span-2 space-y-4">
+                <h3 className="font-black uppercase text-sm flex items-center gap-2">
+                  <Calendar className="h-4 w-4" /> Planejamento para {day}
+                </h3>
+                {programming.filter(p => p.day_of_week === day).length === 0 ? (
+                  <div className="p-10 border-2 border-dashed rounded-2xl text-center text-muted-foreground">
+                    Nenhuma programação para este dia. Clique em "Nova Programação".
                   </div>
-                ))}
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {programming.filter(p => p.day_of_week === day).map(p => {
+                      const availableForType = stats.byType.find(t => t.type === p.equipment_type)?.available || 0;
+                      const isComplete = availableForType >= p.quantity_needed;
+                      
+                      return (
+                        <Card key={p.id} className="overflow-hidden border-2">
+                           <div className={`h-1.5 ${isComplete ? "bg-emerald-500" : "bg-orange-500"}`} />
+                           <CardContent className="p-4 space-y-3">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <h4 className="font-black text-base uppercase leading-none">{p.client_name}</h4>
+                                  <p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{p.equipment_type}</p>
+                                </div>
+                                <Badge variant={isComplete ? "default" : "outline"} className={isComplete ? "bg-emerald-500" : "text-orange-600 border-orange-200"}>
+                                  {isComplete ? "COBERTO" : "FALTA EQUIP."}
+                                </Badge>
+                              </div>
+                              
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-[10px] font-black uppercase">
+                                   <span>Progresso de Alocação</span>
+                                   <span>{availableForType} / {p.quantity_needed}</span>
+                                </div>
+                                <Progress value={(availableForType / p.quantity_needed) * 100} className="h-2" />
+                              </div>
+
+                              <div className="flex items-center gap-2 pt-2 text-[10px] font-bold text-muted-foreground">
+                                 {isComplete ? (
+                                   <><CheckCircle2 className="h-3 w-3 text-emerald-500" /> Frota disponível suficiente</>
+                                 ) : (
+                                   <><AlertCircle className="h-3 w-3 text-orange-500" /> Providenciar mais {p.quantity_needed - availableForType} unidades</>
+                                 )}
+                              </div>
+                           </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </Card>
 
-          <Card className="p-4 border-[oklch(0.65_0.2_50)]/40">
-            <h2 className="font-semibold mb-4 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.2_50)]" />
-              Em manutenção
-              <span className="ml-auto text-xs text-muted-foreground">
-                {inMaintenance.length}
-              </span>
-            </h2>
-            {inMaintenance.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8 text-sm">
-                Nenhum equipamento em manutenção.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {inMaintenance.map((e) => (
-                  <li key={e.id} 
-                    onClick={() => setMaintEqDetails(e)}
-                    className="text-sm px-2 py-2 rounded bg-[oklch(0.65_0.2_50)]/10 space-y-1 cursor-pointer hover:bg-[oklch(0.65_0.2_50)]/20 transition-colors border border-transparent hover:border-[oklch(0.65_0.2_50)]/30">
-                    <div className="flex items-center gap-2 font-mono">
-                      <span className="text-[oklch(0.6_0.2_50)]">*</span>
-                      <span className="font-semibold">{e.identifier}</span>
-                      {maintStartedAt[e.id] && (
-                        <span className="ml-auto text-[10px] text-muted-foreground font-sans">
-                          desde {safeFormat(new Date(maintStartedAt[e.id]), "dd/MM/yyyy")}
-                        </span>
-                      )}
+              {/* COLUNA: PRONTIDÃO (SIDEBAR) */}
+              <div className="space-y-4">
+                <h3 className="font-black uppercase text-sm flex items-center gap-2">
+                  <Truck className="h-4 w-4" /> Pátio Próximo (Livres)
+                </h3>
+                <Card className="bg-muted/30 border-none shadow-none">
+                  <CardContent className="p-4">
+                    <div className="space-y-4">
+                      {stats.byType.map(t => (
+                        <div key={t.type} className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-black uppercase text-muted-foreground">{t.type}</span>
+                            <Badge variant="secondary" className="text-[9px] font-black">{t.available} OK</Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {equipment
+                              .filter(e => e.type === t.type && (e.status === 'disponivel' || e.status === 'operacional'))
+                              .map(e => (
+                                <div key={e.id} className="px-2 py-1 bg-white border rounded text-[9px] font-bold shadow-sm">
+                                  {e.identifier}
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="text-xs text-foreground/80 pl-4">
-                      <span className="font-medium">Problema:</span>{" "}
-                      {e.maintenance_problem || <span className="italic text-muted-foreground">não informado</span>}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
-      )}
+                  </CardContent>
+                </Card>
+              </div>
 
-      <Dialog open={!!requestEq} onOpenChange={(o) => !o && setRequestEq(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Solicitar — {requestEq?.identifier}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>Cliente *</Label>
-              <Select value={reqClient} onValueChange={setReqClient}>
-                <SelectTrigger><SelectValue placeholder="Selecione um cliente" /></SelectTrigger>
-                <SelectContent>
-                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
             </div>
-            <div className="flex items-center gap-2 pt-1">
-              <Checkbox id="rep" checked={isReplace} onCheckedChange={(v) => setIsReplace(!!v)} />
-              <Label htmlFor="rep" className="cursor-pointer">É substituição de outro equipamento?</Label>
-            </div>
-            {isReplace && (
-              <>
-                <div>
-                  <Label>Placa / identificação substituída *</Label>
-                  <Input value={replacePlate} onChange={(e) => setReplacePlate(e.target.value)} placeholder="Ex: ABC-1234" />
-                </div>
-                <div>
-                  <Label>Motivo da substituição *</Label>
-                  <Textarea value={replaceReason} onChange={(e) => setReplaceReason(e.target.value)} placeholder="Justifique a substituição..." />
-                </div>
-              </>
-            )}
-            <div>
-              <Label>Observação</Label>
-              <Textarea value={reqNotes} onChange={(e) => setReqNotes(e.target.value)} placeholder="Opcional" />
-            </div>
-            <Button onClick={submitRequest} disabled={!reqClient} className="w-full">Enviar solicitação</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={clientOpen} onOpenChange={setClientOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Novo cliente</DialogTitle></DialogHeader>
-          <ClientForm userId={user!.id} onDone={() => setClientOpen(false)} />
-        </DialogContent>
-      </Dialog>
-
-      <MaintDetailsDialog 
-        eq={maintEqDetails} 
-        open={!!maintEqDetails} 
-        onOpenChange={(o) => !o && setMaintEqDetails(null)} 
-      />
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
-  );
-}
-
-function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; open: boolean; onOpenChange: (open: boolean) => void }) {
-  if (!eq) return null;
-  
-  const startDate = eq.maintenance_started_at ? new Date(eq.maintenance_started_at) : null;
-  const daysStopped = (startDate && isValid(startDate)) ? differenceInDays(new Date(), startDate) : 0;
-  
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-xl">
-            <span className="h-2 w-2 rounded-full bg-[oklch(0.6_0.2_50)]" />
-            Detalhes da Manutenção
-          </DialogTitle>
-        </DialogHeader>
-        
-        <div className="space-y-4 pt-4">
-          <div className="grid grid-cols-2 gap-4 pb-4 border-b">
-            <div>
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Equipamento</p>
-              <p className="font-mono font-bold text-lg">{eq.identifier}</p>
-              <p className="text-sm text-muted-foreground">{eq.type || "Sem tipo"}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Status Atual</p>
-              <StatusPill s={eq.status} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-muted/30 p-3 rounded-lg border">
-              <p className="text-xs text-muted-foreground font-medium mb-1">Tipo</p>
-              <p className="font-semibold text-sm">{eq.maintenance_type || "Não informado"}</p>
-            </div>
-            <div className="bg-muted/30 p-3 rounded-lg border">
-              <p className="text-xs text-muted-foreground font-medium mb-1">Local</p>
-              <p className="font-semibold text-sm">{eq.maintenance_location || "Não informado"}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-muted/30 p-3 rounded-lg border">
-              <p className="text-xs text-muted-foreground font-medium mb-1">Data de Início</p>
-              <p className="font-semibold text-sm">
-                {safeFormat(startDate, "dd/MM/yyyy")}
-              </p>
-            </div>
-            <div className={`p-3 rounded-lg border ${daysStopped > 5 ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400" : "bg-muted/30"}`}>
-              <p className="text-xs opacity-70 font-medium mb-1">Tempo Parado</p>
-              <p className="font-semibold text-sm">
-                {startDate && isValid(startDate) ? `${daysStopped} dia${daysStopped !== 1 ? 's' : ''}` : "—"}
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-muted/30 p-3 rounded-lg border mt-2">
-             <p className="text-xs text-muted-foreground font-medium mb-1">Previsão de Retorno</p>
-             <p className="font-semibold text-sm">
-               {eq.maintenance_expected_return 
-                  ? safeFormat(new Date(eq.maintenance_expected_return + "T00:00:00"), "dd/MM/yyyy") 
-                  : "—"}
-             </p>
-          </div>
-
-          <div className="pt-2">
-            <p className="text-xs text-muted-foreground font-medium mb-2">Problema Relatado</p>
-            <div className="bg-background border p-3 rounded-md text-sm whitespace-pre-wrap">
-              {eq.maintenance_problem || <span className="italic text-muted-foreground">Nenhum problema relatado.</span>}
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function StatusPill({ s }: { s: EquipmentStatus }) {
-  return (
-    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s]}`}>
-      {STATUS_LABELS[s]}
-    </span>
-  );
-}
-
-function ClientForm({ userId, onDone }: { userId: string; onDone: () => void }) {
-  const [form, setForm] = useState({
-    name: "", contact_name: "", phone: "", email: "", document: "", address: "", notes: "",
-  });
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await supabase.from("clients").insert({ ...form, owner_id: userId });
-    setLoading(false);
-    if (error) toast.error(error.message);
-    else { toast.success("Cliente cadastrado"); onDone(); }
-  };
-
-  return (
-    <form onSubmit={submit} className="space-y-3">
-      <div><Label>Nome *</Label><Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-      <div className="grid grid-cols-2 gap-3">
-        <div><Label>Contato</Label><Input value={form.contact_name} onChange={(e) => setForm({ ...form, contact_name: e.target.value })} /></div>
-        <div><Label>Telefone</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-        <div><Label>Documento</Label><Input value={form.document} onChange={(e) => setForm({ ...form, document: e.target.value })} /></div>
-      </div>
-      <div><Label>Endereço</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
-      <div><Label>Observações</Label><Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
-      <Button type="submit" className="w-full" disabled={loading}>{loading ? "Salvando..." : "Salvar"}</Button>
-    </form>
   );
 }
