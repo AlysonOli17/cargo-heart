@@ -70,13 +70,25 @@ function MaintenancePage() {
   });
 
   const load = async () => {
-    // Filtro ampliado: mostra TUDO que não for operacional ou que tenha problema de manutenção
-    const { data } = await supabase
+    // TESTE RADICAL: Busca TODOS os equipamentos sem filtro nenhum
+    const { data, error } = await supabase
       .from("equipment")
       .select("*")
-      .or("status.not.in.(operacional,disponivel),maintenance_problem.not.is.null")
       .order("updated_at", { ascending: false });
-    setItems((data ?? []) as Equipment[]);
+      
+    if (error) {
+      console.error("Erro ao carregar:", error);
+      toast.error("Erro ao carregar dados do banco");
+      return;
+    }
+
+    // Filtra no código para ter certeza absoluta
+    const filtered = (data ?? []).filter(e => 
+      ['manutencao', 'indisponivel', 'finalizacao', 'programado'].includes(e.status) ||
+      e.maintenance_problem !== null
+    );
+
+    setItems(filtered as Equipment[]);
 
     const { data: av } = await supabase
       .from("equipment")
@@ -88,7 +100,7 @@ function MaintenancePage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("manut-refresh")
+    const ch = supabase.channel("manut-global")
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -113,12 +125,7 @@ function MaintenancePage() {
         maintenance_type: newMaint.m_type,
         maintenance_expected_return: newMaint.expected_return || null,
         maintenance_started_at: newMaint.started_at ? newMaint.started_at + "T12:00:00Z" : new Date().toISOString(),
-        is_preventive_overdue: newMaint.preventive_overdue,
-        notes: JSON.stringify({
-          maintenance_location: newMaint.location,
-          maintenance_start_date: newMaint.started_at,
-          maintenance_type: newMaint.m_type
-        })
+        is_preventive_overdue: newMaint.preventive_overdue
       })
       .eq("id", newMaint.equipment_id);
 
@@ -127,10 +134,10 @@ function MaintenancePage() {
         equipment_id: newMaint.equipment_id,
         to_status: newMaint.status,
         from_status: "operacional",
-        notes: `Entrada Oficina: ${newMaint.problem}`,
+        notes: `CCO Entry: ${newMaint.problem}`,
         owner_id: user.id
       });
-      toast.success("Registrado com sucesso");
+      toast.success("Salvo com sucesso");
       setIsAdding(false);
       load();
     } else {
@@ -155,8 +162,7 @@ function MaintenancePage() {
         maintenance_location: null,
         maintenance_expected_return: null,
         maintenance_started_at: null,
-        is_preventive_overdue: false,
-        notes: null
+        is_preventive_overdue: false
       })
       .eq("id", eq.id);
 
@@ -183,7 +189,6 @@ function MaintenancePage() {
     } catch (e) { return 0; }
   };
 
-  // Agrupamento Híbrido: MEV primeiro, depois por Tipo
   const grouped = items.reduce((acc, e) => {
     const groupName = e.maintenance_type === "MEV" ? "MEV" : (e.type || "Geral");
     if (!acc[groupName]) acc[groupName] = [];
@@ -301,7 +306,7 @@ function MaintenancePage() {
       </div>
 
       {sortedGroups.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground italic border-dashed">Nenhuma máquina em oficina.</Card>
+        <Card className="p-10 text-center text-muted-foreground italic border-dashed">Nenhuma máquina em oficina no momento.</Card>
       ) : (
         <div className="space-y-8">
           {sortedGroups.map(groupName => (
