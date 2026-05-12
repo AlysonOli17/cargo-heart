@@ -5,11 +5,11 @@ import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button"; // Corrigido: Importação do Button adicionada
-import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
-import { format, addDays, startOfDay } from "date-fns";
+import { format, addDays, startOfDay, subDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/operacao")({
@@ -26,18 +26,21 @@ function OperationPlanningPage() {
   const { user } = useAuth();
   const [programming, setProgramming] = useState<Programming[]>([]);
   const [equipment, setEquipment] = useState<any[]>([]);
+  
+  // Estado para controlar o início da semana visualizada
+  const [pivotDate, setPivotDate] = useState<Date>(new Date());
 
-  // Gera os próximos 7 dias para as abas
+  // Gera os 7 dias a partir da pivotDate
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
-      const d = addDays(new Date(), i);
+      const d = addDays(pivotDate, i - 3); // Mostra 3 dias antes e 3 dias depois do pivot
       return {
         dateStr: format(d, "yyyy-MM-dd"),
-        label: format(d, "EEE", { locale: ptBR }), // Seg, Ter...
+        label: format(d, "EEE", { locale: ptBR }),
         fullLabel: format(d, "dd/MM (EEEE)", { locale: ptBR })
       };
     });
-  }, []);
+  }, [pivotDate]);
 
   const load = async () => {
     const [{ data: p }, { data: e }] = await Promise.all([
@@ -51,7 +54,7 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v3")
+    const ch = supabase.channel("op-schedule-v4")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -74,9 +77,23 @@ function OperationPlanningPage() {
         <div>
           <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90">
             <LayoutDashboard className="h-8 w-8 text-primary" />
-            Central de Monitoramento
+            Monitoramento
           </h1>
-          <p className="text-muted-foreground font-medium">Controle de Paradas por Calendário</p>
+          <p className="text-muted-foreground font-medium">Navegue pelas datas de parada</p>
+        </div>
+
+        <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-xl border">
+           <Button variant="ghost" size="icon" onClick={() => setPivotDate(subDays(pivotDate, 7))} className="h-9 w-9 rounded-lg">
+             <ChevronLeft className="h-4 w-4" />
+           </Button>
+           <div className="px-4 font-bold text-xs uppercase flex items-center gap-2">
+             <CalendarIcon className="h-4 w-4 opacity-40" />
+             {format(pivotDate, "MMMM yyyy", { locale: ptBR })}
+           </div>
+           <Button variant="ghost" size="icon" onClick={() => setPivotDate(addDays(pivotDate, 7))} className="h-9 w-9 rounded-lg">
+             <ChevronRight className="h-4 w-4" />
+           </Button>
+           <Button variant="secondary" onClick={() => setPivotDate(new Date())} className="h-9 px-3 text-[10px] font-black uppercase">Hoje</Button>
         </div>
       </div>
 
@@ -95,14 +112,17 @@ function OperationPlanningPage() {
         </Card>
       </div>
 
-      <Tabs defaultValue={weekDays[0].dateStr} className="w-full">
+      <Tabs defaultValue={format(new Date(), "yyyy-MM-dd")} className="w-full">
         <TabsList className="w-full h-14 bg-muted/50 p-1 rounded-xl">
           {weekDays.map(day => (
-            <TabsTrigger key={day.dateStr} value={day.dateStr} className="flex-1 rounded-lg font-black uppercase text-[10px] flex flex-col gap-0.5">
-              <span>{day.label}</span>
+            <TabsTrigger key={day.dateStr} value={day.dateStr} className="flex-1 rounded-lg font-black uppercase text-[10px] flex flex-col gap-0.5 relative">
+              <span className={day.dateStr === format(new Date(), "yyyy-MM-dd") ? "text-primary" : ""}>{day.label}</span>
               <span className="opacity-60">{day.dateStr.split('-').reverse().slice(0,2).join('/')}</span>
               {programming.filter(p => p.scheduled_date === day.dateStr).length > 0 && (
-                <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full" />
+                <span className="absolute top-1 right-1 h-2 w-2 bg-red-500 rounded-full border border-white" />
+              )}
+              {day.dateStr === format(new Date(), "yyyy-MM-dd") && (
+                <div className="absolute bottom-1 w-1 h-1 bg-primary rounded-full" />
               )}
             </TabsTrigger>
           ))}
