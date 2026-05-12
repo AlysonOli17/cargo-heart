@@ -14,7 +14,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { isValid } from "date-fns";
 
 export const Route = createFileRoute("/manutencao")({
   head: () => ({ meta: [{ title: "Controle de Oficina — Frota Busato" }] }),
@@ -29,6 +28,18 @@ type Equipment = {
   maintenance_location: string | null;
   maintenance_started_at: string | null;
   updated_at: string; status: "manutencao"; current_client_id: string | null; notes: string | null;
+};
+
+// Função de formatação ultra segura
+const safeFormatDateFull = (dateStr: string | null) => {
+  if (!dateStr || dateStr === "") return "—";
+  try {
+    const d = new Date(dateStr.includes("T") ? dateStr : dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("pt-BR");
+  } catch (e) {
+    return "—";
+  }
 };
 
 function MaintenancePage() {
@@ -47,24 +58,28 @@ function MaintenancePage() {
   });
 
   const load = async () => {
-    const { data } = await supabase
-      .from("equipment")
-      .select(`
-        id, identifier, type, model, 
-        maintenance_problem, maintenance_expected_return, 
-        maintenance_type, maintenance_location, maintenance_started_at,
-        updated_at, status, current_client_id, notes
-      `)
-      .eq("status", "manutencao")
-      .order("updated_at", { ascending: false });
-    setItems((data ?? []) as Equipment[]);
+    try {
+      const { data } = await supabase
+        .from("equipment")
+        .select(`
+          id, identifier, type, model, 
+          maintenance_problem, maintenance_expected_return, 
+          maintenance_type, maintenance_location, maintenance_started_at,
+          updated_at, status, current_client_id, notes
+        `)
+        .eq("status", "manutencao")
+        .order("updated_at", { ascending: false });
+      setItems((data ?? []) as Equipment[]);
 
-    const { data: av } = await supabase
-      .from("equipment")
-      .select("id, identifier")
-      .eq("status", "disponivel")
-      .order("identifier");
-    setAvailableEqs(av ?? []);
+      const { data: av } = await supabase
+        .from("equipment")
+        .select("id, identifier")
+        .eq("status", "disponivel")
+        .order("identifier");
+      setAvailableEqs(av ?? []);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   useEffect(() => {
@@ -145,12 +160,15 @@ function MaintenancePage() {
     else toast.success(`${eq.identifier} liberado para disponível`);
   };
 
-  const getDiasParado = (dateString: string) => {
-    const d = new Date(dateString);
-    if (!isValid(d)) return 0;
-    const diff = new Date().getTime() - d.getTime();
-    const days = Math.floor(diff / (1000 * 3600 * 24));
-    return days < 0 ? 0 : days;
+  const getDiasParado = (dateString: string | null) => {
+    if (!dateString) return 0;
+    try {
+      const d = new Date(dateString);
+      if (isNaN(d.getTime())) return 0;
+      const diff = new Date().getTime() - d.getTime();
+      const days = Math.floor(diff / (1000 * 3600 * 24));
+      return days < 0 ? 0 : days;
+    } catch (e) { return 0; }
   };
 
   const grouped = items.reduce((acc, e) => {
@@ -162,13 +180,6 @@ function MaintenancePage() {
 
   const sortedTypes = Object.keys(grouped).sort();
 
-  const formatDateSafely = (dateStr: string | null) => {
-    if (!dateStr) return "—";
-    const d = new Date(dateStr.includes("T") ? dateStr : dateStr + "T00:00:00");
-    if (!isValid(d)) return "—";
-    return d.toLocaleDateString("pt-BR");
-  };
-
   if (!user) return null;
   return (
     <div className="space-y-6">
@@ -176,9 +187,9 @@ function MaintenancePage() {
         <div>
           <h1 className="text-3xl font-black flex items-center gap-2 text-foreground/90 uppercase tracking-tighter">
             <Wrench className="h-7 w-7 text-[oklch(0.65_0.2_50)]" />
-            SITUAÇÃO OFICINA
+            Oficina
           </h1>
-          <p className="text-muted-foreground mt-1 font-medium italic">{items.length} máquinas paradas em manutenção</p>
+          <p className="text-muted-foreground mt-1 font-medium italic">{items.length} paradas</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -190,12 +201,12 @@ function MaintenancePage() {
               </Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>Enviar Equipamento para Manutenção</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle>Entrada de Equipamento</DialogTitle></DialogHeader>
               <div className="space-y-4 pt-4">
                 <div className="space-y-2">
-                  <Label>Equipamento Disponível *</Label>
+                  <Label>Equipamento *</Label>
                   <Select value={newMaint.equipment_id} onValueChange={(v) => setNewMaint({...newMaint, equipment_id: v})}>
-                    <SelectTrigger><SelectValue placeholder="Selecione a máquina..." /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
                     <SelectContent>
                       {availableEqs.map(eq => (
                         <SelectItem key={eq.id} value={eq.id}>{eq.identifier}</SelectItem>
@@ -206,7 +217,7 @@ function MaintenancePage() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Tipo de Serviço</Label>
+                    <Label>Tipo</Label>
                     <Select value={newMaint.type} onValueChange={(v) => setNewMaint({...newMaint, type: v})}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -219,21 +230,21 @@ function MaintenancePage() {
                   </div>
                   <div className="space-y-2">
                     <Label>Localização</Label>
-                    <Input value={newMaint.location} onChange={(e) => setNewMaint({...newMaint, location: e.target.value})} placeholder="Ex: Oficina Base" />
+                    <Input value={newMaint.location} onChange={(e) => setNewMaint({...newMaint, location: e.target.value})} placeholder="Onde?" />
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Descrição do Problema *</Label>
-                  <Textarea value={newMaint.problem} onChange={(e) => setNewMaint({...newMaint, problem: e.target.value})} placeholder="O que precisa ser feito?" />
+                  <Label>Problema *</Label>
+                  <Textarea value={newMaint.problem} onChange={(e) => setNewMaint({...newMaint, problem: e.target.value})} placeholder="Descreva o defeito" />
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Previsão de Retorno</Label>
+                  <Label>Previsão</Label>
                   <Input type="date" value={newMaint.expected_return} onChange={(e) => setNewMaint({...newMaint, expected_return: e.target.value})} />
                 </div>
 
-                <Button onClick={sendToMaintenance} className="w-full bg-[oklch(0.65_0.2_50)] text-white font-bold">Confirmar Entrada</Button>
+                <Button onClick={sendToMaintenance} className="w-full bg-[oklch(0.65_0.2_50)] text-white font-bold">Salvar Entrada</Button>
               </div>
             </DialogContent>
           </Dialog>
@@ -245,30 +256,27 @@ function MaintenancePage() {
       </div>
 
       {sortedTypes.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground border border-border">
-          Nenhum equipamento na oficina no momento.
-        </Card>
+        <Card className="p-10 text-center text-muted-foreground">Nenhum equipamento na oficina.</Card>
       ) : (
         <div className="space-y-10">
           {sortedTypes.map(mType => (
-            <section key={mType} className="animate-in slide-in-from-bottom-2 duration-300">
+            <section key={mType}>
               <h2 className="text-xl font-bold mb-3 border-b-2 pb-2 text-[oklch(0.65_0.2_50)] flex items-center gap-2 uppercase tracking-tighter">
                 <Wrench className="h-5 w-5" />
                 Manutenção {mType}
-                <span className="text-sm font-normal text-muted-foreground ml-2">({grouped[mType].length})</span>
               </h2>
               
-              <Card className="overflow-hidden border-none shadow-xl shadow-foreground/5 bg-card/50">
+              <Card className="overflow-hidden border-none shadow-xl bg-card/50">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left border-collapse">
                     <thead className="bg-muted/50 text-muted-foreground text-[10px] uppercase font-black tracking-widest">
                       <tr>
-                        <th className="px-4 py-4">Equipamento</th>
-                        <th className="px-4 py-4 min-w-[250px]">Descrição Detalhada do Problema</th>
-                        <th className="px-4 py-4">Localização</th>
+                        <th className="px-4 py-4">Máquina</th>
+                        <th className="px-4 py-4 min-w-[250px]">Problema</th>
+                        <th className="px-4 py-4">Local</th>
                         <th className="px-4 py-4">Início</th>
                         <th className="px-4 py-4">Previsão</th>
-                        <th className="px-4 py-4 text-center">Dias Parado</th>
+                        <th className="px-4 py-4 text-center">Dias</th>
                         <th className="px-4 py-4 text-right">Ações</th>
                       </tr>
                     </thead>
@@ -280,31 +288,31 @@ function MaintenancePage() {
                           const diasParado = getDiasParado(start);
                           
                           return (
-                            <tr key={e.id} className="hover:bg-muted/20 transition-colors bg-background">
+                            <tr key={e.id} className="hover:bg-muted/20 bg-background">
                               <td className="px-4 py-4">
                                 <p className="font-mono font-black text-base">{e.identifier}</p>
                                 <p className="text-[10px] font-bold text-muted-foreground uppercase">{e.type}</p>
                               </td>
                               <td className="px-4 py-4">
-                                <div className="bg-muted/30 p-3 rounded-2xl border border-foreground/5 text-xs leading-relaxed font-medium">
-                                  {e.maintenance_problem || <span className="text-muted-foreground italic">Descrição não informada</span>}
+                                <div className="bg-muted/30 p-3 rounded-xl text-xs font-medium">
+                                  {e.maintenance_problem || "—"}
                                 </div>
                               </td>
-                              <td className="px-4 py-4 font-bold text-amber-600 dark:text-amber-500 uppercase text-xs tracking-tighter">
+                              <td className="px-4 py-4 font-bold text-amber-600 uppercase text-xs">
                                 {e.maintenance_location || "Oficina Base"}
                               </td>
-                              <td className="px-4 py-4 font-medium text-muted-foreground whitespace-nowrap">
-                                {formatDateSafely(start)}
+                              <td className="px-4 py-4 font-medium text-muted-foreground">
+                                {safeFormatDateFull(start)}
                               </td>
-                              <td className="px-4 py-4 font-bold whitespace-nowrap">
-                                {formatDateSafely(e.maintenance_expected_return)}
+                              <td className="px-4 py-4 font-bold">
+                                {safeFormatDateFull(e.maintenance_expected_return)}
                               </td>
                               <td className="px-4 py-4 text-center">
                                 <span className={`text-xl font-black ${diasParado > 5 ? "text-red-500" : "text-foreground/70"}`}>
                                   {diasParado}
                                 </span>
                               </td>
-                              <td className="px-4 py-4 text-right whitespace-nowrap">
+                              <td className="px-4 py-4 text-right">
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -312,7 +320,6 @@ function MaintenancePage() {
                                   disabled={!canWrite || busy === e.id}
                                   className="hover:bg-[oklch(0.65_0.18_150)] hover:text-white font-bold border-2 rounded-xl"
                                 >
-                                  <CheckCircle2 className="h-4 w-4 mr-1" />
                                   Liberar
                                 </Button>
                               </td>

@@ -4,9 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { STATUS_LABELS, type EquipmentStatus } from "@/lib/equipment";
-import { Wrench, Users, CircleCheck, Activity, Calendar } from "lucide-react";
+import { Calendar } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { format, isValid } from "date-fns";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "Dashboard — Disponibilidade Frota Busato" }] }),
@@ -46,6 +45,18 @@ const StatusDot = ({ status }: { status: EquipmentStatus }) => {
   return <div className={`h-2.5 w-2.5 rounded-full ${colors[status]} shadow-sm`} />;
 };
 
+// Função de formatação ultra segura (sem dependências externas para evitar crash)
+const safeFormatDate = (dateStr: string | null) => {
+  if (!dateStr || dateStr === "") return null;
+  try {
+    const d = new Date(dateStr.includes("T") ? dateStr : dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) return null;
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+  } catch (e) {
+    return null;
+  }
+};
+
 function Dashboard() {
   const { user } = useAuth();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
@@ -79,14 +90,14 @@ function Dashboard() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 pb-2 border-b">
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-foreground/90">Monitoramento de Frota</h1>
+          <h1 className="text-4xl font-extrabold tracking-tight text-foreground/90 uppercase tracking-tighter">Frota Busato</h1>
           <p className="text-muted-foreground flex items-center gap-2 mt-2 font-medium">
-             Gestão em tempo real Busato Locações
+             Gestão em tempo real de ativos
           </p>
         </div>
         <div className="flex items-center gap-3">
            <div className="text-right px-4 border-r">
-              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-tighter">Frota Total</p>
+              <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-tighter">Total</p>
               <p className="text-3xl font-black">{equipment.length}</p>
            </div>
            <div className="text-right px-4 bg-[oklch(0.65_0.18_150)]/5 rounded-xl py-2">
@@ -99,7 +110,7 @@ function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {sortedTypes.length === 0 ? (
           <div className="col-span-full py-32 text-center border-2 border-dashed rounded-3xl bg-muted/10">
-             <p className="text-muted-foreground font-medium">Aguardando cadastro de equipamentos...</p>
+             <p className="text-muted-foreground font-medium">Carregando frota...</p>
           </div>
         ) : (
           sortedTypes.map((type) => {
@@ -128,8 +139,7 @@ function Dashboard() {
                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {items.map((eq) => {
                         const isMaint = eq.status === 'manutencao';
-                        const dateObj = isMaint && eq.maintenance_expected_return ? new Date(eq.maintenance_expected_return + "T00:00:00") : null;
-                        const hasValidDate = dateObj && isValid(dateObj);
+                        const formattedDate = safeFormatDate(eq.maintenance_expected_return);
 
                         return (
                           <div key={eq.id} className={`flex flex-col gap-1.5 p-3 rounded-2xl border transition-all ${
@@ -141,10 +151,10 @@ function Dashboard() {
                           }`}>
                              <div className="flex items-center justify-between">
                                 <StatusDot status={eq.status} />
-                                {isMaint && hasValidDate && (
+                                {isMaint && formattedDate && (
                                    <div className="flex items-center gap-1 text-[9px] font-bold text-[oklch(0.6_0.2_50)] bg-background/80 px-1.5 py-0.5 rounded-md border border-[oklch(0.65_0.2_50)]/20">
                                       <Calendar className="h-2.5 w-2.5" />
-                                      {format(dateObj, "dd/MM")}
+                                      {formattedDate}
                                    </div>
                                 )}
                              </div>

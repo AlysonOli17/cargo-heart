@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { format, addDays, isSameDay, differenceInDays } from "date-fns";
+import { format, addDays, isSameDay, differenceInDays, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CalendarIcon, ChevronLeft, ChevronRight, Activity, UserPlus, History } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,6 +33,15 @@ type Equipment = {
   notes?: string | null;
 };
 type Client = { id: string; name: string };
+
+const safeFormat = (date: Date | null, formatStr: string) => {
+  if (!date || !isValid(date)) return "—";
+  try {
+    return format(date, formatStr, { locale: ptBR });
+  } catch (e) {
+    return "—";
+  }
+};
 
 function OperationPage() {
   const { user } = useAuth();
@@ -164,7 +173,7 @@ function OperationPage() {
             {today ? (
               <><span className="h-2 w-2 rounded-full bg-[oklch(0.65_0.18_150)] animate-pulse" />Ao vivo</>
             ) : (
-              <>Visualizando {format(date, "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</>
+              <>Visualizando {safeFormat(date, "dd 'de' MMMM 'de' yyyy")}</>
             )}
           </p>
         </div>
@@ -182,7 +191,7 @@ function OperationPage() {
             <PopoverTrigger asChild>
               <Button variant="outline" className="min-w-[200px] justify-start">
                 <CalendarIcon className="h-4 w-4 mr-2" />
-                {format(date, "dd 'de' MMM, yyyy", { locale: ptBR })}
+                {safeFormat(date, "dd 'de' MMM, yyyy")}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
@@ -203,7 +212,7 @@ function OperationPage() {
       {!today && (
         <Card className="p-6 border-[oklch(0.65_0.2_50)]/20 shadow-sm">
           <h2 className="font-semibold mb-6 text-xl flex items-center gap-2">
-            <History className="h-5 w-5" /> Atividades do dia {format(date, "dd/MM/yyyy", { locale: ptBR })}
+            <History className="h-5 w-5" /> Atividades do dia {safeFormat(date, "dd/MM/yyyy")}
           </h2>
           {dayMovements.length === 0 ? (
             <p className="text-center text-muted-foreground py-10 bg-muted/30 rounded-lg border border-dashed">
@@ -215,7 +224,7 @@ function OperationPage() {
                 <div key={m.id} className="border-l-4 border-primary pl-4 py-3 bg-muted/20 rounded-r-lg hover:bg-muted/40 transition-colors">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-mono font-bold text-base">{m.equipment?.identifier || "Equipamento deletado"}</span>
-                    <span className="text-sm font-medium text-muted-foreground">{format(new Date(m.created_at), "HH:mm", { locale: ptBR })}</span>
+                    <span className="text-sm font-medium text-muted-foreground">{safeFormat(new Date(m.created_at), "HH:mm")}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     {m.from_status && <span className="line-through opacity-60">{STATUS_LABELS[m.from_status as EquipmentStatus]}</span>}
@@ -266,11 +275,6 @@ function OperationPage() {
                 </button>
               ))}
             </div>
-          )}
-          {!canWrite && (
-            <p className="text-xs text-muted-foreground mt-2 italic">
-              Você não tem permissão para solicitar equipamentos.
-            </p>
           )}
         </Card>
       )}
@@ -338,7 +342,7 @@ function OperationPage() {
                       <span className="font-semibold">{e.identifier}</span>
                       {maintStartedAt[e.id] && (
                         <span className="ml-auto text-[10px] text-muted-foreground font-sans">
-                          desde {format(new Date(maintStartedAt[e.id]), "dd/MM/yyyy", { locale: ptBR })}
+                          desde {safeFormat(new Date(maintStartedAt[e.id]), "dd/MM/yyyy")}
                         </span>
                       )}
                     </div>
@@ -389,7 +393,6 @@ function OperationPage() {
               <Label>Observação</Label>
               <Textarea value={reqNotes} onChange={(e) => setReqNotes(e.target.value)} placeholder="Opcional" />
             </div>
-            <p className="text-xs text-muted-foreground">A solicitação será enviada para aprovação do administrador.</p>
             <Button onClick={submitRequest} disabled={!reqClient} className="w-full">Enviar solicitação</Button>
           </div>
         </DialogContent>
@@ -415,7 +418,7 @@ function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; 
   if (!eq) return null;
   
   const startDate = eq.maintenance_started_at ? new Date(eq.maintenance_started_at) : null;
-  const daysStopped = startDate ? differenceInDays(new Date(), startDate) : 0;
+  const daysStopped = (startDate && isValid(startDate)) ? differenceInDays(new Date(), startDate) : 0;
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -442,11 +445,11 @@ function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; 
 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-muted/30 p-3 rounded-lg border">
-              <p className="text-xs text-muted-foreground font-medium mb-1">Tipo de Manutenção</p>
+              <p className="text-xs text-muted-foreground font-medium mb-1">Tipo</p>
               <p className="font-semibold text-sm">{eq.maintenance_type || "Não informado"}</p>
             </div>
             <div className="bg-muted/30 p-3 rounded-lg border">
-              <p className="text-xs text-muted-foreground font-medium mb-1">Local / Oficina</p>
+              <p className="text-xs text-muted-foreground font-medium mb-1">Local</p>
               <p className="font-semibold text-sm">{eq.maintenance_location || "Não informado"}</p>
             </div>
           </div>
@@ -455,13 +458,13 @@ function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; 
             <div className="bg-muted/30 p-3 rounded-lg border">
               <p className="text-xs text-muted-foreground font-medium mb-1">Data de Início</p>
               <p className="font-semibold text-sm">
-                {startDate ? format(startDate, "dd/MM/yyyy", { locale: ptBR }) : "Não informada"}
+                {safeFormat(startDate, "dd/MM/yyyy")}
               </p>
             </div>
             <div className={`p-3 rounded-lg border ${daysStopped > 5 ? "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400" : "bg-muted/30"}`}>
               <p className="text-xs opacity-70 font-medium mb-1">Tempo Parado</p>
               <p className="font-semibold text-sm">
-                {startDate ? `${daysStopped} dia${daysStopped !== 1 ? 's' : ''}` : "—"}
+                {startDate && isValid(startDate) ? `${daysStopped} dia${daysStopped !== 1 ? 's' : ''}` : "—"}
               </p>
             </div>
           </div>
@@ -470,8 +473,8 @@ function MaintDetailsDialog({ eq, open, onOpenChange }: { eq: Equipment | null; 
              <p className="text-xs text-muted-foreground font-medium mb-1">Previsão de Retorno</p>
              <p className="font-semibold text-sm">
                {eq.maintenance_expected_return 
-                  ? format(new Date(eq.maintenance_expected_return + "T00:00:00"), "dd/MM/yyyy", { locale: ptBR }) 
-                  : "Não informada"}
+                  ? safeFormat(new Date(eq.maintenance_expected_return + "T00:00:00"), "dd/MM/yyyy") 
+                  : "—"}
              </p>
           </div>
 
