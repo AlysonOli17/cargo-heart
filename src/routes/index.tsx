@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { STATUS_LABELS, type EquipmentStatus } from "@/lib/equipment";
 import { Wrench, Users, CircleCheck, Activity, Calendar } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { format } from "date-fns";
+import { format, isValid } from "date-fns";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "Dashboard — Disponibilidade Frota Busato" }] }),
@@ -20,12 +20,12 @@ type Equipment = {
 };
 
 const TYPE_COLORS: Record<string, string> = {
-  "CAMINHÃO PIPA": "oklch(0.65_0.18_250)", // Azul
-  "MALHA PENEIRA": "oklch(0.65_0.18_150)", // Verde
-  "CAMINHÃO": "oklch(0.65_0.18_200)",      // Ciano
-  "RETROESCAVADEIRA": "oklch(0.65_0.18_30)", // Laranja/Ouro
-  "MINI CARREGADEIRA": "oklch(0.65_0.18_300)", // Roxo
-  "PENEIRA ROTATIVA": "oklch(0.65_0.18_100)", // Amarelo Lima
+  "CAMINHÃO PIPA": "oklch(0.65_0.18_250)", 
+  "MALHA PENEIRA": "oklch(0.65_0.18_150)", 
+  "CAMINHÃO": "oklch(0.65_0.18_200)",      
+  "RETROESCAVADEIRA": "oklch(0.65_0.18_30)", 
+  "MINI CARREGADEIRA": "oklch(0.65_0.18_300)", 
+  "PENEIRA ROTATIVA": "oklch(0.65_0.18_100)", 
 };
 
 const getColorForType = (type: string) => {
@@ -128,6 +128,9 @@ function Dashboard() {
                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {items.map((eq) => {
                         const isMaint = eq.status === 'manutencao';
+                        const dateObj = isMaint && eq.maintenance_expected_return ? new Date(eq.maintenance_expected_return + "T00:00:00") : null;
+                        const hasValidDate = dateObj && isValid(dateObj);
+
                         return (
                           <div key={eq.id} className={`flex flex-col gap-1.5 p-3 rounded-2xl border transition-all ${
                             eq.status === 'disponivel' 
@@ -138,10 +141,10 @@ function Dashboard() {
                           }`}>
                              <div className="flex items-center justify-between">
                                 <StatusDot status={eq.status} />
-                                {isMaint && eq.maintenance_expected_return && (
+                                {isMaint && hasValidDate && (
                                    <div className="flex items-center gap-1 text-[9px] font-bold text-[oklch(0.6_0.2_50)] bg-background/80 px-1.5 py-0.5 rounded-md border border-[oklch(0.65_0.2_50)]/20">
                                       <Calendar className="h-2.5 w-2.5" />
-                                      {format(new Date(eq.maintenance_expected_return + "T00:00:00"), "dd/MM")}
+                                      {format(dateObj, "dd/MM")}
                                    </div>
                                 )}
                              </div>

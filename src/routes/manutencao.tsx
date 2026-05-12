@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { isValid } from "date-fns";
 
 export const Route = createFileRoute("/manutencao")({
   head: () => ({ meta: [{ title: "Controle de Oficina — Frota Busato" }] }),
@@ -145,7 +146,9 @@ function MaintenancePage() {
   };
 
   const getDiasParado = (dateString: string) => {
-    const diff = new Date().getTime() - new Date(dateString).getTime();
+    const d = new Date(dateString);
+    if (!isValid(d)) return 0;
+    const diff = new Date().getTime() - d.getTime();
     const days = Math.floor(diff / (1000 * 3600 * 24));
     return days < 0 ? 0 : days;
   };
@@ -159,16 +162,23 @@ function MaintenancePage() {
 
   const sortedTypes = Object.keys(grouped).sort();
 
+  const formatDateSafely = (dateStr: string | null) => {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr.includes("T") ? dateStr : dateStr + "T00:00:00");
+    if (!isValid(d)) return "—";
+    return d.toLocaleDateString("pt-BR");
+  };
+
   if (!user) return null;
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black flex items-center gap-2">
+          <h1 className="text-3xl font-black flex items-center gap-2 text-foreground/90 uppercase tracking-tighter">
             <Wrench className="h-7 w-7 text-[oklch(0.65_0.2_50)]" />
             SITUAÇÃO OFICINA
           </h1>
-          <p className="text-muted-foreground mt-1 font-medium">{items.length} máquinas paradas em manutenção</p>
+          <p className="text-muted-foreground mt-1 font-medium italic">{items.length} máquinas paradas em manutenção</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -239,9 +249,9 @@ function MaintenancePage() {
           Nenhum equipamento na oficina no momento.
         </Card>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-10">
           {sortedTypes.map(mType => (
-            <section key={mType}>
+            <section key={mType} className="animate-in slide-in-from-bottom-2 duration-300">
               <h2 className="text-xl font-bold mb-3 border-b-2 pb-2 text-[oklch(0.65_0.2_50)] flex items-center gap-2 uppercase tracking-tighter">
                 <Wrench className="h-5 w-5" />
                 Manutenção {mType}
@@ -276,23 +286,21 @@ function MaintenancePage() {
                                 <p className="text-[10px] font-bold text-muted-foreground uppercase">{e.type}</p>
                               </td>
                               <td className="px-4 py-4">
-                                <div className="bg-muted/30 p-3 rounded-lg border border-foreground/5 text-xs leading-relaxed font-medium">
+                                <div className="bg-muted/30 p-3 rounded-2xl border border-foreground/5 text-xs leading-relaxed font-medium">
                                   {e.maintenance_problem || <span className="text-muted-foreground italic">Descrição não informada</span>}
                                 </div>
                               </td>
-                              <td className="px-4 py-4 font-bold text-amber-600 dark:text-amber-500 uppercase text-xs">
+                              <td className="px-4 py-4 font-bold text-amber-600 dark:text-amber-500 uppercase text-xs tracking-tighter">
                                 {e.maintenance_location || "Oficina Base"}
                               </td>
                               <td className="px-4 py-4 font-medium text-muted-foreground whitespace-nowrap">
-                                {new Date(start).toLocaleDateString("pt-BR")}
+                                {formatDateSafely(start)}
                               </td>
                               <td className="px-4 py-4 font-bold whitespace-nowrap">
-                                {e.maintenance_expected_return
-                                  ? new Date(e.maintenance_expected_return + "T00:00:00").toLocaleDateString("pt-BR")
-                                  : <span className="text-muted-foreground italic">—</span>}
+                                {formatDateSafely(e.maintenance_expected_return)}
                               </td>
                               <td className="px-4 py-4 text-center">
-                                <span className={`text-lg font-black ${diasParado > 5 ? "text-red-500" : "text-foreground/70"}`}>
+                                <span className={`text-xl font-black ${diasParado > 5 ? "text-red-500" : "text-foreground/70"}`}>
                                   {diasParado}
                                 </span>
                               </td>
@@ -302,7 +310,7 @@ function MaintenancePage() {
                                   variant="outline"
                                   onClick={() => release(e)}
                                   disabled={!canWrite || busy === e.id}
-                                  className="hover:bg-[oklch(0.65_0.18_150)] hover:text-white font-bold border-2"
+                                  className="hover:bg-[oklch(0.65_0.18_150)] hover:text-white font-bold border-2 rounded-xl"
                                 >
                                   <CheckCircle2 className="h-4 w-4 mr-1" />
                                   Liberar
