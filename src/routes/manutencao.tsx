@@ -5,7 +5,7 @@ import { AppLayout } from "@/components/AppLayout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Wrench, CheckCircle2, PlusCircle, Clock, Calendar as CalendarIcon, Tag, Check, ChevronsUpDown, Search, FileDown } from "lucide-react";
+import { Wrench, CheckCircle2, PlusCircle, Clock, Calendar as CalendarIcon, Tag, Check, ChevronsUpDown, Search, FileDown, Hourglass } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
@@ -54,6 +54,7 @@ function MaintenancePage() {
     priority: "Média",
     responsible: "",
     scheduledDate: new Date().toISOString().split("T")[0],
+    expectedReturn: "",
     stopType: "Manutenção Programada"
   });
 
@@ -66,94 +67,36 @@ function MaintenancePage() {
   useEffect(() => { if (user) load(); }, [user]);
 
   const exportToPDF = () => {
-    if (items.length === 0) {
-      toast.error("Não há dados para exportar");
-      return;
-    }
-
-    // Configurado para 'l' (Landscape - Paisagem)
+    if (items.length === 0) { toast.error("Não há dados"); return; }
     const doc = new jsPDF({ orientation: "l", unit: "mm", format: "a4" });
     const pageWidth = doc.internal.pageSize.getWidth();
     const brandBlue = [44, 126, 189]; 
 
-    // --- CABEÇALHO PADRÃO BUSATO ---
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.setTextColor(80, 80, 80);
-    doc.text("BUSATO", 20, 20);
-    
-    doc.setFontSize(16);
-    doc.setTextColor(60, 60, 60);
-    doc.text("RELATÓRIO DE MANUTENÇÃO ATIVA", pageWidth - 20, 20, { align: "right" });
-    
-    doc.setDrawColor(brandBlue[0], brandBlue[1], brandBlue[2]);
-    doc.setLineWidth(0.8);
-    doc.line(20, 25, pageWidth - 20, 25);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(22); doc.setTextColor(80, 80, 80); doc.text("BUSATO", 20, 20);
+    doc.setFontSize(16); doc.setTextColor(60, 60, 60); doc.text("RELATÓRIO DE MANUTENÇÃO ATIVA", pageWidth - 20, 20, { align: "right" });
+    doc.setDrawColor(brandBlue[0], brandBlue[1], brandBlue[2]); doc.setLineWidth(0.8); doc.line(20, 25, pageWidth - 20, 25);
+    doc.setFontSize(8); doc.setTextColor(150, 150, 150); doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, pageWidth - 20, 30, { align: "right" });
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, pageWidth - 20, 30, { align: "right" });
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(brandBlue[0], brandBlue[1], brandBlue[2]);
-    doc.text("QUADRO GERAL DE OFICINA", 20, 38);
-
-    // --- TABELA ---
     const tableData = items.map(e => [
       e.identifier,
       e.type || "—",
       e.maintenance_problem || "Intervenção Técnica",
-      e.maintenance_priority || "Média",
-      e.maintenance_responsible || "Técnico Base",
       e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString("pt-BR") : "—",
+      e.maintenance_expected_return ? new Date(e.maintenance_expected_return).toLocaleDateString("pt-BR") : "S/ Previsão",
       getDiasParado(e.maintenance_started_at || e.updated_at).toString() + " dias"
     ]);
 
     autoTable(doc, {
       startY: 42,
-      head: [["Equipamento", "Tipo", "Defeito / Observação", "Prioridade", "Responsável", "Entrada", "Tempo Parado"]],
+      head: [["Equipamento", "Tipo", "Defeito / Observação", "Entrada", "Previsão Retorno", "Tempo Parado"]],
       body: tableData,
       theme: "grid",
-      headStyles: { 
-        fillColor: brandBlue as [number, number, number], 
-        textColor: [255, 255, 255], 
-        fontStyle: "bold",
-        halign: "center",
-        fontSize: 9
-      },
-      styles: { 
-        fontSize: 8, 
-        cellPadding: 4,
-        valign: "middle",
-        lineColor: [220, 220, 220],
-        lineWidth: 0.1
-      },
-      columnStyles: {
-        0: { fontStyle: "bold", halign: "center", cellWidth: 25 },
-        1: { halign: "center", cellWidth: 25 },
-        2: { cellWidth: 100 },
-        3: { halign: "center", cellWidth: 25 },
-        4: { halign: "center", cellWidth: 35 },
-        5: { halign: "center", cellWidth: 25 },
-        6: { halign: "center", fontStyle: "bold" }
-      },
-      alternateRowStyles: {
-        fillColor: [250, 250, 250]
-      },
-      margin: { left: 20, right: 20 }
+      headStyles: { fillColor: brandBlue as any, textColor: [255, 255, 255], fontStyle: "bold", halign: "center" },
+      styles: { fontSize: 8, cellPadding: 4 },
+      columnStyles: { 0: { fontStyle: "bold", halign: "center", cellWidth: 25 }, 2: { cellWidth: 100 } }
     });
 
-    const finalY = (doc as any).lastAutoTable.finalY || 42;
-    doc.setFontSize(7);
-    doc.setTextColor(180, 180, 180);
-    doc.text("Sistema Cargo-Heart - Controle Central de Operações Busato", 20, finalY + 10);
-    doc.text("Relatório Confidencial", pageWidth / 2, finalY + 10, { align: "center" });
-    doc.text("Página 1 de 1", pageWidth - 20, finalY + 10, { align: "right" });
-
-    doc.save(`relatorio-oficina-paisagem-${new Date().toISOString().split('T')[0]}.pdf`);
-    toast.success("Relatório gerado em formato paisagem!");
+    doc.save(`relatorio-oficina-${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
   const handleSubmit = async () => {
@@ -164,6 +107,7 @@ function MaintenancePage() {
         maintenance_problem: form.problem,
         maintenance_priority: form.priority,
         maintenance_responsible: form.responsible,
+        maintenance_expected_return: form.expectedReturn || null,
         maintenance_started_at: new Date().toISOString()
       }).eq("id", selectedEqId);
       if (!error) { toast.success("Entrada realizada"); setIsAdding(false); load(); }
@@ -183,7 +127,11 @@ function MaintenancePage() {
   const release = async (id: string) => {
     const rep = prompt("Relatório de liberação:");
     if (rep === null) return;
-    await supabase.from("equipment").update({ status: "operacional", maintenance_problem: null }).eq("id", id);
+    await supabase.from("equipment").update({ 
+      status: "operacional", 
+      maintenance_problem: null,
+      maintenance_expected_return: null 
+    }).eq("id", id);
     load();
   };
 
@@ -218,16 +166,12 @@ function MaintenancePage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={exportToPDF} className="font-bold border-2 h-10 uppercase text-xs hover:bg-primary hover:text-white transition-all">
+          <Button variant="outline" onClick={exportToPDF} className="font-bold border-2 h-10 uppercase text-xs">
             <FileDown className="h-4 w-4 mr-2" /> Exportar Paisagem
           </Button>
 
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
-            <DialogTrigger asChild>
-              <Button className="font-bold uppercase shadow-lg h-10 text-xs">
-                <PlusCircle className="h-4 w-4 mr-2" /> Nova Intervenção
-              </Button>
-            </DialogTrigger>
+            <DialogTrigger asChild><Button className="font-bold uppercase shadow-lg h-10 text-xs"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
             <DialogContent className="max-w-md">
               <DialogHeader><DialogTitle className="font-black uppercase">Controle de Frota</DialogTitle></DialogHeader>
               <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
@@ -250,10 +194,16 @@ function MaintenancePage() {
                     </Popover>
                   </div>
                   {mode === "now" ? (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Status</Label><Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manutencao">Manutenção</SelectItem><SelectItem value="indisponivel">Indisponível</SelectItem></SelectContent></Select></div>
-                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Prioridade</Label><Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Média">Média</SelectItem><SelectItem value="Crítica">Crítica</SelectItem></SelectContent></Select></div>
-                    </div>
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Status</Label><Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manutencao">Manutenção</SelectItem><SelectItem value="indisponivel">Indisponível</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Prioridade</Label><Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Média">Média</SelectItem><SelectItem value="Crítica">Crítica</SelectItem></SelectContent></Select></div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-black uppercase text-primary flex items-center gap-1"><Hourglass className="h-3 w-3" /> Previsão de Retorno</Label>
+                        <Input type="date" value={form.expectedReturn} onChange={(e) => setForm({...form, expectedReturn: e.target.value})} className="h-10 font-bold border-primary/30" />
+                      </div>
+                    </>
                   ) : (
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Data</Label><Input type="date" value={form.scheduledDate} onChange={(e) => setForm({...form, scheduledDate: e.target.value})} className="h-10 font-bold" /></div>
@@ -281,8 +231,9 @@ function MaintenancePage() {
                   <thead className="bg-muted/50 text-[10px] uppercase font-black tracking-widest text-muted-foreground">
                     <tr>
                       <th className="px-4 py-4">Equipamento</th>
-                      <th className="px-4 py-4 min-w-[250px]">Problema</th>
+                      <th className="px-4 py-4 min-w-[200px]">Problema</th>
                       <th className="px-4 py-4 text-center">Início</th>
+                      <th className="px-4 py-4 text-center">Previsão</th>
                       <th className="px-4 py-4 text-center">Dias</th>
                       <th className="px-4 py-4 text-right">Ações</th>
                     </tr>
@@ -296,6 +247,11 @@ function MaintenancePage() {
                           <Badge variant={e.maintenance_priority === 'Crítica' ? 'destructive' : 'secondary'} className="text-[9px] font-bold">{e.maintenance_priority || 'Média'}</Badge>
                         </td>
                         <td className="px-4 py-4 text-center font-medium text-muted-foreground">{e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString('pt-BR') : '—'}</td>
+                        <td className="px-4 py-4 text-center">
+                          {e.maintenance_expected_return ? (
+                            <Badge variant="outline" className="border-primary text-primary font-black text-[10px]">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</Badge>
+                          ) : <span className="text-muted-foreground/30 text-[10px] font-bold italic">NÃO INF.</span>}
+                        </td>
                         <td className="px-4 py-4 text-center"><span className="text-lg font-black">{getDiasParado(e.maintenance_started_at || e.updated_at)}</span></td>
                         <td className="px-4 py-4 text-right"><Button variant="outline" size="sm" onClick={() => release(e.id)} className="font-black border-2 h-8 text-[10px]">LIBERAR</Button></td>
                       </tr>
@@ -306,7 +262,6 @@ function MaintenancePage() {
             </Card>
           </section>
         ))}
-        {items.length === 0 && <div className="p-20 text-center border-2 border-dashed rounded-3xl text-muted-foreground italic uppercase font-bold">Oficina Vazia</div>}
       </div>
     </div>
   );

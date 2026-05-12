@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info, CheckCircle, XCircle } from "lucide-react";
+import { LayoutDashboard, Clock, Truck, Wrench, Trash2, CheckCircle2, AlertCircle, Calendar as CalendarIcon, ChevronLeft, ChevronRight, Info, CheckCircle, XCircle, Hourglass } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import { format, addDays, startOfWeek, endOfWeek, subWeeks, addWeeks, isSameDay } from "date-fns";
@@ -26,13 +26,17 @@ type Programming = {
   equipment: { identifier: string; type: string } | null;
 };
 
+type Equipment = {
+  id: string; identifier: string; type: string | null; status: string;
+  maintenance_expected_return: string | null; maintenance_problem: string | null;
+};
+
 function OperationPlanningPage() {
   const { user } = useAuth();
   const [programming, setProgramming] = useState<Programming[]>([]);
-  const [equipment, setEquipment] = useState<any[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 0 }));
   
-  // Fluxo de Reagendamento (Para Não Realizado ou Lavagem Recorrente)
   const [rescheduleData, setRescheduleData] = useState<{ id: string, eqId: string, type: string } | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState(format(addDays(new Date(), 1), "yyyy-MM-dd"));
   const [rescheduleNotes, setRescheduleNotes] = useState("");
@@ -51,7 +55,7 @@ function OperationPlanningPage() {
   const load = async () => {
     const [{ data: p }, { data: e }] = await Promise.all([
       supabase.from("programming").select("*, equipment:equipment_id(identifier, type)").eq("is_completed", false),
-      supabase.from("equipment").select("id, identifier, type, status")
+      supabase.from("equipment").select("*").order("identifier")
     ]);
     setProgramming((p ?? []) as any[]);
     setEquipment((e ?? []) as any[]);
@@ -60,8 +64,9 @@ function OperationPlanningPage() {
   useEffect(() => {
     if (!user) return;
     load();
-    const ch = supabase.channel("op-schedule-v9")
+    const ch = supabase.channel("op-schedule-v10")
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [user]);
@@ -73,21 +78,16 @@ function OperationPlanningPage() {
       if (p.stop_type === "Lavador") {
         setRescheduleData({ id: p.id, eqId: p.equipment_id, type: "Lavador" });
         setRescheduleNotes("Lavagem recorrente");
-      } else {
-        load();
-      }
+      } else { load(); }
     }
   };
 
   const markNotRealized = async (p: Programming) => {
     const confirm = window.confirm("Confirmar que este serviço NÃO foi realizado?");
     if (!confirm) return;
-    
-    // Remove o atual e pergunta se quer reagendar
     await supabase.from("programming").delete().eq("id", p.id);
     setRescheduleData({ id: p.id, eqId: p.equipment_id, type: p.stop_type });
     setRescheduleNotes(`Reagendamento: ${p.stop_type} não realizado anteriormente.`);
-    toast.info("Serviço marcado como não realizado. Deseja reagendar?");
   };
 
   const handleReschedule = async () => {
@@ -100,11 +100,7 @@ function OperationPlanningPage() {
       notes: rescheduleNotes,
       owner_id: user?.id
     });
-    if (!error) {
-      toast.success("Serviço reagendado com sucesso!");
-      setRescheduleData(null);
-      load();
-    }
+    if (!error) { toast.success("Reagendado!"); setRescheduleData(null); load(); }
   };
 
   const deleteSchedule = async (id: string) => {
@@ -117,6 +113,10 @@ function OperationPlanningPage() {
     const ready = equipment.filter(e => e.status === 'disponivel' || e.status === 'operacional').length;
     return { activeMaint, ready, totalScheduled: programming.length };
   }, [equipment, programming]);
+
+  const inMaintenance = useMemo(() => {
+    return equipment.filter(e => e.status === 'manutencao' || e.status === 'indisponivel');
+  }, [equipment]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
@@ -178,30 +178,15 @@ function OperationPlanningPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {programming.filter(p => p.scheduled_date === day.dateStr).map(p => (
                     <Card key={p.id} className="overflow-hidden border-2 hover:border-primary/30 transition-all">
-                       <div className="h-1 bg-primary/20" />
                        <CardContent className="p-4 space-y-3">
                           <div className="flex justify-between items-start">
-                            <div>
-                              <h4 className="font-mono font-black text-lg leading-none uppercase">{p.equipment?.identifier || "NÃO IDENT."}</h4>
-                              <p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{p.equipment?.type || "DESCONHECIDO"}</p>
-                            </div>
+                            <div><h4 className="font-mono font-black text-lg uppercase leading-none">{p.equipment?.identifier}</h4><p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{p.equipment?.type}</p></div>
                             <Badge className="bg-blue-600 text-[9px] font-black uppercase">{p.stop_type}</Badge>
                           </div>
-                          {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground border-l-2 border-primary">"{p.notes}"</div>}
-                          
-                          <div className="pt-2 flex flex-col gap-2 border-t border-dashed">
-                             <div className="grid grid-cols-2 gap-2">
-                               <Button onClick={() => confirmRealized(p)} className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-[9px] flex items-center justify-center gap-1">
-                                 <CheckCircle className="h-3 w-3" /> Realizado
-                               </Button>
-                               <Button onClick={() => markNotRealized(p)} variant="outline" className="h-8 border-red-200 text-red-600 hover:bg-red-50 font-black uppercase text-[9px] flex items-center justify-center gap-1">
-                                 <XCircle className="h-3 w-3" /> Não Realizado
-                               </Button>
-                             </div>
-                             <div className="flex justify-between items-center opacity-60">
-                               <span className="text-[8px] font-black text-muted-foreground uppercase flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Agendado</span>
-                               <Button variant="ghost" size="icon" onClick={() => deleteSchedule(p.id)} className="h-6 w-6 text-muted-foreground hover:text-red-500"><Trash2 className="h-3 w-3" /></Button>
-                             </div>
+                          {p.notes && <div className="bg-muted/50 p-2 rounded text-[11px] font-medium italic text-muted-foreground">"{p.notes}"</div>}
+                          <div className="pt-2 grid grid-cols-2 gap-2 border-t border-dashed">
+                             <Button onClick={() => confirmRealized(p)} className="h-8 bg-emerald-600 text-white font-black uppercase text-[9px]"><CheckCircle className="h-3 w-3 mr-1" /> Realizado</Button>
+                             <Button onClick={() => markNotRealized(p)} variant="outline" className="h-8 text-red-600 border-red-100 font-black uppercase text-[9px]"><XCircle className="h-3 w-3 mr-1" /> Não Realizado</Button>
                           </div>
                        </CardContent>
                     </Card>
@@ -212,29 +197,48 @@ function OperationPlanningPage() {
         ))}
       </Tabs>
 
-      {/* DIALOG DE REAGENDAMENTO (USADO PARA LAVADOR OU NÃO REALIZADOS) */}
+      {/* SEÇÃO DE QUEM JÁ ESTÁ NA OFICINA E QUANDO VOLTA */}
+      <div className="pt-8 space-y-4 border-t-2 border-dashed">
+         <h2 className="text-xl font-black uppercase tracking-tighter flex items-center gap-2">
+           <Wrench className="h-5 w-5 text-orange-500" /> Em Intervenção Técnica
+         </h2>
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {inMaintenance.map(e => (
+              <Card key={e.id} className="border-2 hover:border-orange-200 transition-all">
+                <CardContent className="p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <span className="font-mono font-black text-lg">{e.identifier}</span>
+                    <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 text-[9px] font-black">NA OFICINA</Badge>
+                  </div>
+                  {e.maintenance_expected_return ? (
+                    <div className="bg-blue-50 border border-blue-200 p-2 rounded-lg flex items-center gap-2">
+                      <Hourglass className="h-4 w-4 text-blue-600 animate-pulse" />
+                      <div>
+                        <p className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão de Retorno</p>
+                        <p className="text-xs font-black text-blue-800">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-muted/50 p-2 rounded-lg flex items-center gap-2 text-muted-foreground italic text-xs font-medium">
+                      Sem previsão definida
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+         </div>
+      </div>
+
       <Dialog open={!!rescheduleData} onOpenChange={(o) => !o && setRescheduleData(null)}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="font-black uppercase flex items-center gap-2 text-primary">
-              <CalendarIcon className="h-5 w-5" /> Reagendamento de Frota
-            </DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle className="font-black uppercase text-primary">Reagendamento</DialogTitle></DialogHeader>
           <div className="py-4 space-y-4">
-             <p className="text-sm font-medium">Defina a nova data para realizar este serviço (**{rescheduleData?.type}**):</p>
              <div className="space-y-2">
-               <Label className="text-[10px] font-black uppercase">Nova Data Planejada</Label>
+               <Label className="text-[10px] font-black uppercase">Nova Data</Label>
                <Input type="date" value={rescheduleDate} onChange={(e) => setRescheduleDate(e.target.value)} className="h-12 font-bold" />
              </div>
-             <div className="space-y-2">
-               <Label className="text-[10px] font-black uppercase">Motivo / Observação</Label>
-               <Input value={rescheduleNotes} onChange={(e) => setRescheduleNotes(e.target.value)} className="text-xs" />
-             </div>
           </div>
-          <DialogFooter className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={() => { setRescheduleData(null); load(); }} className="font-black uppercase text-xs">Apenas Fechar</Button>
-            <Button onClick={handleReschedule} className="font-black uppercase text-xs bg-primary text-white">Salvar Nova Data</Button>
-          </DialogFooter>
+          <DialogFooter className="grid grid-cols-2 gap-2"><Button variant="outline" onClick={() => { setRescheduleData(null); load(); }}>Fechar</Button><Button onClick={handleReschedule} className="bg-primary text-white">Salvar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
