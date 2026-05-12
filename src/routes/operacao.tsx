@@ -78,11 +78,11 @@ function OperationPlanningPage() {
     if (!error) {
       toast.success("Serviço concluído!");
       
-      // Grava no histórico geral que foi realizado
+      // Grava no histórico geral que foi realizado com data e hora exata
       await supabase.from("history").insert({
         equipment_id: p.equipment_id,
         status_to: "Realizado",
-        notes: `Serviço ${p.stop_type} concluído conforme planejado.`
+        notes: `CONCLUÍDO: O serviço de ${p.stop_type} foi realizado com sucesso em ${format(new Date(), 'dd/MM/yyyy HH:mm')}.`
       });
 
       if (p.stop_type === "Lavador") {
