@@ -19,6 +19,13 @@ type Equipment = {
   maintenance_problem: string | null; maintenance_expected_return: string | null;
 };
 
+// Função auxiliar para garantir cores consistentes em todo o dashboard
+const getStatusColor = (status: string) => {
+  if (status === 'operacional' || status === 'disponivel') return '#10b981'; // Verde
+  if (status === 'programado') return '#f59e0b'; // Amarelo/Laranja
+  return '#ef4444'; // Vermelho (Manutenção/Indisponível)
+};
+
 function Dashboard() {
   const [items, setItems] = useState<Equipment[]>([]);
   const [search, setSearch] = useState("");
@@ -31,21 +38,24 @@ function Dashboard() {
 
   useEffect(() => {
     load();
-    const ch = supabase.channel("dashboard-v11").on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load).subscribe();
+    const ch = supabase.channel("dashboard-v12").on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load).subscribe();
     return () => { supabase.removeChannel(ch); };
   }, []);
 
   const filtered = useMemo(() => {
     return items.filter(e => {
       const matchSearch = e.identifier.toLowerCase().includes(search.toLowerCase()) || (e.type || "").toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === "all" || e.status === statusFilter;
+      const matchStatus = statusFilter === "all" || 
+                        (statusFilter === "operacional" && (e.status === "operacional" || e.status === "disponivel")) ||
+                        (statusFilter === "manutencao" && (e.status === "manutencao" || e.status === "indisponivel")) ||
+                        e.status === statusFilter;
       return matchSearch && matchStatus;
     });
   }, [items, search, statusFilter]);
 
   const stats = useMemo(() => ({
     total: items.length,
-    operacional: items.filter(e => e.status === 'operacional').length,
+    operacional: items.filter(e => e.status === 'operacional' || e.status === 'disponivel').length,
     manutencao: items.filter(e => e.status === 'manutencao' || e.status === 'indisponivel').length,
     preventiva: items.filter(e => e.status === 'programado').length,
   }), [items]);
@@ -59,7 +69,6 @@ function Dashboard() {
         </div>
       </div>
 
-      {/* KPI CARDS COM CORES VIBRANTES */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <KPI card={{ label: "Total Frota", val: stats.total, icon: Truck, color: "bg-slate-900 text-white border-slate-800" }} />
         <KPI card={{ label: "Operacional", val: stats.operacional, icon: CheckCircle2, color: "bg-[#10b981] text-white border-[#059669]" }} />
@@ -78,11 +87,11 @@ function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           {filtered.map(e => (
             <Card key={e.id} className="overflow-hidden border-2 shadow-sm hover:border-primary/40 transition-all group">
-              <div className="h-2" style={{ backgroundColor: e.status === 'operacional' ? '#10b981' : e.status === 'programado' ? '#f59e0b' : '#ef4444' }} />
+              <div className="h-2" style={{ backgroundColor: getStatusColor(e.status) }} />
               <CardContent className="p-4 space-y-3">
                 <div className="flex justify-between items-start">
                    <div><h3 className="font-mono font-black text-xl leading-none uppercase group-hover:text-primary transition-colors">{e.identifier}</h3><p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{e.type}</p></div>
-                   <Badge className="text-[9px] font-black uppercase text-white border-none" style={{ backgroundColor: e.status === 'operacional' ? '#10b981' : e.status === 'programado' ? '#f59e0b' : '#ef4444' }}>{STATUS_LABELS[e.status]}</Badge>
+                   <Badge className="text-[9px] font-black uppercase text-white border-none" style={{ backgroundColor: getStatusColor(e.status) }}>{STATUS_LABELS[e.status]}</Badge>
                 </div>
 
                 {(e.status === 'manutencao' || e.status === 'indisponivel') && (
