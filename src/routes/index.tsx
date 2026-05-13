@@ -202,7 +202,9 @@ function Dashboard() {
                        </div>
                     </td>
                     <td className="px-4 py-3">
-                       <p className="text-slate-400 text-[9px] font-medium italic max-w-[200px] truncate">{m.notes || "Movimentação padrão"}</p>
+                       <p className="text-slate-400 text-[9px] font-medium italic max-w-[200px] truncate" title={m.equipment?.maintenance_problem || m.notes || "Movimentação padrão"}>
+                         {m.equipment?.maintenance_problem ? m.equipment.maintenance_problem.split('\n').pop() : (m.notes || "Movimentação padrão")}
+                       </p>
                     </td>
                     <td className="px-4 py-3 text-right">
                        <span className={cn(
@@ -244,9 +246,16 @@ function Dashboard() {
                           <p className="text-[10px] font-black text-primary/80 uppercase mt-0.5 tracking-tighter">CONTRATO: {e.contract_type}</p>
                         )}
                       </div>
-                     <Badge className="text-[9px] font-black uppercase text-white border-none" style={{ backgroundColor: getStatusColor(e.status, hasProgToday) }}>
-                       {hasProgToday ? `AGENDADO: ${progType}` : STATUS_LABELS[e.status]}
-                     </Badge>
+                     <div className="flex flex-col items-end gap-1">
+                       <Badge className="text-[9px] font-black uppercase text-white border-none" style={{ backgroundColor: getStatusColor(e.status, hasProgToday) }}>
+                         {hasProgToday ? `AGENDADO: ${progType}` : STATUS_LABELS[e.status]}
+                       </Badge>
+                       {(e.status === 'manutencao' || e.status === 'indisponivel') && e.maintenance_expected_return && (
+                         <div className="mt-1">
+                           <Countdown targetDate={e.maintenance_expected_return} />
+                         </div>
+                       )}
+                     </div>
                   </div>
 
                   {hasProgToday && (
@@ -279,6 +288,36 @@ function Dashboard() {
           })}
         </div>
       </Tabs>
+    </div>
+  );
+}
+
+function Countdown({ targetDate }: { targetDate: string | Date }) {
+  const [timeLeft, setTimeLeft] = useState("");
+  const [isDelayed, setIsDelayed] = useState(false);
+  useEffect(() => {
+    const calc = () => {
+      const now = new Date().getTime();
+      const target = new Date(targetDate).getTime();
+      const diff = target - now;
+      if (diff <= 0) {
+        setTimeLeft("ATRASADO");
+        setIsDelayed(true);
+      } else {
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        setTimeLeft(`Falta: ${hours}h ${minutes}m`);
+        setIsDelayed(false);
+      }
+    };
+    calc();
+    const timer = setInterval(calc, 60000);
+    return () => clearInterval(timer);
+  }, [targetDate]);
+  return (
+    <div className={cn("px-2 py-0.5 rounded flex items-center gap-1", isDelayed ? "bg-red-500/10 text-red-600" : "bg-amber-500/10 text-amber-600")}>
+       <Hourglass className="h-3 w-3" />
+       <span className="text-[10px] font-black tracking-tighter uppercase">{timeLeft}</span>
     </div>
   );
 }

@@ -142,7 +142,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "equipment" }, async (payload) => {
         const oldRow = payload.old as { status?: string } | null;
         const newRow = payload.new as { id: string; status: string; identifier?: string };
-        if (oldRow?.status === "manutencao" && newRow.status === "disponivel") {
+        if (oldRow?.status === "manutencao" && (newRow.status === "disponivel" || newRow.status === "operacional")) {
           let identifier = newRow.identifier;
           if (!identifier) {
             const { data } = await supabase.from("equipment").select("identifier").eq("id", newRow.id).maybeSingle();
