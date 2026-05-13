@@ -228,7 +228,7 @@ function Dashboard() {
         </TabsList>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-          {filtered.map(e => {
+          {filteredItems.map(e => {
             const hasProgToday = !!todayProgramming[e.id];
             const progType = todayProgramming[e.id];
             
