@@ -8,7 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { LayoutDashboard, Truck, Wrench, AlertTriangle, CheckCircle2, Search, Filter, Hourglass, Calendar } from "lucide-react";
 import { STATUS_LABELS, type EquipmentStatus } from "@/lib/equipment";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "CCO Dashboard — Frota Busato" }] }),
@@ -18,11 +19,20 @@ export const Route = createFileRoute("/")({
 type Equipment = {
   id: string; identifier: string; type: string | null; status: EquipmentStatus;
   maintenance_problem: string | null; maintenance_expected_return: string | null; contract_type: string | null;
+  maintenance_started_at: string | null;
 };
 
 type Programming = {
   equipment_id: string;
   stop_type: string;
+};
+
+type LiveMovement = {
+  id: string;
+  created_at: string;
+  to_status: EquipmentStatus;
+  notes: string | null;
+  equipment: { identifier: string; type: string | null };
 };
 
 function Dashboard() {
@@ -34,20 +44,29 @@ function Dashboard() {
 
   const [items, setItems] = useState<Equipment[]>([]);
   const [todayProgramming, setTodayProgramming] = useState<Record<string, string>>({});
+  const [movements, setMovements] = useState<LiveMovement[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const load = async () => {
     const today = format(new Date(), "yyyy-MM-dd");
-    const [{ data: eqs }, { data: prog }] = await Promise.all([
+    const [{ data: eqs }, { data: prog }, { data: movs }] = await Promise.all([
       supabase.from("equipment").select("*").order("identifier"),
       supabase.from("programming")
         .select("equipment_id, stop_type")
         .eq("scheduled_date", today)
-        .eq("is_completed", false)
+        .eq("is_completed", false),
+      supabase.from("movements")
+        .select(`
+          id, created_at, to_status, notes,
+          equipment ( identifier, type )
+        `)
+        .order("created_at", { ascending: false })
+        .limit(10)
     ]);
 
     setItems(eqs ?? []);
+    setMovements((movs as any) ?? []);
     
     // Mapeia agendamentos de hoje para consulta rápida
     const progMap: Record<string, string> = {};
@@ -57,9 +76,10 @@ function Dashboard() {
 
   useEffect(() => {
     load();
-    const ch = supabase.channel("dashboard-v13")
+    const ch = supabase.channel("dashboard-v14")
       .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "programming" }, load)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "movements" }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, []);
@@ -82,12 +102,23 @@ function Dashboard() {
     });
   }, [items, search, statusFilter]);
 
-  const stats = useMemo(() => ({
-    total: items.length,
-    operacional: items.filter(e => !todayProgramming[e.id] && (e.status === 'operacional' || e.status === 'disponivel' || e.status === 'com_cliente')).length,
-    manutencao: items.filter(e => !!todayProgramming[e.id] || ['manutencao', 'indisponivel', 'finalizacao', 'programado'].includes(e.status)).length,
-    preventiva: items.filter(e => e.status === 'programado' || todayProgramming[e.id] === 'Preventiva').length,
-  }), [items, todayProgramming]);
+  const stats = useMemo(() => {
+    const getStats = (contract: string) => {
+      const filtered = items.filter(e => e.contract_type === contract);
+      return {
+        total: filtered.length,
+        op: filtered.filter(e => (e.status === 'operacional' || e.status === 'disponivel') && !todayProgramming[e.id]).length,
+        of: filtered.filter(e => e.status === 'manutencao' || e.status === 'indisponivel' || !!todayProgramming[e.id]).length
+      };
+    };
+
+    return {
+      usina: getStats("Usina"),
+      porto: getStats("Porto"),
+      eventual: getStats("Eventual"),
+      total: items.length
+    };
+  }, [items, todayProgramming]);
 
   return (
     <div className="space-y-6">
@@ -98,11 +129,75 @@ function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <KPI card={{ label: "Total Frota", val: stats.total, icon: Truck, color: "bg-slate-900 text-white border-slate-800" }} />
-        <KPI card={{ label: "Operacional Hoje", val: stats.operacional, icon: CheckCircle2, color: "bg-[#10b981] text-white border-[#059669]" }} />
-        <KPI card={{ label: "Indisponível Hoje", val: stats.manutencao, icon: Wrench, color: "bg-[#ef4444] text-white border-[#dc2626]" }} />
-        <KPI card={{ label: "Preventivas", val: stats.preventiva, icon: AlertTriangle, color: "bg-[#f59e0b] text-white border-[#d97706]" }} />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ContractKPI label="USINA" stats={stats.usina} color="blue" />
+        <ContractKPI label="PORTO" stats={stats.porto} color="emerald" />
+        <ContractKPI label="EVENTUAL" stats={stats.eventual} color="amber" />
+      </div>
+
+      <div className="bg-slate-950 rounded-2xl border-4 border-slate-900 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-1000">
+        <div className="bg-slate-900 px-6 py-3 flex items-center justify-between border-b border-slate-800">
+           <div className="flex items-center gap-3">
+             <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
+             <h2 className="text-slate-100 font-black tracking-widest text-xs uppercase italic">Painel de Operações em Tempo Real</h2>
+           </div>
+           <span className="text-slate-500 font-mono text-[10px] uppercase">Busato Air Logistics Terminal</span>
+        </div>
+        <div className="p-0 overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[800px]">
+             <thead>
+               <tr className="bg-slate-900/50 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                 <th className="px-6 py-3">Horário</th>
+                 <th className="px-6 py-3">Placa / Equipamento</th>
+                 <th className="px-6 py-3">Movimentação / Status</th>
+                 <th className="px-6 py-3">Detalhes / Observação</th>
+                 <th className="px-6 py-3 text-right">Status do Vôo</th>
+               </tr>
+             </thead>
+             <tbody className="divide-y divide-slate-900">
+               {movements.length === 0 && (
+                 <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-700 font-bold italic uppercase tracking-tighter">Nenhuma movimentação registrada nas últimas horas</td></tr>
+               )}
+               {movements.map(m => (
+                 <tr key={m.id} className="hover:bg-slate-900/40 transition-colors group">
+                    <td className="px-6 py-4 font-mono text-amber-500 font-black text-xs">{format(new Date(m.created_at), "HH:mm")}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="text-slate-100 font-black text-lg leading-none tracking-tighter uppercase">{m.equipment?.identifier}</span>
+                        <span className="text-slate-500 font-bold text-[9px] uppercase mt-1">{m.equipment?.type}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                       <div className="flex items-center gap-2">
+                         {m.to_status === 'operacional' || m.to_status === 'disponivel' ? (
+                           <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                         ) : (
+                           <Wrench className="h-4 w-4 text-red-500" />
+                         )}
+                         <span className={cn(
+                           "font-black text-xs uppercase italic tracking-tight",
+                           m.to_status === 'operacional' || m.to_status === 'disponivel' ? "text-emerald-400" : "text-red-400"
+                         )}>
+                           {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "Liberado p/ Operação" : "Entrada em Oficina"}
+                         </span>
+                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                       <p className="text-slate-400 text-[10px] font-medium italic max-w-xs truncate">{m.notes || "Movimentação padrão registrada pelo sistema"}</p>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                       <span className={cn(
+                         "px-3 py-1 rounded text-[9px] font-black uppercase tracking-widest",
+                         m.to_status === 'operacional' || m.to_status === 'disponivel' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-red-500/20 text-red-400 border border-red-500/30"
+                       )}>
+                         {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "On Duty" : "Grounded"}
+                       </span>
+                    </td>
+                 </tr>
+               ))}
+             </tbody>
+          </table>
+        </div>
       </div>
 
       <Tabs defaultValue="all" onValueChange={setStatusFilter}>
@@ -169,13 +264,50 @@ function Dashboard() {
   );
 }
 
-function KPI({ card }: { card: any }) {
-  const Icon = card.icon;
+function ContractKPI({ label, stats, color }: { label: string; stats: any; color: "blue" | "emerald" | "amber" }) {
+  const colors = {
+    blue: "from-blue-600 to-blue-800 shadow-blue-500/20 border-blue-400/20",
+    emerald: "from-emerald-600 to-emerald-800 shadow-emerald-500/20 border-emerald-400/20",
+    amber: "from-amber-600 to-amber-800 shadow-amber-500/20 border-amber-400/20"
+  };
+
   return (
-    <Card className={cn("border-b-4 shadow-md transition-transform hover:scale-[1.02]", card.color)}>
-      <CardContent className="p-5 flex items-center justify-between">
-        <div><p className="text-[10px] font-black uppercase opacity-80 mb-1">{card.label}</p><h2 className="text-4xl font-black tracking-tighter">{card.val}</h2></div>
-        <Icon className="h-10 w-10 opacity-30" />
+    <Card className={cn("relative overflow-hidden border-2 bg-gradient-to-br shadow-xl transition-all hover:scale-[1.02]", colors[color])}>
+      <CardContent className="p-6">
+        <div className="flex justify-between items-start mb-4">
+          <h3 className="text-white/70 font-black tracking-widest text-[10px] uppercase">{label}</h3>
+          <Truck className="h-5 w-5 text-white/30" />
+        </div>
+        <div className="flex items-baseline gap-2 mb-4">
+          <span className="text-4xl font-black text-white tracking-tighter">{stats.total}</span>
+          <span className="text-white/60 font-bold text-xs uppercase tracking-widest">Máquinas</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white/10 rounded-lg p-2 border border-white/5">
+             <p className="text-white/40 text-[8px] font-black uppercase leading-none mb-1">Operacional</p>
+             <p className="text-emerald-400 font-black text-lg">{stats.op}</p>
+          </div>
+          <div className="bg-white/10 rounded-lg p-2 border border-white/5">
+             <p className="text-white/40 text-[8px] font-black uppercase leading-none mb-1">Em Oficina</p>
+             <p className="text-red-400 font-black text-lg">{stats.of}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function KPI({ card }: { card: { label: string; val: number; icon: any; color: string } }) {
+  return (
+    <Card className={cn("overflow-hidden border-2 shadow-sm transition-all hover:shadow-md", card.color)}>
+      <CardContent className="p-5 flex items-center gap-4">
+        <div className="p-3 bg-white/10 rounded-xl">
+           <card.icon className="h-6 w-6" />
+        </div>
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-widest opacity-80">{card.label}</p>
+          <p className="text-3xl font-black">{card.val}</p>
+        </div>
       </CardContent>
     </Card>
   );
