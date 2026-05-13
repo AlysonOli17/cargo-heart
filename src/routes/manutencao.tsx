@@ -257,34 +257,76 @@ function MaintenancePage() {
   const handleExportPDF = () => {
     const doc = new jsPDF({ orientation: "landscape" });
     const today = format(new Date(), "dd/MM/yyyy HH:mm");
+    const busatoBlue = [41, 128, 185]; // #2980B9
     
-    doc.setFontSize(18);
-    doc.text("CCO MANUTENÇÃO - FROTA BUSATO", 14, 15);
+    // Header Corporativo
+    doc.setFillColor(busatoBlue[0], busatoBlue[1], busatoBlue[2]);
+    doc.rect(0, 0, 297, 25, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(20);
+    doc.setFont("helvetica", "bold");
+    doc.text("RELATÓRIO GERENCIAL - CCO MANUTENÇÃO", 14, 15);
     doc.setFontSize(10);
-    doc.text(`Relatório gerado em: ${today}`, 14, 22);
+    doc.setFont("helvetica", "normal");
+    doc.text(`FROTA BUSATO | GERADO EM: ${today}`, 14, 21);
 
-    const tableData = filtered.map(e => [
+    // Resumo Gerencial (KPIs no PDF)
+    const stats = {
+      total: filtered.length,
+      mev: filtered.filter(e => e.maintenance_type === "MEV").length,
+      criticos: filtered.filter(e => e.maintenance_priority === "Crítica").length,
+      mediaDias: filtered.length > 0 ? (filtered.reduce((acc, e) => acc + getDiasParado(e.maintenance_started_at), 0) / filtered.length).toFixed(1) : 0
+    };
+
+    doc.setTextColor(40, 40, 40);
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("SUMÁRIO EXECUTIVO", 14, 35);
+    
+    doc.setDrawColor(200, 200, 200);
+    doc.line(14, 37, 283, 37);
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Total em Intervenção: ${stats.total}`, 14, 45);
+    doc.text(`Equipamentos MEV: ${stats.mev}`, 70, 45);
+    doc.text(`Prioridades Críticas: ${stats.criticos}`, 130, 45);
+    doc.text(`Permanência Média: ${stats.mediaDias} dias`, 190, 45);
+
+    // Tabela Agrupada
+    const tableData = filtered.sort((a, b) => (a.contract_type || "").localeCompare(b.contract_type || "")).map(e => [
       e.identifier,
-      e.type || "-",
+      e.contract_type || "Eventual",
+      e.maintenance_type || "Geral",
       e.maintenance_problem || "-",
-      e.maintenance_priority || "Média",
+      { content: e.maintenance_priority || "Média", styles: { textColor: e.maintenance_priority === "Crítica" ? [200, 0, 0] : [40, 40, 40], fontStyle: e.maintenance_priority === "Crítica" ? "bold" : "normal" } },
       e.maintenance_started_at ? formatDate(e.maintenance_started_at) : "-",
       e.maintenance_expected_return ? formatDate(e.maintenance_expected_return) : "-",
       getDiasParado(e.maintenance_started_at || e.updated_at).toString()
     ]);
 
     autoTable(doc, {
-      startY: 30,
-      head: [["Placa", "Tipo", "Status / Histórico", "Prioridade", "Entrada", "Previsão", "Dias"]],
-      body: tableData,
-      theme: "striped",
-      headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: "bold" },
-      styles: { fontSize: 8, cellPadding: 2 },
-      columnStyles: { 2: { cellWidth: 80 } }
+      startY: 55,
+      head: [["Placa", "Contrato", "Tipo", "Status / Histórico do Problema", "Prioridade", "Entrada", "Previsão", "Dias"]],
+      body: tableData as any,
+      theme: "grid",
+      headStyles: { fillColor: busatoBlue, textColor: 255, fontStyle: "bold", halign: 'center' },
+      styles: { fontSize: 8, cellPadding: 3, valign: 'middle' },
+      columnStyles: { 
+        3: { cellWidth: 70 },
+        4: { halign: 'center' },
+        7: { halign: 'center', fontStyle: 'bold' }
+      },
+      didDrawPage: (data) => {
+        // Footer
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text(`Página ${data.pageNumber}`, 280, 200);
+      }
     });
 
-    doc.save(`manutencao_frota_${format(new Date(), "yyyy-MM-dd")}.pdf`);
-    toast.success("PDF gerado com sucesso!");
+    doc.save(`relatorio_gerencial_busato_${format(new Date(), "yyyy-MM-dd")}.pdf`);
+    toast.success("PDF Gerencial gerado com sucesso!");
   };
 
   const grouped = filtered.reduce((acc, e) => {
