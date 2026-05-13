@@ -154,55 +154,55 @@ function Dashboard() {
         />
       </div>
 
-      <div className="bg-slate-950 rounded-xl border-2 border-slate-900 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-1000">
-        <div className="bg-slate-900 px-4 py-2 flex items-center justify-between border-b border-slate-800">
+      <div className="bg-card rounded-xl border-2 border-slate-200 shadow-xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-1000">
+        <div className="bg-slate-50 px-4 py-2 flex items-center justify-between border-b border-slate-200">
            <div className="flex items-center gap-2">
              <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
-             <h2 className="text-slate-100 font-black tracking-widest text-[10px] uppercase italic">Painel de Operações em Tempo Real</h2>
+             <h2 className="text-slate-800 font-black tracking-widest text-[10px] uppercase italic">Painel de Operações em Tempo Real</h2>
            </div>
            <span className="text-slate-500 font-mono text-[9px] uppercase">Terminal Logístico Busato</span>
         </div>
         <div className="p-0 overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[800px]">
              <thead>
-               <tr className="bg-slate-900/50 text-[9px] font-black text-slate-500 uppercase tracking-widest">
+               <tr className="bg-slate-100/50 text-[9px] font-black text-slate-600 uppercase tracking-widest border-b border-slate-200">
                  <th className="px-4 py-2">Horário</th>
                  <th className="px-4 py-2">Placa / Equipamento</th>
                  <th className="px-4 py-2">Movimentação / Status</th>
                  <th className="px-4 py-2">Detalhes / Observação</th>
-                 <th className="px-4 py-2 text-right">Status do Vôo</th>
+                 <th className="px-4 py-2 text-right">Status Oficina</th>
                </tr>
              </thead>
-             <tbody className="divide-y divide-slate-900">
+             <tbody className="divide-y divide-slate-200">
                {filteredMovements.length === 0 && (
-                 <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-700 font-bold italic uppercase tracking-tighter">Nenhuma movimentação registrada nas últimas horas</td></tr>
+                 <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500 font-bold italic uppercase tracking-tighter">Nenhuma movimentação registrada nas últimas horas</td></tr>
                )}
                {filteredMovements.map(m => (
-                 <tr key={m.id} className="hover:bg-slate-900/40 transition-colors group border-b border-slate-900/50">
-                    <td className="px-4 py-3 font-mono text-amber-500 font-black text-xs">{format(new Date(m.created_at), "HH:mm")}</td>
+                 <tr key={m.id} className="hover:bg-slate-50 transition-colors group">
+                    <td className="px-4 py-3 font-mono text-slate-800 font-black text-xs">{format(new Date(m.created_at), "HH:mm")}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span className="text-slate-100 font-black text-sm leading-none tracking-tighter uppercase">{m.equipment?.identifier}</span>
+                        <span className="text-slate-900 font-black text-sm leading-none tracking-tighter uppercase">{m.equipment?.identifier}</span>
                         <span className="text-slate-500 font-bold text-[8px] uppercase mt-0.5">{m.equipment?.type}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3">
                        <div className="flex items-center gap-1.5">
                          {m.to_status === 'operacional' || m.to_status === 'disponivel' ? (
-                           <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                           <CheckCircle2 className="h-3 w-3 text-emerald-600" />
                          ) : (
-                           <Wrench className="h-3 w-3 text-red-500" />
+                           <Wrench className="h-3 w-3 text-red-600" />
                          )}
                          <span className={cn(
                            "font-black text-[10px] uppercase italic tracking-tight",
-                           m.to_status === 'operacional' || m.to_status === 'disponivel' ? "text-emerald-400" : "text-red-400"
+                           m.to_status === 'operacional' || m.to_status === 'disponivel' ? "text-emerald-600" : "text-red-600"
                          )}>
                            {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "Liberado p/ Operação" : "Entrada em Oficina"}
                          </span>
                        </div>
                     </td>
                     <td className="px-4 py-3">
-                       <p className="text-slate-400 text-[9px] font-medium italic max-w-[200px] truncate" title={m.equipment?.maintenance_problem || m.notes || "Movimentação padrão"}>
+                       <p className="text-slate-500 text-[10px] font-medium max-w-[200px] truncate" title={m.equipment?.maintenance_problem || m.notes || "Movimentação padrão"}>
                          {m.equipment?.maintenance_problem ? m.equipment.maintenance_problem.split('\n').pop() : (m.notes || "Movimentação padrão")}
                        </p>
                     </td>
@@ -210,7 +210,7 @@ function Dashboard() {
                        <div className="flex flex-col items-end gap-1">
                          <span className={cn(
                            "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest",
-                           m.to_status === 'operacional' || m.to_status === 'disponivel' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-red-500/20 text-red-400 border border-red-500/30"
+                           m.to_status === 'operacional' || m.to_status === 'disponivel' ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-red-100 text-red-700 border border-red-200"
                          )}>
                            {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "EM OPERAÇÃO" : "EM OFICINA"}
                          </span>
