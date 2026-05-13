@@ -311,7 +311,7 @@ function Countdown({ targetDate }: { targetDate: string | Date }) {
       } else {
         const hours = Math.floor(diff / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        setTimeLeft(`Falta: ${hours}h ${minutes}m`);
+        setTimeLeft(`FALTA: ${hours}H ${minutes}M`);
         setIsDelayed(false);
       }
     };
@@ -320,8 +320,8 @@ function Countdown({ targetDate }: { targetDate: string | Date }) {
     return () => clearInterval(timer);
   }, [targetDate]);
   return (
-    <div className={cn("px-2 py-0.5 rounded flex items-center gap-1", isDelayed ? "bg-red-500/10 text-red-600" : "bg-amber-500/10 text-amber-600")}>
-       <Hourglass className="h-3 w-3" />
+    <div className={cn("px-2 py-0.5 rounded flex items-center gap-1 border shadow-sm", isDelayed ? "bg-red-50 text-red-600 border-red-100" : "bg-amber-50 text-amber-700 border-amber-100")}>
+       <Hourglass className={cn("h-3 w-3", !isDelayed && "animate-pulse")} />
        <span className="text-[10px] font-black tracking-tighter uppercase">{timeLeft}</span>
     </div>
   );
@@ -329,37 +329,55 @@ function Countdown({ targetDate }: { targetDate: string | Date }) {
 
 function ContractKPI({ label, stats, color, isActive, onClick }: { label: string; stats: any; color: "blue" | "grey" | "dark", isActive: boolean, onClick: () => void }) {
   const colors = {
-    blue: "from-[#2980B9] to-[#1F618D] shadow-blue-500/10 border-[#2980B9]/20",
-    grey: "from-[#7F8C8D] to-[#616A6B] shadow-slate-500/10 border-[#7F8C8D]/20",
-    dark: "from-slate-700 to-slate-800 shadow-slate-900/10 border-slate-600/20"
+    blue: {
+      border: "border-blue-200",
+      accent: "bg-blue-600",
+      text: "text-blue-700",
+      box: "bg-blue-50/50"
+    },
+    grey: {
+      border: "border-slate-200",
+      accent: "bg-slate-500",
+      text: "text-slate-700",
+      box: "bg-slate-50/50"
+    },
+    dark: {
+      border: "border-slate-300",
+      accent: "bg-slate-800",
+      text: "text-slate-900",
+      box: "bg-slate-100/50"
+    }
   };
+
+  const c = colors[color];
 
   return (
     <Card 
       onClick={onClick}
       className={cn(
-        "relative overflow-hidden border-2 bg-gradient-to-br shadow-md transition-all cursor-pointer", 
-        colors[color],
-        isActive ? "scale-100 ring-2 ring-white/20 ring-offset-2 ring-offset-slate-50 opacity-100" : "scale-[0.98] opacity-60 hover:opacity-100 hover:scale-[0.99] grayscale-[50%]"
+        "relative overflow-hidden border-2 bg-white shadow-sm transition-all cursor-pointer group", 
+        c.border,
+        isActive ? "ring-2 ring-primary/20 scale-[1.02] shadow-md" : "opacity-60 hover:opacity-100 grayscale-[50%] hover:grayscale-0"
       )}
     >
+      <div className={cn("absolute top-0 left-0 w-1.5 h-full", c.accent)} />
       <CardContent className="p-4">
         <div className="flex justify-between items-start mb-2">
-          <h3 className="text-white/80 font-black tracking-widest text-[9px] uppercase">{label}</h3>
-          <Truck className="h-4 w-4 text-white/30" />
+          <h3 className={cn("font-black tracking-widest text-[9px] uppercase opacity-70", c.text)}>{label}</h3>
+          <Truck className={cn("h-4 w-4 opacity-20 group-hover:opacity-50 transition-opacity", c.text)} />
         </div>
-        <div className="flex items-baseline gap-1.5 mb-3">
-          <span className="text-3xl font-black text-white tracking-tighter leading-none">{stats.total}</span>
-          <span className="text-white/70 font-bold text-[9px] uppercase tracking-widest">Máquinas</span>
+        <div className="flex items-baseline gap-2 mb-3">
+          <span className={cn("text-4xl font-black tracking-tighter leading-none", c.text)}>{stats.total}</span>
+          <span className="text-slate-400 font-bold text-[10px] uppercase tracking-tight">máquinas</span>
         </div>
-        <div className="grid grid-cols-2 gap-1.5">
-          <div className="bg-white/10 rounded p-1.5 border border-white/10">
-             <p className="text-white/50 text-[7px] font-black uppercase leading-none mb-0.5">Operacional</p>
-             <p className="text-emerald-300 font-black text-sm leading-none">{stats.op}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div className={cn("rounded-lg p-2 border flex flex-col justify-center", c.box, c.border)}>
+             <p className={cn("text-[8px] font-black uppercase opacity-60", c.text)}>Operacional</p>
+             <p className={cn("text-lg font-black leading-none mt-1", c.text)}>{stats.op}</p>
           </div>
-          <div className="bg-white/10 rounded p-1.5 border border-white/10">
-             <p className="text-white/50 text-[7px] font-black uppercase leading-none mb-0.5">Em Oficina</p>
-             <p className="text-red-300 font-black text-sm leading-none">{stats.of}</p>
+          <div className="bg-red-50/50 rounded-lg p-2 border border-red-100 flex flex-col justify-center">
+             <p className="text-red-600 text-[8px] font-black uppercase opacity-60">Em Oficina</p>
+             <p className="text-red-700 text-lg font-black leading-none mt-1">{stats.of}</p>
           </div>
         </div>
       </CardContent>
