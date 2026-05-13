@@ -129,68 +129,68 @@ function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <ContractKPI label="USINA" stats={stats.usina} color="blue" />
-        <ContractKPI label="PORTO" stats={stats.porto} color="emerald" />
-        <ContractKPI label="EVENTUAL" stats={stats.eventual} color="amber" />
+        <ContractKPI label="PORTO" stats={stats.porto} color="grey" />
+        <ContractKPI label="EVENTUAL" stats={stats.eventual} color="dark" />
       </div>
 
-      <div className="bg-slate-950 rounded-2xl border-4 border-slate-900 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-1000">
-        <div className="bg-slate-900 px-6 py-3 flex items-center justify-between border-b border-slate-800">
-           <div className="flex items-center gap-3">
+      <div className="bg-slate-950 rounded-xl border-2 border-slate-900 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-1000">
+        <div className="bg-slate-900 px-4 py-2 flex items-center justify-between border-b border-slate-800">
+           <div className="flex items-center gap-2">
              <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse" />
-             <h2 className="text-slate-100 font-black tracking-widest text-xs uppercase italic">Painel de Operações em Tempo Real</h2>
+             <h2 className="text-slate-100 font-black tracking-widest text-[10px] uppercase italic">Painel de Operações em Tempo Real</h2>
            </div>
-           <span className="text-slate-500 font-mono text-[10px] uppercase">Busato Air Logistics Terminal</span>
+           <span className="text-slate-500 font-mono text-[9px] uppercase">Terminal Logístico Busato</span>
         </div>
         <div className="p-0 overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[800px]">
              <thead>
-               <tr className="bg-slate-900/50 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                 <th className="px-6 py-3">Horário</th>
-                 <th className="px-6 py-3">Placa / Equipamento</th>
-                 <th className="px-6 py-3">Movimentação / Status</th>
-                 <th className="px-6 py-3">Detalhes / Observação</th>
-                 <th className="px-6 py-3 text-right">Status do Vôo</th>
+               <tr className="bg-slate-900/50 text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                 <th className="px-4 py-2">Horário</th>
+                 <th className="px-4 py-2">Placa / Equipamento</th>
+                 <th className="px-4 py-2">Movimentação / Status</th>
+                 <th className="px-4 py-2">Detalhes / Observação</th>
+                 <th className="px-4 py-2 text-right">Status do Vôo</th>
                </tr>
              </thead>
              <tbody className="divide-y divide-slate-900">
                {movements.length === 0 && (
-                 <tr><td colSpan={5} className="px-6 py-12 text-center text-slate-700 font-bold italic uppercase tracking-tighter">Nenhuma movimentação registrada nas últimas horas</td></tr>
+                 <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-700 font-bold italic uppercase tracking-tighter">Nenhuma movimentação registrada nas últimas horas</td></tr>
                )}
                {movements.map(m => (
-                 <tr key={m.id} className="hover:bg-slate-900/40 transition-colors group">
-                    <td className="px-6 py-4 font-mono text-amber-500 font-black text-xs">{format(new Date(m.created_at), "HH:mm")}</td>
-                    <td className="px-6 py-4">
+                 <tr key={m.id} className="hover:bg-slate-900/40 transition-colors group border-b border-slate-900/50">
+                    <td className="px-4 py-3 font-mono text-amber-500 font-black text-xs">{format(new Date(m.created_at), "HH:mm")}</td>
+                    <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span className="text-slate-100 font-black text-lg leading-none tracking-tighter uppercase">{m.equipment?.identifier}</span>
-                        <span className="text-slate-500 font-bold text-[9px] uppercase mt-1">{m.equipment?.type}</span>
+                        <span className="text-slate-100 font-black text-sm leading-none tracking-tighter uppercase">{m.equipment?.identifier}</span>
+                        <span className="text-slate-500 font-bold text-[8px] uppercase mt-0.5">{m.equipment?.type}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4">
-                       <div className="flex items-center gap-2">
+                    <td className="px-4 py-3">
+                       <div className="flex items-center gap-1.5">
                          {m.to_status === 'operacional' || m.to_status === 'disponivel' ? (
-                           <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                           <CheckCircle2 className="h-3 w-3 text-emerald-500" />
                          ) : (
-                           <Wrench className="h-4 w-4 text-red-500" />
+                           <Wrench className="h-3 w-3 text-red-500" />
                          )}
                          <span className={cn(
-                           "font-black text-xs uppercase italic tracking-tight",
+                           "font-black text-[10px] uppercase italic tracking-tight",
                            m.to_status === 'operacional' || m.to_status === 'disponivel' ? "text-emerald-400" : "text-red-400"
                          )}>
                            {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "Liberado p/ Operação" : "Entrada em Oficina"}
                          </span>
                        </div>
                     </td>
-                    <td className="px-6 py-4">
-                       <p className="text-slate-400 text-[10px] font-medium italic max-w-xs truncate">{m.notes || "Movimentação padrão registrada pelo sistema"}</p>
+                    <td className="px-4 py-3">
+                       <p className="text-slate-400 text-[9px] font-medium italic max-w-[200px] truncate">{m.notes || "Movimentação padrão"}</p>
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-4 py-3 text-right">
                        <span className={cn(
-                         "px-3 py-1 rounded text-[9px] font-black uppercase tracking-widest",
+                         "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest",
                          m.to_status === 'operacional' || m.to_status === 'disponivel' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-red-500/20 text-red-400 border border-red-500/30"
                        )}>
-                         {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "On Duty" : "Grounded"}
+                         {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "EM OPERAÇÃO" : "EM OFICINA"}
                        </span>
                     </td>
                  </tr>
@@ -264,32 +264,32 @@ function Dashboard() {
   );
 }
 
-function ContractKPI({ label, stats, color }: { label: string; stats: any; color: "blue" | "emerald" | "amber" }) {
+function ContractKPI({ label, stats, color }: { label: string; stats: any; color: "blue" | "grey" | "dark" }) {
   const colors = {
-    blue: "from-blue-600 to-blue-800 shadow-blue-500/20 border-blue-400/20",
-    emerald: "from-emerald-600 to-emerald-800 shadow-emerald-500/20 border-emerald-400/20",
-    amber: "from-amber-600 to-amber-800 shadow-amber-500/20 border-amber-400/20"
+    blue: "from-[#2980B9] to-[#1F618D] shadow-blue-500/10 border-[#2980B9]/20",
+    grey: "from-[#7F8C8D] to-[#616A6B] shadow-slate-500/10 border-[#7F8C8D]/20",
+    dark: "from-slate-700 to-slate-800 shadow-slate-900/10 border-slate-600/20"
   };
 
   return (
-    <Card className={cn("relative overflow-hidden border-2 bg-gradient-to-br shadow-xl transition-all hover:scale-[1.02]", colors[color])}>
-      <CardContent className="p-6">
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-white/70 font-black tracking-widest text-[10px] uppercase">{label}</h3>
-          <Truck className="h-5 w-5 text-white/30" />
+    <Card className={cn("relative overflow-hidden border-2 bg-gradient-to-br shadow-md transition-all hover:scale-[1.01]", colors[color])}>
+      <CardContent className="p-4">
+        <div className="flex justify-between items-start mb-2">
+          <h3 className="text-white/80 font-black tracking-widest text-[9px] uppercase">{label}</h3>
+          <Truck className="h-4 w-4 text-white/30" />
         </div>
-        <div className="flex items-baseline gap-2 mb-4">
-          <span className="text-4xl font-black text-white tracking-tighter">{stats.total}</span>
-          <span className="text-white/60 font-bold text-xs uppercase tracking-widest">Máquinas</span>
+        <div className="flex items-baseline gap-1.5 mb-3">
+          <span className="text-3xl font-black text-white tracking-tighter leading-none">{stats.total}</span>
+          <span className="text-white/70 font-bold text-[9px] uppercase tracking-widest">Máquinas</span>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-white/10 rounded-lg p-2 border border-white/5">
-             <p className="text-white/40 text-[8px] font-black uppercase leading-none mb-1">Operacional</p>
-             <p className="text-emerald-400 font-black text-lg">{stats.op}</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="bg-white/10 rounded p-1.5 border border-white/10">
+             <p className="text-white/50 text-[7px] font-black uppercase leading-none mb-0.5">Operacional</p>
+             <p className="text-emerald-300 font-black text-sm leading-none">{stats.op}</p>
           </div>
-          <div className="bg-white/10 rounded-lg p-2 border border-white/5">
-             <p className="text-white/40 text-[8px] font-black uppercase leading-none mb-1">Em Oficina</p>
-             <p className="text-red-400 font-black text-lg">{stats.of}</p>
+          <div className="bg-white/10 rounded p-1.5 border border-white/10">
+             <p className="text-white/50 text-[7px] font-black uppercase leading-none mb-0.5">Em Oficina</p>
+             <p className="text-red-300 font-black text-sm leading-none">{stats.of}</p>
           </div>
         </div>
       </CardContent>
