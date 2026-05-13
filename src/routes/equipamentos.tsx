@@ -23,6 +23,7 @@ type Equipment = {
   id: string; identifier: string; type: string | null; brand: string | null; model: string | null;
   serial_number: string | null; year: number | null; hour_meter: number | null;
   status: EquipmentStatus; current_client_id: string | null;
+  contract_type: string | null;
 };
 type Client = { id: string; name: string };
 type Movement = {
@@ -70,7 +71,7 @@ function EquipmentPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Frota</h1>
+          <h1 className="text-3xl font-bold">Frota <span className="text-xs text-primary bg-primary/10 px-2 py-1 rounded">V2.0-TEST</span></h1>
           <p className="text-muted-foreground">{items.length} equipamentos cadastrados</p>
         </div>
         <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setEditing(null); }}>
@@ -118,6 +119,11 @@ function EquipmentPage() {
                 <p className="text-xs font-bold text-muted-foreground truncate uppercase">
                   {[eq.brand, eq.model].filter(Boolean).join(" ") || eq.type || "—"}
                 </p>
+                {eq.contract_type && (
+                  <p className="text-[10px] font-black text-primary/80 uppercase tracking-tighter">
+                    CONTRATO: {eq.contract_type}
+                  </p>
+                )}
               </div>
               <Badge status={eq.status} />
             </div>
@@ -179,6 +185,7 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
     model: equipment?.model ?? "",
     brand: equipment?.brand ?? "",
     status: (equipment?.status ?? "operacional") as EquipmentStatus,
+    contract_type: equipment?.contract_type ?? "Eventual",
   });
   const [loading, setLoading] = useState(false);
 
@@ -193,6 +200,7 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
       model: form.model || null,
       brand: form.brand || null,
       status: form.status,
+      contract_type: form.contract_type,
     };
 
     // Validação de duplicidade (Placa)
@@ -245,6 +253,18 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
         <p className="text-[10px] text-muted-foreground italic">
           * Aponte manutenções exclusivamente pela aba de Oficina.
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-[10px] font-black uppercase">Fidelização / Contrato</Label>
+        <Select value={form.contract_type} onValueChange={(v) => setForm({ ...form, contract_type: v })}>
+          <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Usina">Usina</SelectItem>
+            <SelectItem value="Porto">Porto</SelectItem>
+            <SelectItem value="Eventual">Eventual</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <Button type="submit" className="w-full h-12 font-bold" disabled={loading}>

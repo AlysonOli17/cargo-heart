@@ -38,6 +38,13 @@ function OperationPlanningPage() {
   const { user } = useAuth();
   const [programming, setProgramming] = useState<Programming[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return "—";
+    const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString('pt-BR');
+  };
+
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 0 }));
   
   const [rescheduleData, setRescheduleData] = useState<{ id: string, eqId: string, type: string, mode: "success" | "fail" } | null>(null);
@@ -115,7 +122,7 @@ function OperationPlanningPage() {
       await supabase.from("history").insert({
         equipment_id: rescheduleData.eqId,
         status_to: "Reagendado",
-        notes: `Agendamento de ${rescheduleData.type} não realizado. Motivo: ${rescheduleReason}. Reagendado para ${format(new Date(rescheduleDate), 'dd/MM/yyyy')}`
+        notes: `Agendamento de ${rescheduleData.type} não realizado. Motivo: ${rescheduleReason}. Reagendado para ${formatDate(rescheduleDate)}`
       });
     }
 
@@ -249,7 +256,7 @@ function OperationPlanningPage() {
                       <Hourglass className="h-4 w-4 text-blue-600 animate-pulse" />
                       <div>
                         <p className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão Retorno</p>
-                        <p className="text-xs font-black text-blue-800">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</p>
+                        <p className="text-xs font-black text-blue-800">{formatDate(e.maintenance_expected_return)}</p>
                       </div>
                     </div>
                   ) : (<div className="bg-muted/50 p-2 rounded-lg text-muted-foreground italic text-[10px] font-bold uppercase">Sem previsão definida</div>)}

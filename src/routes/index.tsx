@@ -17,7 +17,7 @@ export const Route = createFileRoute("/")({
 
 type Equipment = {
   id: string; identifier: string; type: string | null; status: EquipmentStatus;
-  maintenance_problem: string | null; maintenance_expected_return: string | null;
+  maintenance_problem: string | null; maintenance_expected_return: string | null; contract_type: string | null;
 };
 
 type Programming = {
@@ -26,6 +26,12 @@ type Programming = {
 };
 
 function Dashboard() {
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return "—";
+    const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString('pt-BR');
+  };
+
   const [items, setItems] = useState<Equipment[]>([]);
   const [todayProgramming, setTodayProgramming] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
@@ -117,7 +123,13 @@ function Dashboard() {
                 <div className="h-2" style={{ backgroundColor: getStatusColor(e.status, hasProgToday) }} />
                 <CardContent className="p-4 space-y-3">
                   <div className="flex justify-between items-start">
-                     <div><h3 className="font-mono font-black text-xl leading-none uppercase group-hover:text-primary transition-colors">{e.identifier}</h3><p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{e.type}</p></div>
+                     <div>
+                        <h3 className="font-mono font-black text-xl leading-none uppercase group-hover:text-primary transition-colors">{e.identifier}</h3>
+                        <p className="text-[10px] font-bold text-muted-foreground mt-1 uppercase">{e.type}</p>
+                        {e.contract_type && (
+                          <p className="text-[10px] font-black text-primary/80 uppercase mt-0.5 tracking-tighter">CONTRATO: {e.contract_type}</p>
+                        )}
+                      </div>
                      <Badge className="text-[9px] font-black uppercase text-white border-none" style={{ backgroundColor: getStatusColor(e.status, hasProgToday) }}>
                        {hasProgToday ? `AGENDADO: ${progType}` : STATUS_LABELS[e.status]}
                      </Badge>
@@ -141,7 +153,7 @@ function Dashboard() {
                             <Hourglass className="h-3.5 w-3.5 text-blue-600 animate-pulse" />
                             <div className="flex flex-col">
                               <span className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão Retorno</span>
-                              <span className="text-[11px] font-black text-blue-800">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</span>
+                              <span className="text-[11px] font-black text-blue-800">{formatDate(e.maintenance_expected_return)}</span>
                             </div>
                          </div>
                       )}

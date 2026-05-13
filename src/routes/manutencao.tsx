@@ -33,12 +33,12 @@ type Equipment = {
   id: string; identifier: string; type: string | null; status: EquipmentStatus;
   maintenance_problem: string | null; maintenance_started_at: string | null; maintenance_expected_return: string | null;
   maintenance_priority: string | null; maintenance_responsible: string | null; maintenance_type: string | null;
-  updated_at: string; sub_status?: string;
+  updated_at: string; sub_status?: string; contract_type: string | null;
 };
 
 type AlertRule = { id: string; name: string; threshold_days: number; is_active: boolean; };
 
-const STOP_TYPES = ["Lavador", "Mola", "Borracharia", "Preventiva", "Manutenção Programada", "Elétrica", "Motor", "Solda"];
+const STOP_TYPES = ["Manutenção Geral", "MEV", "Lavador", "Mola", "Borracharia", "Preventiva", "Elétrica", "Motor", "Solda"];
 
 function MaintenancePage() {
   const { user } = useAuth();
@@ -57,6 +57,10 @@ function MaintenancePage() {
   const [updatingEq, setUpdatingEq] = useState<Equipment | null>(null);
   const [newUpdateInfo, setNewUpdateInfo] = useState("");
   const [isSolved, setIsSolved] = useState<"yes" | "no">("no");
+  
+  // Estado para o Dialog de Liberação Final
+  const [releasingEq, setReleasingEq] = useState<Equipment | null>(null);
+  const [releaseInfo, setReleaseInfo] = useState("");
 
   const [form, setForm] = useState({
     status: "manutencao" as EquipmentStatus,
@@ -66,7 +70,8 @@ function MaintenancePage() {
     entryDate: new Date().toISOString().split("T")[0], // Data de entrada manual
     scheduledDate: new Date().toISOString().split("T")[0],
     expectedReturn: "",
-    stopType: "Manutenção Programada"
+    stopType: "Manutenção Geral",
+    maintenanceType: "Manutenção Geral"
   });
 
   const load = async () => {
@@ -107,7 +112,8 @@ function MaintenancePage() {
         maintenance_priority: form.priority,
         maintenance_responsible: form.responsible,
         maintenance_expected_return: form.expectedReturn || null,
-        maintenance_started_at: new Date(form.entryDate).toISOString()
+        maintenance_started_at: new Date(form.entryDate).toISOString(),
+        maintenance_type: form.maintenanceType
       }).eq("id", selectedEqId);
       
       if (error) {
@@ -137,16 +143,27 @@ function MaintenancePage() {
     const dateTag = `[${new Date().toLocaleDateString('pt-BR')}]`;
 
     if (isSolved === "yes") {
-      finalProblem = newUpdateInfo;
+      finalProblem = dateTag + " [RESOLVIDO] " + newUpdateInfo;
     } else {
-      finalProblem = (updatingEq.maintenance_problem || "") + "\n" + dateTag + " " + newUpdateInfo;
+      finalProblem = dateTag + " " + newUpdateInfo + "\n" + (updatingEq.maintenance_problem || "");
     }
 
     const { error } = await supabase.from("equipment").update({
       maintenance_problem: finalProblem
     }).eq("id", updatingEq.id);
 
-    if (!error) {
+    if (error) {
+      toast.error(`Erro ao atualizar: ${error.message}`);
+    } else {
+      // Registrar no histórico de movimentos
+      await supabase.from("movements").insert({
+        equipment_id: updatingEq.id,
+        from_status: updatingEq.status,
+        to_status: updatingEq.status,
+        notes: `ATUALIZAÇÃO: ${newUpdateInfo}`,
+        owner_id: user?.id
+      });
+
       toast.success("Histórico atualizado!");
       setUpdatingEq(null);
       setNewUpdateInfo("");
@@ -164,40 +181,75 @@ function MaintenancePage() {
       return;
     }
 
-    const finalProblem = (e.maintenance_problem || "") + "\n" + dateTag + " " + checkNote;
+    const finalProblem = dateTag + " " + checkNote + "\n" + (e.maintenance_problem || "");
     const { error } = await supabase.from("equipment").update({ 
       maintenance_problem: finalProblem,
       last_verified_at: new Date().toISOString()
     }).eq("id", e.id);
-    if (!error) toast.success("Verificação registrada!");
+    
+    if (error) {
+      console.error("Erro ao verificar:", error);
+      toast.error(`Erro ao verificar: ${error.message}`);
+    } else {
+      // Registrar no histórico de movimentos
+      await supabase.from("movements").insert({
+        equipment_id: e.id,
+        from_status: e.status,
+        to_status: e.status,
+        notes: `AUDITORIA: ${checkNote}`,
+        owner_id: user?.id
+      });
+
+      toast.success("Verificação registrada!");
+      load();
+    }
   };
 
-  const release = async (id: string, identifier: string) => {
-    const confirm = window.confirm(`Confirmar liberação do equipamento ${identifier}?`);
-    if (!confirm) return;
-    
+  const handleFinalRelease = async () => {
+    if (!releasingEq || !releaseInfo) {
+      toast.error("Descreva o que foi realizado para liberar.");
+      return;
+    }
+
+    const dateTag = `[LIBERAÇÃO ${new Date().toLocaleDateString('pt-BR')}]`;
+    const finalProblem = (releasingEq.maintenance_problem || "") + "\n" + dateTag + " " + releaseInfo;
+
     const { error } = await supabase.from("equipment").update({ 
       status: "operacional", 
-      maintenance_problem: null, 
+      maintenance_problem: finalProblem, 
       maintenance_expected_return: null, 
       maintenance_priority: null, 
       maintenance_responsible: null, 
       maintenance_started_at: null 
-    }).eq("id", id);
+    }).eq("id", releasingEq.id);
     
     if (error) {
       console.error("Erro ao liberar:", error);
       toast.error(`Falha ao liberar: ${error.message}`);
     } else { 
-      toast.success(`${identifier} liberado!`); 
+      toast.success(`${releasingEq.identifier} liberado com sucesso!`); 
+      setReleasingEq(null);
+      setReleaseInfo("");
       load(); 
     }
   };
 
+  const release = (e: Equipment) => {
+    setReleasingEq(e);
+    setReleaseInfo("");
+  };
+
   const getDiasParado = (dateStr: string | null) => {
     if (!dateStr) return 0;
-    const diff = new Date().getTime() - new Date(dateStr).getTime();
+    const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00");
+    const diff = new Date().getTime() - d.getTime();
     return Math.max(0, Math.floor(diff / (1000 * 3600 * 24)));
+  };
+
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return "—";
+    const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString('pt-BR');
   };
 
   const filtered = items.filter(e => e.identifier.toLowerCase().includes(searchQuery.toLowerCase()) || (e.type || "").toLowerCase().includes(searchQuery.toLowerCase()));
@@ -216,8 +268,8 @@ function MaintenancePage() {
       e.type || "-",
       e.maintenance_problem || "-",
       e.maintenance_priority || "Média",
-      e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString('pt-BR') : "-",
-      e.maintenance_expected_return ? new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR') : "-",
+      e.maintenance_started_at ? formatDate(e.maintenance_started_at) : "-",
+      e.maintenance_expected_return ? formatDate(e.maintenance_expected_return) : "-",
       getDiasParado(e.maintenance_started_at || e.updated_at).toString()
     ]);
 
@@ -279,6 +331,20 @@ function MaintenancePage() {
                         <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Status</Label><Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manutencao">Manutenção</SelectItem><SelectItem value="indisponivel">Indisponível</SelectItem></SelectContent></Select></div>
                         <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Prioridade</Label><Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Média">Média</SelectItem><SelectItem value="Crítica">Crítica</SelectItem></SelectContent></Select></div>
                       </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-black uppercase">Tipo de Intervenção</Label>
+                        <Select value={form.maintenanceType} onValueChange={(v) => setForm({...form, maintenanceType: v})}>
+                          <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Manutenção Geral">Manutenção Geral</SelectItem>
+                            <SelectItem value="MEV">MEV</SelectItem>
+                            <SelectItem value="Lavador">Lavador</SelectItem>
+                            <SelectItem value="Mola">Mola</SelectItem>
+                            <SelectItem value="Preventiva">Preventiva</SelectItem>
+                            <SelectItem value="Elétrica">Elétrica</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </>
                   ) : (
                     <div className="grid grid-cols-2 gap-3">
@@ -319,20 +385,23 @@ function MaintenancePage() {
                               {isOverdue && <AlertCircle className="h-4 w-4 text-red-600 animate-pulse" />}
                             </div>
                             <p className="text-[9px] font-bold text-muted-foreground uppercase">{e.type}</p>
+                            {e.contract_type && (
+                              <p className="text-[9px] font-black text-primary uppercase mt-0.5">{e.contract_type}</p>
+                            )}
                           </td>
                           <td className="px-4 py-4">
                             <div className="bg-muted/30 p-2 rounded-lg text-xs font-medium border mb-1 whitespace-pre-wrap">{e.maintenance_problem || '—'}</div>
                             <Badge variant={e.maintenance_priority === 'Crítica' ? 'destructive' : 'secondary'} className="text-[9px] font-bold">{e.maintenance_priority || 'Média'}</Badge>
                           </td>
-                          <td className="px-4 py-4 text-center font-medium text-muted-foreground">{e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString('pt-BR') : '—'}</td>
-                          <td className="px-4 py-4 text-center">{e.maintenance_expected_return ? (<Badge variant="outline" className="border-primary text-primary font-black text-[10px]">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</Badge>) : <span className="text-muted-foreground/30 text-[10px] font-bold italic">NÃO INF.</span>}</td>
+                          <td className="px-4 py-4 text-center font-medium text-muted-foreground">{e.maintenance_started_at ? formatDate(e.maintenance_started_at) : '—'}</td>
+                          <td className="px-4 py-4 text-center">{e.maintenance_expected_return ? (<Badge variant="outline" className="border-primary text-primary font-black text-[10px]">{formatDate(e.maintenance_expected_return)}</Badge>) : <span className="text-muted-foreground/30 text-[10px] font-bold italic">NÃO INF.</span>}</td>
                           <td className="px-4 py-4 text-center">
                             <span className={cn("text-lg font-black", isOverdue && "text-red-600")}>{dias}</span>
                           </td>
                           <td className="px-4 py-4 text-right flex items-center justify-end gap-2">
                             <Button variant="outline" size="sm" onClick={() => handleQuickVerify(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50"><CheckCircle2 className="h-3 w-3 mr-1" /> VERIFICAR</Button>
                             <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="font-black border-2 h-8 text-[10px] text-blue-600 border-blue-100 hover:bg-blue-50"><Edit3 className="h-3 w-3 mr-1" /> ATUALIZAR</Button>
-                            <Button variant="outline" size="sm" onClick={() => release(e.id, e.identifier)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
+                            <Button variant="outline" size="sm" onClick={() => release(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
                           </td>
                         </tr>
                       );
@@ -367,6 +436,37 @@ function MaintenancePage() {
           </div>
           <DialogFooter>
             <Button onClick={handleUpdateStatus} className="w-full h-12 font-black uppercase bg-blue-600 text-white">SALVAR ATUALIZAÇÃO</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG DE LIBERAÇÃO FINAL (FECHAMENTO) */}
+      <Dialog open={!!releasingEq} onOpenChange={(o) => !o && setReleasingEq(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase flex items-center gap-2 text-emerald-600">
+              <CheckCircle2 className="h-5 w-5" /> Liberar {releasingEq?.identifier}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+             <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100">
+                <p className="text-[10px] font-black text-emerald-800 uppercase mb-1">Resumo da Manutenção</p>
+                <p className="text-xs text-emerald-900 italic">Ao liberar, este equipamento voltará para o status "Operacional".</p>
+             </div>
+             <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase">O que foi resolvido? (Relatório de Saída)</Label>
+                <Textarea 
+                  value={releaseInfo} 
+                  onChange={(e) => setReleaseInfo(e.target.value)} 
+                  placeholder="Descreva as peças trocadas ou serviços realizados..." 
+                  className="h-32 border-2 focus:border-emerald-500" 
+                />
+             </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={handleFinalRelease} className="w-full h-12 font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700">
+              CONFIRMAR E LIBERAR EQUIPAMENTO
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
