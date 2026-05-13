@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Pencil, Trash2, History } from "lucide-react";
+import { Plus, Pencil, Trash2, History, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
@@ -38,6 +38,7 @@ function EquipmentPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Equipment | null>(null);
   const [historyFor, setHistoryFor] = useState<Equipment | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const load = async () => {
     const [{ data: e }, { data: c }] = await Promise.all([
@@ -81,8 +82,35 @@ function EquipmentPage() {
         </Dialog>
       </div>
 
+      <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="relative w-full md:max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input 
+            placeholder="Buscar por placa, tipo, marca ou modelo..." 
+            className="pl-10 h-11 border-2"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <p className="text-sm text-muted-foreground font-medium italic">
+          {items.filter(eq => 
+            eq.identifier.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (eq.type || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (eq.brand || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (eq.model || "").toLowerCase().includes(searchQuery.toLowerCase())
+          ).length} máquinas encontradas
+        </p>
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {items.map((eq) => (
+        {items
+          .filter(eq => 
+            eq.identifier.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (eq.type || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (eq.brand || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (eq.model || "").toLowerCase().includes(searchQuery.toLowerCase())
+          )
+          .map((eq) => (
           <Card key={eq.id} className="p-4 space-y-3">
             <div className="flex justify-between items-start gap-2">
               <div className="min-w-0">
@@ -166,6 +194,14 @@ function EquipmentForm({ equipment, clients, userId, onDone }: { equipment: Equi
       brand: form.brand || null,
       status: form.status,
     };
+
+    // Validação de duplicidade (Placa)
+    const { data: existing } = await supabase.from("equipment").select("id").eq("identifier", form.identifier.toUpperCase()).maybeSingle();
+    if (existing && (!equipment || existing.id !== equipment.id)) {
+      toast.error("Já existe um equipamento com esta placa/identificação!");
+      setLoading(false);
+      return;
+    }
 
     const { error } = equipment
       ? await supabase.from("equipment").update(payload).eq("id", equipment.id)

@@ -22,22 +22,29 @@ export function MaintenanceGovernanceAlert() {
   const check = async () => {
     if (!user) return;
 
-    // 1. Carrega perfil do usuário logado
-    const { data: prof } = await supabase.from("profiles").select("department, receives_alerts").eq("id", user.id).maybeSingle();
-    setProfile(prof);
+    // 1. Carrega perfil e regras de alerta
+    const [{ data: prof }, { data: rls }] = await Promise.all([
+      supabase.from("profiles").select("department, receives_alerts").eq("id", user.id).maybeSingle(),
+      supabase.from("alert_rules").select("*").eq("is_active", true).eq("rule_type", "maintenance_duration").maybeSingle()
+    ]);
 
-    // 2. Verifica se já passou das 10h (ou se deve mostrar o dia todo após as 10h)
+    setProfile(prof);
+    const rule = rls as any;
+    const threshold = rule?.threshold_days ?? 5;
+    const alertHour = rule?.alert_time ? parseInt(rule.alert_time.split(':')[0]) : 10;
+
+    // 2. Verifica se já passou do horário definido na regra
     const now = new Date();
     const currentHour = now.getHours();
-    setIsTimeToShow(currentHour >= 10);
+    setIsTimeToShow(currentHour >= alertHour);
 
-    // 3. Busca equipamentos em manutenção há mais de 5 dias que NÃO foram verificados hoje
+    // 3. Busca equipamentos em manutenção há mais de X dias que NÃO foram verificados hoje
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
     const { data: eqs } = await supabase.from("equipment")
       .select("id, identifier, maintenance_problem, maintenance_started_at, last_verified_at")
-      .in("status", ["manutencao", "indisponivel"]);
+      .in("status", ["manutencao", "indisponivel", "finalizacao", "programado"]);
 
     const critical = (eqs ?? []).filter(e => {
       if (!e.maintenance_started_at) return false;
@@ -48,7 +55,7 @@ export function MaintenanceGovernanceAlert() {
       const lastVerified = e.last_verified_at ? new Date(e.last_verified_at) : null;
       const verifiedToday = lastVerified && lastVerified >= todayStart;
 
-      return diffDays >= 5 && !verifiedToday;
+      return diffDays >= threshold && !verifiedToday;
     }).map(e => ({
       id: e.id,
       identifier: e.identifier,
@@ -59,21 +66,35 @@ export function MaintenanceGovernanceAlert() {
     setCriticalItems(critical);
   };
 
-  const verify = async (id: string, identifier: string) => {
-    const { error } = await supabase.from("equipment").update({
+  const verify = async (e: CriticalEquipment, checkNote: string = "Verificação diária realizada.") => {
+    const dateTag = new Date().toLocaleDateString('pt-BR');
+    const finalProblem = (e.maintenance_problem || "") + "\n" + dateTag + " " + checkNote;
+    const { error } = await supabase.from("equipment").update({ 
+      maintenance_problem: finalProblem,
       last_verified_at: new Date().toISOString()
-    }).eq("id", id);
-
+    }).eq("id", e.id);
+    
     if (!error) {
-      toast.success(`Situação de ${identifier} confirmada para hoje!`);
+      toast.success(`Situação de ${e.identifier} confirmada para hoje!`);
       check();
     }
   };
 
   useEffect(() => {
+    if (!user) return;
     check();
-    const interval = setInterval(check, 1000 * 60 * 5); // Verifica a cada 5 min
-    return () => clearInterval(interval);
+    
+    const channel = supabase.channel("governance-alerts")
+      .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, check)
+      .on("postgres_changes", { event: "*", schema: "public", table: "alert_rules" }, check)
+      .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, check)
+      .subscribe();
+
+    const interval = setInterval(check, 1000 * 60 * 5);
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   // Regra de exibição: 
@@ -104,7 +125,7 @@ export function MaintenanceGovernanceAlert() {
                 <p className="text-[10px] font-bold opacity-80 uppercase">{item.days_stopped} dias parado</p>
               </div>
               <Button 
-                onClick={() => verify(item.id, item.identifier)}
+                onClick={() => verify(item)}
                 size="sm" 
                 className="h-8 bg-white text-red-600 hover:bg-red-50 font-black text-[9px] uppercase px-3"
               >

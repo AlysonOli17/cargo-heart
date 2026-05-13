@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { format } from "date-fns";
 
 export const Route = createFileRoute("/manutencao")({
   head: () => ({ meta: [{ title: "CCO Manutenção — Frota Busato" }] }),
@@ -31,8 +32,10 @@ type Equipment = {
   id: string; identifier: string; type: string | null; status: EquipmentStatus;
   maintenance_problem: string | null; maintenance_started_at: string | null; maintenance_expected_return: string | null;
   maintenance_priority: string | null; maintenance_responsible: string | null; maintenance_type: string | null;
-  updated_at: string;
+  updated_at: string; sub_status?: string;
 };
+
+type AlertRule = { id: string; name: string; threshold_days: number; is_active: boolean; };
 
 const STOP_TYPES = ["Lavador", "Mola", "Borracharia", "Preventiva", "Manutenção Programada", "Elétrica", "Motor", "Solda"];
 
@@ -47,6 +50,7 @@ function MaintenancePage() {
   
   const [openCombo, setOpenCombo] = useState(false);
   const [selectedEqId, setSelectedEqId] = useState("");
+  const [alertRules, setAlertRules] = useState<AlertRule[]>([]);
 
   // Estado para o Dialog de Atualização
   const [updatingEq, setUpdatingEq] = useState<Equipment | null>(null);
@@ -65,15 +69,36 @@ function MaintenancePage() {
   });
 
   const load = async () => {
-    const { data: e } = await supabase.from("equipment").select("*").order("identifier");
+    const [{ data: e }, { data: rls }] = await Promise.all([
+      supabase.from("equipment").select("*").order("identifier"),
+      supabase.from("alert_rules").select("*").eq("is_active", true)
+    ]);
+    
     setAvailableEqs((e ?? []).map(x => ({ id: x.id, identifier: x.identifier })));
     setItems((e ?? []).filter(x => ['manutencao', 'indisponivel', 'finalizacao', 'programado'].includes(x.status)) as Equipment[]);
+    setAlertRules((rls ?? []) as AlertRule[]);
   };
 
-  useEffect(() => { if (user) load(); }, [user]);
+  useEffect(() => {
+    if (!user) return;
+    load();
+    const ch = supabase.channel("maint-realtime-v1")
+      .on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "alert_rules" }, load)
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [user]);
 
   const handleSubmit = async () => {
     if (!selectedEqId) { toast.error("Selecione o equipamento"); return; }
+    
+    // Verificação de duplicidade de equipamento em manutenção ativa
+    const activeMaintenance = items.find(i => i.id === selectedEqId && ['manutencao', 'indisponivel', 'finalizacao'].includes(i.status));
+    if (activeMaintenance && mode === "now") {
+        toast.error("Este equipamento já está em manutenção!");
+        return;
+    }
+
     if (mode === "now") {
       const { error } = await supabase.from("equipment").update({
         status: form.status,
@@ -83,7 +108,14 @@ function MaintenancePage() {
         maintenance_expected_return: form.expectedReturn || null,
         maintenance_started_at: new Date(form.entryDate).toISOString()
       }).eq("id", selectedEqId);
-      if (!error) { toast.success("Entrada realizada"); setIsAdding(false); load(); }
+      
+      if (error) {
+        toast.error(`Erro ao atualizar manutenção: ${error.message}`);
+      } else { 
+        toast.success("Entrada realizada"); 
+        setIsAdding(false); 
+        load(); 
+      }
     } else {
       const { error } = await supabase.from("programming").insert({
         equipment_id: selectedEqId,
@@ -121,11 +153,44 @@ function MaintenancePage() {
     }
   };
 
+  const handleQuickVerify = async (e: Equipment) => {
+    const dateTag = `[${new Date().toLocaleDateString('pt-BR')}]`;
+    const checkNote = "Verificação diária realizada: Sem alterações.";
+    
+    // Evita duplicar se já foi verificado hoje
+    if (e.maintenance_problem?.includes(dateTag + " " + checkNote)) {
+      toast.info("Já verificado hoje!");
+      return;
+    }
+
+    const finalProblem = (e.maintenance_problem || "") + "\n" + dateTag + " " + checkNote;
+    const { error } = await supabase.from("equipment").update({ 
+      maintenance_problem: finalProblem,
+      last_verified_at: new Date().toISOString()
+    }).eq("id", e.id);
+    if (!error) toast.success("Verificação registrada!");
+  };
+
   const release = async (id: string, identifier: string) => {
     const confirm = window.confirm(`Confirmar liberação do equipamento ${identifier}?`);
     if (!confirm) return;
-    const { error } = await supabase.from("equipment").update({ status: "operacional", maintenance_problem: null, maintenance_expected_return: null, maintenance_priority: null, maintenance_responsible: null, maintenance_started_at: null }).eq("id", id);
-    if (!error) { toast.success(`${identifier} liberado!`); load(); }
+    
+    const { error } = await supabase.from("equipment").update({ 
+      status: "operacional", 
+      maintenance_problem: null, 
+      maintenance_expected_return: null, 
+      maintenance_priority: null, 
+      maintenance_responsible: null, 
+      maintenance_started_at: null 
+    }).eq("id", id);
+    
+    if (error) {
+      console.error("Erro ao liberar:", error);
+      toast.error(`Falha ao liberar: ${error.message}`);
+    } else { 
+      toast.success(`${identifier} liberado!`); 
+      load(); 
+    }
   };
 
   const getDiasParado = (dateStr: string | null) => {
@@ -135,6 +200,40 @@ function MaintenancePage() {
   };
 
   const filtered = items.filter(e => e.identifier.toLowerCase().includes(searchQuery.toLowerCase()) || (e.type || "").toLowerCase().includes(searchQuery.toLowerCase()));
+  
+  const handleExportPDF = () => {
+    const doc = new jsPDF({ orientation: "landscape" });
+    const today = format(new Date(), "dd/MM/yyyy HH:mm");
+    
+    doc.setFontSize(18);
+    doc.text("CCO MANUTENÇÃO - FROTA BUSATO", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Relatório gerado em: ${today}`, 14, 22);
+
+    const tableData = filtered.map(e => [
+      e.identifier,
+      e.type || "-",
+      e.maintenance_problem || "-",
+      e.maintenance_priority || "Média",
+      e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString('pt-BR') : "-",
+      e.maintenance_expected_return ? new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR') : "-",
+      getDiasParado(e.maintenance_started_at || e.updated_at).toString()
+    ]);
+
+    autoTable(doc, {
+      startY: 30,
+      head: [["Placa", "Tipo", "Status / Histórico", "Prioridade", "Entrada", "Previsão", "Dias"]],
+      body: tableData,
+      theme: "striped",
+      headStyles: { fillColor: [41, 128, 185], textColor: 255, fontStyle: "bold" },
+      styles: { fontSize: 8, cellPadding: 2 },
+      columnStyles: { 2: { cellWidth: 80 } }
+    });
+
+    doc.save(`manutencao_frota_${format(new Date(), "yyyy-MM-dd")}.pdf`);
+    toast.success("PDF gerado com sucesso!");
+  };
+
   const grouped = filtered.reduce((acc, e) => {
     const group = e.maintenance_type === "MEV" ? "MEV" : (e.type || "Geral");
     if (!acc[group]) acc[group] = [];
@@ -151,7 +250,7 @@ function MaintenancePage() {
           <p className="text-muted-foreground font-medium italic">{items.length} máquinas em intervenção</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => {}} className="font-bold border-2 h-10 uppercase text-xs"><FileDown className="h-4 w-4 mr-2" /> Exportar Paisagem</Button>
+          <Button variant="outline" onClick={handleExportPDF} className="font-bold border-2 h-10 uppercase text-xs"><FileDown className="h-4 w-4 mr-2" /> Exportar Paisagem</Button>
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
             <DialogTrigger asChild><Button className="font-bold uppercase shadow-lg h-10 text-xs"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
             <DialogContent className="max-w-md">
@@ -206,22 +305,37 @@ function MaintenancePage() {
                     <tr><th className="px-4 py-4">Equipamento</th><th className="px-4 py-4 min-w-[200px]">Status / Histórico</th><th className="px-4 py-4 text-center">Entrada</th><th className="px-4 py-4 text-center">Previsão</th><th className="px-4 py-4 text-center">Dias</th><th className="px-4 py-4 text-right">Ações</th></tr>
                   </thead>
                   <tbody className="divide-y">
-                    {grouped[group].map(e => (
-                      <tr key={e.id} className="hover:bg-muted/20 transition-colors">
-                        <td className="px-4 py-4"><p className="font-mono font-black text-base">{e.identifier}</p><p className="text-[9px] font-bold text-muted-foreground uppercase">{e.type}</p></td>
-                        <td className="px-4 py-4">
-                          <div className="bg-muted/30 p-2 rounded-lg text-xs font-medium border mb-1 whitespace-pre-wrap">{e.maintenance_problem || '—'}</div>
-                          <Badge variant={e.maintenance_priority === 'Crítica' ? 'destructive' : 'secondary'} className="text-[9px] font-bold">{e.maintenance_priority || 'Média'}</Badge>
-                        </td>
-                        <td className="px-4 py-4 text-center font-medium text-muted-foreground">{e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString('pt-BR') : '—'}</td>
-                        <td className="px-4 py-4 text-center">{e.maintenance_expected_return ? (<Badge variant="outline" className="border-primary text-primary font-black text-[10px]">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</Badge>) : <span className="text-muted-foreground/30 text-[10px] font-bold italic">NÃO INF.</span>}</td>
-                        <td className="px-4 py-4 text-center"><span className="text-lg font-black">{getDiasParado(e.maintenance_started_at || e.updated_at)}</span></td>
-                        <td className="px-4 py-4 text-right flex items-center justify-end gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="font-black border-2 h-8 text-[10px] text-blue-600 border-blue-100 hover:bg-blue-50"><Edit3 className="h-3 w-3 mr-1" /> ATUALIZAR</Button>
-                          <Button variant="outline" size="sm" onClick={() => release(e.id, e.identifier)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
-                        </td>
-                      </tr>
-                    ))}
+                    {grouped[group].map(e => {
+                      const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
+                      const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
+                      const isOverdue = dias >= threshold;
+
+                      return (
+                        <tr key={e.id} className={cn("hover:bg-muted/20 transition-colors", isOverdue && "bg-red-50/50")}>
+                          <td className="px-4 py-4">
+                            <div className="flex items-center gap-2">
+                              <p className="font-mono font-black text-base">{e.identifier}</p>
+                              {isOverdue && <AlertCircle className="h-4 w-4 text-red-600 animate-pulse" />}
+                            </div>
+                            <p className="text-[9px] font-bold text-muted-foreground uppercase">{e.type}</p>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="bg-muted/30 p-2 rounded-lg text-xs font-medium border mb-1 whitespace-pre-wrap">{e.maintenance_problem || '—'}</div>
+                            <Badge variant={e.maintenance_priority === 'Crítica' ? 'destructive' : 'secondary'} className="text-[9px] font-bold">{e.maintenance_priority || 'Média'}</Badge>
+                          </td>
+                          <td className="px-4 py-4 text-center font-medium text-muted-foreground">{e.maintenance_started_at ? new Date(e.maintenance_started_at).toLocaleDateString('pt-BR') : '—'}</td>
+                          <td className="px-4 py-4 text-center">{e.maintenance_expected_return ? (<Badge variant="outline" className="border-primary text-primary font-black text-[10px]">{new Date(e.maintenance_expected_return).toLocaleDateString('pt-BR')}</Badge>) : <span className="text-muted-foreground/30 text-[10px] font-bold italic">NÃO INF.</span>}</td>
+                          <td className="px-4 py-4 text-center">
+                            <span className={cn("text-lg font-black", isOverdue && "text-red-600")}>{dias}</span>
+                          </td>
+                          <td className="px-4 py-4 text-right flex items-center justify-end gap-2">
+                            <Button variant="outline" size="sm" onClick={() => handleQuickVerify(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50"><CheckCircle2 className="h-3 w-3 mr-1" /> VERIFICAR</Button>
+                            <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="font-black border-2 h-8 text-[10px] text-blue-600 border-blue-100 hover:bg-blue-50"><Edit3 className="h-3 w-3 mr-1" /> ATUALIZAR</Button>
+                            <Button variant="outline" size="sm" onClick={() => release(e.id, e.identifier)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

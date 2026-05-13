@@ -78,9 +78,9 @@ function Dashboard() {
 
   const stats = useMemo(() => ({
     total: items.length,
-    operacional: items.filter(e => !todayProgramming[e.id] && (e.status === 'operacional' || e.status === 'disponivel')).length,
-    manutencao: items.filter(e => !!todayProgramming[e.id] || e.status === 'manutencao' || e.status === 'indisponivel').length,
-    preventiva: items.filter(e => e.status === 'programado').length,
+    operacional: items.filter(e => !todayProgramming[e.id] && (e.status === 'operacional' || e.status === 'disponivel' || e.status === 'com_cliente')).length,
+    manutencao: items.filter(e => !!todayProgramming[e.id] || ['manutencao', 'indisponivel', 'finalizacao', 'programado'].includes(e.status)).length,
+    preventiva: items.filter(e => e.status === 'programado' || todayProgramming[e.id] === 'Preventiva').length,
   }), [items, todayProgramming]);
 
   return (

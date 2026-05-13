@@ -47,7 +47,17 @@ function AccessPage() {
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
-  useEffect(() => { if (user && isAdmin) load(); }, [user, isAdmin]);
+  useEffect(() => {
+    if (user && isAdmin) {
+      load();
+      const ch = supabase.channel("access-realtime")
+        .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, load)
+        .on("postgres_changes", { event: "*", schema: "public", table: "user_roles" }, load)
+        .on("postgres_changes", { event: "*", schema: "public", table: "alert_rules" }, load)
+        .subscribe();
+      return () => { supabase.removeChannel(ch); };
+    }
+  }, [user, isAdmin]);
 
   if (authLoading || roleLoading) return null;
   if (!user || !isAdmin) return <Navigate to="/" />;
@@ -58,7 +68,13 @@ function AccessPage() {
       threshold_days: 5,
       alert_time: "10:00:00"
     });
-    if (error) toast.error("Erro ao criar regra"); else { toast.success("Regra criada!"); load(); }
+    if (error) {
+      console.error("Erro ao criar regra:", error);
+      toast.error(`Erro ao criar regra: ${error.message}`);
+    } else { 
+      toast.success("Regra criada!"); 
+      load(); 
+    }
   };
 
   const updateRule = async (id: string, updates: Partial<AlertRule>) => {
