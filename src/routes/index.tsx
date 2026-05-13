@@ -32,7 +32,7 @@ type LiveMovement = {
   created_at: string;
   to_status: EquipmentStatus;
   notes: string | null;
-  equipment: { identifier: string; type: string | null };
+  equipment: { identifier: string; type: string | null; contract_type: string | null };
 };
 
 function Dashboard() {
@@ -47,6 +47,7 @@ function Dashboard() {
   const [movements, setMovements] = useState<LiveMovement[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [contractFilter, setContractFilter] = useState<string>("all");
 
   const load = async () => {
     const today = format(new Date(), "yyyy-MM-dd");
@@ -59,10 +60,10 @@ function Dashboard() {
       supabase.from("movements")
         .select(`
           id, created_at, to_status, notes,
-          equipment ( identifier, type )
+          equipment ( identifier, type, contract_type )
         `)
         .order("created_at", { ascending: false })
-        .limit(10)
+        .limit(15)
     ]);
 
     setItems(eqs ?? []);
@@ -91,16 +92,22 @@ function Dashboard() {
     return '#ef4444'; // Vermelho
   };
 
-  const filtered = useMemo(() => {
-    return items.filter(e => {
+  const filteredItems = useMemo(() => {
+    return items.filter((e) => {
       const matchSearch = e.identifier.toLowerCase().includes(search.toLowerCase()) || (e.type || "").toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === "all" || 
+      const matchStatus = statusFilter === "all" ? true : 
                         (statusFilter === "operacional" && (e.status === "operacional" || e.status === "disponivel")) ||
                         (statusFilter === "manutencao" && (e.status === "manutencao" || e.status === "indisponivel")) ||
                         e.status === statusFilter;
-      return matchSearch && matchStatus;
+      const matchContract = contractFilter === "all" ? true : e.contract_type === contractFilter;
+      return matchSearch && matchStatus && matchContract;
     });
-  }, [items, search, statusFilter]);
+  }, [items, search, statusFilter, contractFilter]);
+
+  const filteredMovements = useMemo(() => {
+    if (contractFilter === "all") return movements;
+    return movements.filter(m => m.equipment?.contract_type === contractFilter);
+  }, [movements, contractFilter]);
 
   const stats = useMemo(() => {
     const getStats = (contract: string) => {
@@ -130,9 +137,21 @@ function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <ContractKPI label="USINA" stats={stats.usina} color="blue" />
-        <ContractKPI label="PORTO" stats={stats.porto} color="grey" />
-        <ContractKPI label="EVENTUAL" stats={stats.eventual} color="dark" />
+        <ContractKPI 
+          label="USINA" stats={stats.usina} color="blue" 
+          isActive={contractFilter === "all" || contractFilter === "Usina"} 
+          onClick={() => setContractFilter(prev => prev === "Usina" ? "all" : "Usina")} 
+        />
+        <ContractKPI 
+          label="PORTO" stats={stats.porto} color="grey" 
+          isActive={contractFilter === "all" || contractFilter === "Porto"} 
+          onClick={() => setContractFilter(prev => prev === "Porto" ? "all" : "Porto")} 
+        />
+        <ContractKPI 
+          label="EVENTUAL" stats={stats.eventual} color="dark" 
+          isActive={contractFilter === "all" || contractFilter === "Eventual"} 
+          onClick={() => setContractFilter(prev => prev === "Eventual" ? "all" : "Eventual")} 
+        />
       </div>
 
       <div className="bg-slate-950 rounded-xl border-2 border-slate-900 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-1000">
@@ -155,10 +174,10 @@ function Dashboard() {
                </tr>
              </thead>
              <tbody className="divide-y divide-slate-900">
-               {movements.length === 0 && (
+               {filteredMovements.length === 0 && (
                  <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-700 font-bold italic uppercase tracking-tighter">Nenhuma movimentação registrada nas últimas horas</td></tr>
                )}
-               {movements.map(m => (
+               {filteredMovements.map(m => (
                  <tr key={m.id} className="hover:bg-slate-900/40 transition-colors group border-b border-slate-900/50">
                     <td className="px-4 py-3 font-mono text-amber-500 font-black text-xs">{format(new Date(m.created_at), "HH:mm")}</td>
                     <td className="px-4 py-3">
@@ -264,7 +283,7 @@ function Dashboard() {
   );
 }
 
-function ContractKPI({ label, stats, color }: { label: string; stats: any; color: "blue" | "grey" | "dark" }) {
+function ContractKPI({ label, stats, color, isActive, onClick }: { label: string; stats: any; color: "blue" | "grey" | "dark", isActive: boolean, onClick: () => void }) {
   const colors = {
     blue: "from-[#2980B9] to-[#1F618D] shadow-blue-500/10 border-[#2980B9]/20",
     grey: "from-[#7F8C8D] to-[#616A6B] shadow-slate-500/10 border-[#7F8C8D]/20",
@@ -272,7 +291,14 @@ function ContractKPI({ label, stats, color }: { label: string; stats: any; color
   };
 
   return (
-    <Card className={cn("relative overflow-hidden border-2 bg-gradient-to-br shadow-md transition-all hover:scale-[1.01]", colors[color])}>
+    <Card 
+      onClick={onClick}
+      className={cn(
+        "relative overflow-hidden border-2 bg-gradient-to-br shadow-md transition-all cursor-pointer", 
+        colors[color],
+        isActive ? "scale-100 ring-2 ring-white/20 ring-offset-2 ring-offset-slate-50 opacity-100" : "scale-[0.98] opacity-60 hover:opacity-100 hover:scale-[0.99] grayscale-[50%]"
+      )}
+    >
       <CardContent className="p-4">
         <div className="flex justify-between items-start mb-2">
           <h3 className="text-white/80 font-black tracking-widest text-[9px] uppercase">{label}</h3>
