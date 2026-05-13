@@ -32,7 +32,7 @@ type LiveMovement = {
   created_at: string;
   to_status: EquipmentStatus;
   notes: string | null;
-  equipment: { identifier: string; type: string | null; contract_type: string | null };
+  equipment: { identifier: string; type: string | null; contract_type: string | null; maintenance_problem: string | null; maintenance_expected_return: string | null; };
 };
 
 function Dashboard() {
@@ -60,7 +60,7 @@ function Dashboard() {
       supabase.from("movements")
         .select(`
           id, created_at, to_status, notes,
-          equipment ( identifier, type, contract_type )
+          equipment ( identifier, type, contract_type, maintenance_problem, maintenance_expected_return )
         `)
         .order("created_at", { ascending: false })
         .limit(15)
@@ -207,12 +207,17 @@ function Dashboard() {
                        </p>
                     </td>
                     <td className="px-4 py-3 text-right">
-                       <span className={cn(
-                         "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest",
-                         m.to_status === 'operacional' || m.to_status === 'disponivel' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-red-500/20 text-red-400 border border-red-500/30"
-                       )}>
-                         {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "EM OPERAÇÃO" : "EM OFICINA"}
-                       </span>
+                       <div className="flex flex-col items-end gap-1">
+                         <span className={cn(
+                           "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest",
+                           m.to_status === 'operacional' || m.to_status === 'disponivel' ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-red-500/20 text-red-400 border border-red-500/30"
+                         )}>
+                           {m.to_status === 'operacional' || m.to_status === 'disponivel' ? "EM OPERAÇÃO" : "EM OFICINA"}
+                         </span>
+                         {(m.to_status === 'manutencao' || m.to_status === 'indisponivel') && m.equipment?.maintenance_expected_return && (
+                           <Countdown targetDate={m.equipment.maintenance_expected_return} />
+                         )}
+                       </div>
                     </td>
                  </tr>
                ))}
