@@ -45,6 +45,7 @@ function MaintenancePage() {
   const { canWrite } = useRole();
   const [items, setItems] = useState<Equipment[]>([]);
   const [availableEqs, setAvailableEqs] = useState<{id: string, identifier: string}[]>([]);
+  const [users, setUsers] = useState<{id: string, full_name: string | null}[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [mode, setMode] = useState<"now" | "schedule">("now");
   const [searchQuery, setSearchQuery] = useState("");
@@ -70,19 +71,22 @@ function MaintenancePage() {
     entryDate: new Date().toISOString().split("T")[0], // Data de entrada manual
     scheduledDate: new Date().toISOString().split("T")[0],
     expectedReturn: "",
+    expectedReturnTime: "17:00", // Default time
+    alertUserId: "", // User to be alerted
     stopType: "Manutenção Geral",
     maintenanceType: "Manutenção Geral"
   });
 
-  const load = async () => {
-    const [{ data: e }, { data: rls }] = await Promise.all([
+    const [{ data: e }, { data: rls }, { data: profs }] = await Promise.all([
       supabase.from("equipment").select("*").order("identifier"),
-      supabase.from("alert_rules").select("*").eq("is_active", true)
+      supabase.from("alert_rules").select("*").eq("is_active", true),
+      supabase.from("profiles").select("id, full_name")
     ]);
     
     setAvailableEqs((e ?? []).map(x => ({ id: x.id, identifier: x.identifier })));
     setItems((e ?? []).filter(x => ['manutencao', 'indisponivel', 'finalizacao', 'programado'].includes(x.status)) as Equipment[]);
     setAlertRules((rls ?? []) as AlertRule[]);
+    setUsers((profs ?? []) as any[]);
   };
 
   useEffect(() => {
@@ -111,7 +115,8 @@ function MaintenancePage() {
         maintenance_problem: form.problem,
         maintenance_priority: form.priority,
         maintenance_responsible: form.responsible,
-        maintenance_expected_return: form.expectedReturn || null,
+        alert_user_id: form.alertUserId || null,
+        maintenance_expected_return: form.expectedReturn ? `${form.expectedReturn}T${form.expectedReturnTime || '00:00'}:00` : null,
         maintenance_started_at: new Date(form.entryDate).toISOString(),
         maintenance_type: form.maintenanceType
       }).eq("id", selectedEqId);
@@ -249,7 +254,13 @@ function MaintenancePage() {
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "—";
     const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00");
-    return d.toLocaleDateString('pt-BR');
+    const formattedDate = d.toLocaleDateString('pt-BR');
+    if (dateStr.includes("T")) {
+      const hours = d.getHours().toString().padStart(2, '0');
+      const minutes = d.getMinutes().toString().padStart(2, '0');
+      return `${formattedDate} ${hours}:${minutes}`;
+    }
+    return formattedDate;
   };
 
   const filtered = items.filter(e => e.identifier.toLowerCase().includes(searchQuery.toLowerCase()) || (e.type || "").toLowerCase().includes(searchQuery.toLowerCase()));
@@ -344,7 +355,32 @@ function MaintenancePage() {
           <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90"><Wrench className="h-8 w-8 text-primary" /> CCO Manutenção</h1>
           <p className="text-muted-foreground font-medium italic">{items.length} máquinas em intervenção</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="md:hidden w-full">
+           <div className="relative">
+             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+             <Input 
+               placeholder="Buscar placa ou tipo..." 
+               value={searchQuery} 
+               onChange={(e) => setSearchQuery(e.target.value)} 
+               className="pl-9 w-full rounded-xl h-10 border-2 bg-muted/30 focus:bg-background transition-all" 
+             />
+           </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="relative hidden md:block">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input 
+              placeholder="Buscar placa ou tipo..." 
+              value={searchQuery} 
+              onChange={(e) => setSearchQuery(e.target.value)} 
+              className="pl-9 w-64 rounded-xl h-10 border-2 bg-muted/30 focus:bg-background transition-all" 
+            />
+            {searchQuery && (
+              <span className="absolute -bottom-5 right-0 text-[9px] font-bold text-muted-foreground uppercase">
+                {filtered.length} encontrados
+              </span>
+            )}
+          </div>
           <Button variant="outline" onClick={handleExportPDF} className="font-bold border-2 h-10 uppercase text-xs"><FileDown className="h-4 w-4 mr-2" /> Exportar Paisagem</Button>
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
             <DialogTrigger asChild><Button className="font-bold uppercase shadow-lg h-10 text-xs"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
@@ -367,7 +403,31 @@ function MaintenancePage() {
                     <>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Data de Entrada</Label><Input type="date" value={form.entryDate} onChange={(e) => setForm({...form, entryDate: e.target.value})} className="h-10 font-bold" /></div>
-                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-primary">Previsão Retorno</Label><Input type="date" value={form.expectedReturn} onChange={(e) => setForm({...form, expectedReturn: e.target.value})} className="h-10 font-bold border-primary/30" /></div>
+                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-primary">Previsão Retorno (Data)</Label><Input type="date" value={form.expectedReturn} onChange={(e) => setForm({...form, expectedReturn: e.target.value})} className="h-10 font-bold border-primary/30" /></div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-black uppercase text-primary">Hora Prevista para Liberação</Label>
+                          <Input 
+                            type="time" 
+                            value={form.expectedReturnTime} 
+                            onChange={(e) => setForm({...form, expectedReturnTime: e.target.value})} 
+                            className="h-10 font-bold border-primary/30" 
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[10px] font-black uppercase">Usuário para Alerta de Atraso</Label>
+                          <Select value={form.alertUserId} onValueChange={(v) => setForm({...form, alertUserId: v})}>
+                            <SelectTrigger className="h-10 font-bold">
+                              <SelectValue placeholder="Selecione um usuário..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {users.map(u => (
+                                <SelectItem key={u.id} value={u.id}>{u.full_name || "Sem Nome"}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Status</Label><Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manutencao">Manutenção</SelectItem><SelectItem value="indisponivel">Indisponível</SelectItem></SelectContent></Select></div>

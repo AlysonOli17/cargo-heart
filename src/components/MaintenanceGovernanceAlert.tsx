@@ -12,6 +12,8 @@ type CriticalEquipment = {
   identifier: string;
   maintenance_problem: string;
   days_stopped: number;
+  expected_return?: string | null;
+  is_overdue?: boolean;
 };
 
 export function MaintenanceGovernanceAlert() {
@@ -44,7 +46,7 @@ export function MaintenanceGovernanceAlert() {
     todayStart.setHours(0, 0, 0, 0);
 
     const { data: eqs } = await supabase.from("equipment")
-      .select("id, identifier, maintenance_problem, maintenance_started_at, last_verified_at")
+      .select("id, identifier, maintenance_problem, maintenance_started_at, last_verified_at, maintenance_expected_return, alert_user_id")
       .in("status", ["manutencao", "indisponivel", "finalizacao", "programado"]);
 
     const critical = (eqs ?? []).filter(e => {
@@ -56,12 +58,19 @@ export function MaintenanceGovernanceAlert() {
       const lastVerified = e.last_verified_at ? new Date(e.last_verified_at) : null;
       const verifiedToday = lastVerified && lastVerified >= todayStart;
 
-      return diffDays >= threshold && !verifiedToday;
+      const isDurationCritical = diffDays >= threshold && !verifiedToday;
+      
+      const isOverdue = e.maintenance_expected_return ? new Date(e.maintenance_expected_return) < now : false;
+      const isUserAlerted = e.alert_user_id === user.id;
+
+      return isDurationCritical || (isOverdue && isUserAlerted);
     }).map(e => ({
       id: e.id,
       identifier: e.identifier,
       maintenance_problem: e.maintenance_problem || "Sem descrição",
-      days_stopped: Math.floor((now.getTime() - new Date(e.maintenance_started_at!).getTime()) / (1000 * 3600 * 24))
+      days_stopped: Math.floor((now.getTime() - new Date(e.maintenance_started_at!).getTime()) / (1000 * 3600 * 24)),
+      expected_return: e.maintenance_expected_return,
+      is_overdue: e.maintenance_expected_return ? new Date(e.maintenance_expected_return) < now : false
     }));
 
     setCriticalItems(critical);
@@ -114,7 +123,7 @@ export function MaintenanceGovernanceAlert() {
           </div>
           <div>
             <p className="font-black uppercase text-xs tracking-widest leading-none">Alerta de Governança — {new Date().toLocaleDateString('pt-BR')}</p>
-            <h2 className="text-sm font-bold">Existem {criticalItems.length} equipamentos parados há mais de 5 dias sem atualização hoje.</h2>
+            <h2 className="text-sm font-bold">Existem {criticalItems.length} alertas de manutenção que exigem sua atenção imediata.</h2>
           </div>
         </div>
 
@@ -122,8 +131,13 @@ export function MaintenanceGovernanceAlert() {
           {criticalItems.slice(0, 3).map(item => (
             <div key={item.id} className="bg-black/20 hover:bg-black/30 transition-colors p-2 rounded-lg flex items-center gap-3 border border-white/10 group">
               <div className="text-left">
-                <p className="font-mono font-black text-xs leading-none">{item.identifier}</p>
-                <p className="text-[10px] font-bold opacity-80 uppercase">{item.days_stopped} dias parado</p>
+                <p className="font-mono font-black text-xs leading-none flex items-center gap-1">
+                  {item.identifier} 
+                  {item.is_overdue && <Clock className="h-3 w-3 text-yellow-300 animate-pulse" />}
+                </p>
+                <p className={cn("text-[10px] font-bold uppercase", item.is_overdue ? "text-yellow-200" : "opacity-80")}>
+                  {item.is_overdue ? "⚠️ PREVISÃO VENCIDA" : `${item.days_stopped} dias parado`}
+                </p>
               </div>
               <Button 
                 onClick={() => verify(item)}

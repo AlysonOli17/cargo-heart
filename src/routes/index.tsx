@@ -39,7 +39,13 @@ function Dashboard() {
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "—";
     const d = dateStr.includes("T") ? new Date(dateStr) : new Date(dateStr + "T12:00:00");
-    return d.toLocaleDateString('pt-BR');
+    const formattedDate = d.toLocaleDateString('pt-BR');
+    if (dateStr.includes("T") && dateStr.length > 10) {
+      const hours = d.getHours().toString().padStart(2, '0');
+      const minutes = d.getMinutes().toString().padStart(2, '0');
+      return `${formattedDate} ${hours}:${minutes}`;
+    }
+    return formattedDate;
   };
 
   const [items, setItems] = useState<Equipment[]>([]);
@@ -276,15 +282,25 @@ function Dashboard() {
                   {(e.status === 'manutencao' || e.status === 'indisponivel') && !hasProgToday && (
                     <div className="space-y-2 pt-1">
                       <p className="text-[10px] font-bold text-muted-foreground uppercase leading-tight bg-muted/50 p-1.5 rounded line-clamp-2 min-h-[2.5rem]">Defeito: {e.maintenance_problem || 'Não relatado'}</p>
-                      {e.maintenance_expected_return && (
-                         <div className="flex items-center gap-1.5 bg-blue-50 p-1.5 rounded-lg border border-blue-200">
-                            <Hourglass className="h-3.5 w-3.5 text-blue-600 animate-pulse" />
-                            <div className="flex flex-col">
-                              <span className="text-[8px] font-black text-blue-700 uppercase leading-none">Previsão Retorno</span>
-                              <span className="text-[11px] font-black text-blue-800">{formatDate(e.maintenance_expected_return)}</span>
-                            </div>
-                         </div>
-                      )}
+                      {e.maintenance_expected_return && (() => {
+                        const isOverdue = new Date(e.maintenance_expected_return) < new Date();
+                        return (
+                          <div className={cn(
+                            "flex items-center gap-1.5 p-1.5 rounded-lg border",
+                            isOverdue ? "bg-red-50 border-red-200 animate-pulse" : "bg-blue-50 border-blue-200"
+                          )}>
+                             <Hourglass className={cn("h-3.5 w-3.5", isOverdue ? "text-red-600" : "text-blue-600 animate-pulse")} />
+                             <div className="flex flex-col">
+                               <span className={cn("text-[8px] font-black uppercase leading-none", isOverdue ? "text-red-700" : "text-blue-700")}>
+                                 {isOverdue ? "ATRASO NA LIBERAÇÃO" : "Previsão Retorno"}
+                               </span>
+                               <span className={cn("text-[11px] font-black", isOverdue ? "text-red-800" : "text-blue-800")}>
+                                 {formatDate(e.maintenance_expected_return)}
+                               </span>
+                             </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </CardContent>
