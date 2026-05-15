@@ -77,6 +77,7 @@ function MaintenancePage() {
     maintenanceType: "Manutenção Geral"
   });
 
+  // Triggering new build to ensure async fix is applied
   const load = async () => {
     const [{ data: e }, { data: rls }, { data: profs }] = await Promise.all([
       supabase.from("equipment").select("*").order("identifier"),
