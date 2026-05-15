@@ -77,6 +77,7 @@ function MaintenancePage() {
     maintenanceType: "Manutenção Geral"
   });
 
+  const load = async () => {
     const [{ data: e }, { data: rls }, { data: profs }] = await Promise.all([
       supabase.from("equipment").select("*").order("identifier"),
       supabase.from("alert_rules").select("*").eq("is_active", true),
