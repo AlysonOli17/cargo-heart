@@ -957,7 +957,28 @@ function UsinaOperacaoPage() {
   }, [schedules, correctiveLogs, selectedDate]);
 
   return (
-    <div className="space-y-4">
+    <Tabs defaultValue="operacao" className="w-full space-y-4">
+      {/* Tabs list at the very top of the page */}
+      <div className="flex justify-start">
+        <TabsList className="bg-slate-100 p-1 rounded-xl">
+          <TabsTrigger value="operacao" className="font-bold text-xs uppercase px-4 py-2">
+            <Activity className="h-4 w-4 mr-2 text-indigo-600" />
+            Operação Diária
+          </TabsTrigger>
+          <TabsTrigger value="habituais" className="font-bold text-xs uppercase px-4 py-2">
+            <Clock className="h-4 w-4 mr-2 text-indigo-600" />
+            Demandas Habituais
+          </TabsTrigger>
+          <TabsTrigger value="aderencia" className="font-bold text-xs uppercase px-4 py-2">
+            <Activity className="h-4 w-4 mr-2 text-indigo-600" />
+            Aderência & Indicadores
+          </TabsTrigger>
+          <TabsTrigger value="corretivas" className="font-bold text-xs uppercase px-4 py-2">
+            <Wrench className="h-4 w-4 mr-2 text-indigo-600" />
+            Corretivas
+          </TabsTrigger>
+        </TabsList>
+      </div>
       
       {/* Title & Import section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
@@ -1012,29 +1033,8 @@ function UsinaOperacaoPage() {
           </CardContent>
         </Card>
       </div>
- 
-      {/* Sub-tabs for Operação and Aderência */}
-      <Tabs defaultValue="operacao" className="w-full space-y-3">
-        <TabsList className="bg-slate-100 p-1 rounded-xl">
-          <TabsTrigger value="operacao" className="font-bold text-xs uppercase px-4 py-2">
-            <Activity className="h-4 w-4 mr-2 text-indigo-600" />
-            Operação Diária
-          </TabsTrigger>
-          <TabsTrigger value="habituais" className="font-bold text-xs uppercase px-4 py-2">
-            <Clock className="h-4 w-4 mr-2 text-indigo-600" />
-            Demandas Habituais
-          </TabsTrigger>
-          <TabsTrigger value="aderencia" className="font-bold text-xs uppercase px-4 py-2">
-            <Activity className="h-4 w-4 mr-2 text-indigo-600" />
-            Aderência & Indicadores
-          </TabsTrigger>
-          <TabsTrigger value="corretivas" className="font-bold text-xs uppercase px-4 py-2">
-            <Wrench className="h-4 w-4 mr-2 text-indigo-600" />
-            Corretivas
-          </TabsTrigger>
-        </TabsList>
 
-        <TabsContent value="operacao" className="space-y-3 mt-0">
+      <TabsContent value="operacao" className="space-y-3 mt-0">
           {/* Shift Filter Bar */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Filtrar Turno:</span>
@@ -1813,7 +1813,7 @@ function UsinaOperacaoPage() {
             </div>
           </div>
         </TabsContent>
-      </Tabs>
+
 
       {/* Corrective Stop Insertion Dialog */}
       <Dialog open={stopOpen} onOpenChange={setStopOpen}>
@@ -2052,6 +2052,6 @@ function UsinaOperacaoPage() {
         </DialogContent>
       </Dialog>
  
-    </div>
+    </Tabs>
   );
 }
