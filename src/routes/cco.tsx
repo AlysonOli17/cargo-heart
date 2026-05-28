@@ -318,23 +318,34 @@ function CCOPage() {
   }, [equipment, allocations]);
 
   // Daily Attendance Dashboard computations
+  const getScheduleContract = (s: any) => {
+    if (s.client) {
+      const clientUpper = s.client.trim().toUpperCase();
+      if (clientUpper.includes("USINA")) return "USINA";
+      if (clientUpper.includes("PORTO")) return "PORTO";
+      if (clientUpper.includes("EVENTUAL")) return "EVENTUAL";
+    }
+    // Fallback to equipment registered contract_type if daily client field is not set
+    const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+    const eq = equipment.find(e => {
+      const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+      const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+      return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
+    });
+    if (eq?.contract_type) {
+      const typeUpper = eq.contract_type.trim().toUpperCase();
+      if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
+        return typeUpper;
+      }
+    }
+    return "USINA";
+  };
+
   const filteredScheds = useMemo(() => {
     return usinaSchedules.filter(s => {
-      const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const eq = equipment.find(e => {
-        const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
-      });
-
-      // Todos os registros de usina_daily_schedules são USINA por padrão
-      // Se o equipamento estiver cadastrado, usa o contract_type dele
-      const matchesContract = contractFilter === "Todos" || (
-        eq
-          ? eq.contract_type?.toLowerCase() === contractFilter.toLowerCase()
-          : contractFilter.toLowerCase() === "usina" // não cadastrado → USINA
-      );
+      const contractType = getScheduleContract(s);
+      const matchesContract = contractFilter === "Todos" || contractType.toLowerCase() === contractFilter.toLowerCase();
       const matchesLocal = localFilter === "Todos" || s.local === localFilter;
 
       return matchesContract && matchesLocal;
@@ -363,23 +374,7 @@ function CCOPage() {
   // Dashboard filtering for Left Gauge
   const dashboardScheds = useMemo(() => {
     return filteredScheds.filter(s => {
-      const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const eq = equipment.find(e => {
-        const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
-      });
-      
-      // Default: todos schedules da usina são USINA, a não ser que o equipamento diga o contrário
-      let contractKey = "USINA";
-      if (eq?.contract_type) {
-        const typeUpper = eq.contract_type.trim().toUpperCase();
-        if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
-          contractKey = typeUpper;
-        }
-      }
-
+      const contractKey = getScheduleContract(s);
       return !selectedDashboardContract || contractKey === selectedDashboardContract.toUpperCase();
     });
   }, [filteredScheds, equipment, selectedDashboardContract]);
@@ -412,23 +407,7 @@ function CCOPage() {
     });
 
     filteredScheds.forEach(s => {
-      const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const eq = equipment.find(e => {
-        const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
-      });
-      
-      // Default: USINA (todos os registros de usina_daily_schedules são do contrato Usina)
-      let contractKey = "USINA";
-      if (eq?.contract_type) {
-        const typeUpper = eq.contract_type.trim().toUpperCase();
-        if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
-          contractKey = typeUpper;
-        }
-      }
-
+      const contractKey = getScheduleContract(s);
       const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id);
       const isBroken = activeStops.some(l => !l.stop_end);
 
@@ -809,21 +788,7 @@ function CCOPage() {
                 <TableBody className="text-xs font-bold text-slate-800">
                   {stats.naoAtendidosList.map((s, idx) => {
                     const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id && !l.stop_end);
-                    const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-                    const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-                    const eq = equipment.find(e => {
-                      const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-                      const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-                      return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
-                    });
-                    
-                    let contractKey = "EVENTUAL";
-                    if (eq?.contract_type) {
-                      const typeUpper = eq.contract_type.trim().toUpperCase();
-                      if (typeUpper === "USINA" || typeUpper === "PORTO") {
-                        contractKey = typeUpper;
-                      }
-                    }
+                    const contractKey = getScheduleContract(s);
                     return (
                       <TableRow key={idx} className="bg-rose-50/20 hover:bg-rose-50/40">
                         <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
