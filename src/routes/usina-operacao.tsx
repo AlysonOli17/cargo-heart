@@ -1416,8 +1416,15 @@ function UsinaOperacaoPage() {
                       const isCurrentlyBroken = activeStops.some(l => !l.stop_end);
                       const isChecked = selectedOperacaoIds.has(s.id);
                       return (
-                        <TableRow key={s.id} className={`hover:bg-slate-50/50 ${isCurrentlyBroken ? "bg-red-50/20" : ""} ${isChecked ? "bg-indigo-50/50" : ""}`}>
-                          <TableCell className="w-8">
+                        <TableRow 
+                          key={s.id} 
+                          className={`hover:bg-slate-50/50 cursor-pointer ${isCurrentlyBroken ? "bg-red-50/20" : ""} ${isChecked ? "bg-indigo-50/50" : ""}`}
+                          onClick={() => {
+                            setDetailsSchedule(s);
+                            setDetailsOpen(true);
+                          }}
+                        >
+                          <TableCell className="w-8" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               className="accent-indigo-600 w-3.5 h-3.5 cursor-pointer"
@@ -1456,7 +1463,7 @@ function UsinaOperacaoPage() {
                           <TableCell className="max-w-[150px] truncate text-slate-500 font-medium" title={s.activity || ""}>{s.activity || "—"}</TableCell>
                           <TableCell className="text-slate-800 uppercase">{s.operator || "—"}</TableCell>
                           <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
-                          <TableCell>
+                          <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex flex-col gap-1">
                               {activeStops.map(l => (
                                 <div key={l.id} className="flex items-center gap-1 text-[9px] font-black uppercase">
@@ -1468,7 +1475,8 @@ function UsinaOperacaoPage() {
                                       size="icon" 
                                       variant="outline" 
                                       className="h-4 w-4 text-emerald-600 border-emerald-300 hover:bg-emerald-50 rounded"
-                                      onClick={() => {
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         const time = prompt("Hora do retorno (HH:MM) ex: 14:30");
                                         if (time) handleFinishStop(l.id, time);
                                       }}
@@ -1484,13 +1492,14 @@ function UsinaOperacaoPage() {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-end gap-1.5">
                               <Button 
                                 variant="outline" 
                                 size="icon" 
                                 className="h-8 w-8 text-indigo-600 border-indigo-100 hover:bg-indigo-50"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setEditingSchedule(s);
                                   setEditEquipmentName(s.equipment || "");
                                   setEditPlate(s.plate || "");
@@ -1523,7 +1532,8 @@ function UsinaOperacaoPage() {
                                 variant="outline" 
                                 size="icon" 
                                 className="h-8 w-8 text-red-600 border-red-100 hover:bg-red-50"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setActiveSchedule(s);
                                   setStopStartStr(format(new Date(), "HH:mm"));
                                   setStopOpen(true);
@@ -1536,7 +1546,10 @@ function UsinaOperacaoPage() {
                                 variant="ghost" 
                                 size="icon" 
                                 className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50"
-                                onClick={() => handleDeleteSchedule(s.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteSchedule(s.id);
+                                }}
                                 title="Deletar escala"
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -2007,7 +2020,14 @@ function UsinaOperacaoPage() {
                       const adherenceScore = Math.round((uptime / totalMinutes) * 100);
 
                       return (
-                        <TableRow key={s.id} className="hover:bg-slate-50/50 bg-red-50/10">
+                        <TableRow 
+                          key={s.id} 
+                          className="hover:bg-slate-50/50 bg-red-50/10 cursor-pointer"
+                          onClick={() => {
+                            setDetailsSchedule(s);
+                            setDetailsOpen(true);
+                          }}
+                        >
                           <TableCell className="font-mono text-slate-700">{s.equipment || "—"}</TableCell>
                           <TableCell>
                             <span className="px-2 py-0.5 rounded font-mono bg-red-100 text-red-700 border border-red-200">
@@ -2017,26 +2037,57 @@ function UsinaOperacaoPage() {
                           <TableCell className="text-indigo-800 uppercase">{s.local || "—"}</TableCell>
                           <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
                           <TableCell className="font-mono text-red-600">{(breakdownMinutes / 60).toFixed(1)} hrs</TableCell>
-                          <TableCell>
-                            <div className="flex flex-col gap-1">
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-col gap-1.5">
                               {stops.map(l => (
-                                <div key={l.id} className="text-[10px] text-slate-600 flex items-center gap-1.5">
-                                  ⚠️ <span className="font-mono font-bold">{format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}</span>
-                                  {l.reason && <span className="text-slate-400 font-medium">({l.reason})</span>}
-                                  {!l.stop_end && (
+                                <div key={l.id} className="text-[10px] text-slate-600 flex items-center justify-between gap-2 border-b border-slate-100/55 pb-1 last:border-0 last:pb-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    ⚠️ <span className="font-mono font-bold">{format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}</span>
+                                    {l.reason && <span className="text-slate-400 font-medium">({l.reason})</span>}
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {!l.stop_end && (
+                                      <Button 
+                                        size="icon" 
+                                        variant="outline" 
+                                        className="h-4 w-4 text-emerald-600 border-emerald-300 hover:bg-emerald-50 rounded"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const time = prompt("Hora do retorno (HH:MM) ex: 14:30");
+                                          if (time) handleFinishStop(l.id, time);
+                                        }}
+                                        title="Registrar Retorno da corretiva (Liberar)"
+                                      >
+                                        <CheckCircle2 className="h-3 w-3" />
+                                      </Button>
+                                    )}
                                     <Button 
                                       size="icon" 
                                       variant="outline" 
-                                      className="h-4 w-4 text-emerald-600 border-emerald-300 hover:bg-emerald-50 rounded"
-                                      onClick={() => {
-                                        const time = prompt("Hora do retorno (HH:MM) ex: 14:30");
-                                        if (time) handleFinishStop(l.id, time);
+                                      className="h-4 w-4 text-indigo-600 border-indigo-200 hover:bg-indigo-50 rounded"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openEditStop(l);
                                       }}
-                                      title="Registrar Retorno da corretiva (Liberar)"
+                                      title="Editar Parada"
                                     >
-                                      <CheckCircle2 className="h-3 w-3" />
+                                      <Pencil className="h-3 w-3" />
                                     </Button>
-                                  )}
+                                    <Button 
+                                      size="icon" 
+                                      variant="outline" 
+                                      className="h-4 w-4 text-red-600 border-red-200 hover:bg-red-50 rounded"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (confirm("Tem certeza que deseja excluir esta parada?")) {
+                                          handleDeleteStop(l.id);
+                                        }
+                                      }}
+                                      title="Excluir Parada"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -2495,6 +2546,18 @@ function UsinaOperacaoPage() {
                               onClick={() => openEditStop(log)}
                             >
                               Editar
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="h-6 text-[9px] font-black uppercase text-red-600 border-red-200 hover:bg-red-50 px-2"
+                              onClick={() => {
+                                if (confirm("Tem certeza que deseja excluir esta parada?")) {
+                                  handleDeleteStop(log.id);
+                                }
+                              }}
+                            >
+                              Excluir
                             </Button>
                           </div>
                         </div>
