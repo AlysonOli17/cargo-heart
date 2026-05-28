@@ -130,11 +130,56 @@ function CCOPage() {
       setProgramming((progs ?? []) as Programming[]);
     } catch (_) {}
 
-    // 4. Carrega escalas Usina
+    // 4. Carrega escalas Usina — busca data real E templates (2000-01-0x)
     try {
-      const { data: scheds } = await supabase.from("usina_daily_schedules").select("*").eq("scheduled_date", selectedDate);
-      setUsinaSchedules(scheds ?? []);
-      localStorage.setItem("local_usina_schedules", JSON.stringify(scheds ?? []));
+      let { data: scheds } = await supabase
+        .from("usina_daily_schedules")
+        .select("*")
+        .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+
+      const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
+
+      if (dayScheds.length === 0) {
+        // Clone template for selectedDate's day of week
+        const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
+        const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
+        const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
+
+        if (templatesForDay.length > 0) {
+          const clones = templatesForDay.map((t: any) => ({
+            scheduled_date: selectedDate,
+            equipment: t.equipment,
+            plate: t.plate,
+            model: t.model,
+            client: t.client,
+            shift: t.shift,
+            valley_time: t.valley_time,
+            valley_start: t.valley_start,
+            valley_end: t.valley_end,
+            cost_center: t.cost_center,
+            subet: t.subet,
+            local: t.local,
+            activity: t.activity,
+            operator: t.operator,
+            os_number: t.os_number,
+            is_completed: false,
+            owner_id: user?.id
+          }));
+
+          const { data: inserted } = await supabase
+            .from("usina_daily_schedules")
+            .insert(clones)
+            .select();
+
+          if (inserted) {
+            scheds = [...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate), ...inserted];
+          }
+        }
+      }
+
+      const finalScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
+      setUsinaSchedules(finalScheds);
+      localStorage.setItem("local_usina_schedules", JSON.stringify(finalScheds));
     } catch (_) {
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
       setUsinaSchedules(localScheds.filter((s: any) => s.scheduled_date === selectedDate));
@@ -273,7 +318,13 @@ function CCOPage() {
         return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
       });
 
-      const matchesContract = contractFilter === "Todos" || (eq && eq.contract_type?.toLowerCase() === contractFilter.toLowerCase());
+      // Todos os registros de usina_daily_schedules são USINA por padrão
+      // Se o equipamento estiver cadastrado, usa o contract_type dele
+      const matchesContract = contractFilter === "Todos" || (
+        eq
+          ? eq.contract_type?.toLowerCase() === contractFilter.toLowerCase()
+          : contractFilter.toLowerCase() === "usina" // não cadastrado → USINA
+      );
       const matchesLocal = localFilter === "Todos" || s.local === localFilter;
 
       return matchesContract && matchesLocal;
@@ -310,10 +361,11 @@ function CCOPage() {
         return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
       });
       
-      let contractKey = "EVENTUAL";
+      // Default: todos schedules da usina são USINA, a não ser que o equipamento diga o contrário
+      let contractKey = "USINA";
       if (eq?.contract_type) {
         const typeUpper = eq.contract_type.trim().toUpperCase();
-        if (typeUpper === "USINA" || typeUpper === "PORTO") {
+        if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
           contractKey = typeUpper;
         }
       }
@@ -358,10 +410,11 @@ function CCOPage() {
         return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
       });
       
-      let contractKey = "EVENTUAL";
+      // Default: USINA (todos os registros de usina_daily_schedules são do contrato Usina)
+      let contractKey = "USINA";
       if (eq?.contract_type) {
         const typeUpper = eq.contract_type.trim().toUpperCase();
-        if (typeUpper === "USINA" || typeUpper === "PORTO") {
+        if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
           contractKey = typeUpper;
         }
       }
@@ -410,10 +463,11 @@ function CCOPage() {
         return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
       });
       
-      let contractKey = "EVENTUAL";
+      // Default: USINA
+      let contractKey = "USINA";
       if (eq?.contract_type) {
         const typeUpper = eq.contract_type.trim().toUpperCase();
-        if (typeUpper === "USINA" || typeUpper === "PORTO") {
+        if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
           contractKey = typeUpper;
         }
       }

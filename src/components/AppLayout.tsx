@@ -4,20 +4,20 @@ import { useRole } from "@/hooks/use-role";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Wrench, LogOut, Truck, Activity, Shield, History, CheckCircle2, Menu, ChevronLeft, ChevronRight } from "lucide-react";
+import { Globe, Calendar, HardDrive, Wrench, FileText, CalendarDays, Clock, Shield, LogOut, Menu, ChevronLeft, ChevronRight, Truck, CheckCircle2 } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { MaintenanceGovernanceAlert } from "./MaintenanceGovernanceAlert";
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const baseNav = [
-  { to: "/cco", label: "CCO Central", icon: Activity },
-  { to: "/usina-operacao", label: "Operação Usina", icon: Activity },
-  { to: "/operacao", label: "Operação", icon: Activity },
+  { to: "/cco", label: "CCO Central", icon: Globe },
+  { to: "/usina-operacao", label: "Operação Usina", icon: Calendar },
+  { to: "/operacao", label: "Operação", icon: HardDrive },
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
-  { to: "/manutencao", label: "Manutenção", icon: Wrench },
-  { to: "/fidelizacao", label: "Fidelização", icon: CheckCircle2 },
-  { to: "/historico", label: "Histórico", icon: History },
+  { to: "/manutencao", label: "Manutenção", icon: FileText },
+  { to: "/fidelizacao", label: "Fidelização", icon: CalendarDays },
+  { to: "/historico", label: "Histórico", icon: Clock },
 ];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -174,25 +174,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <MaintenanceGovernanceAlert />
       
       {/* SIDEBAR FOR DESKTOP */}
-      <aside className={`hidden md:flex flex-col bg-slate-900 text-white border-r border-slate-800 transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}>
-        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
-          <Link to="/cco" className="flex items-center gap-2 overflow-hidden">
-            <div className="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
-              <Truck className="h-5 w-5 text-white" />
+      <aside className={`hidden md:flex flex-col bg-[#0f172a] text-slate-300 border-r border-slate-800 transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}>
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800/60">
+          <Link to="/cco" className="flex items-center gap-2 overflow-hidden mx-auto">
+            <div className="h-10 w-10 rounded-full bg-slate-800/40 flex items-center justify-center flex-shrink-0 border border-slate-700/60">
+              <Globe className="h-6 w-6 text-sky-400" />
             </div>
-            {!collapsed && <span className="font-black text-sm uppercase tracking-wider whitespace-nowrap">Operação Busato</span>}
+            {!collapsed && <span className="font-black text-sm uppercase tracking-wider whitespace-nowrap text-slate-100">Operação Busato</span>}
           </Link>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => setCollapsed(!collapsed)} 
-            className="text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg h-8 w-8"
-          >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          </Button>
         </div>
 
-        <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto">
+        <nav className="flex-1 py-6 px-3 space-y-2.5 overflow-y-auto flex flex-col items-center">
           {nav.map((n) => {
             const Icon = n.icon;
             const active = loc.pathname === n.to;
@@ -200,39 +192,52 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <Link 
                 key={n.to} 
                 to={n.to}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-colors ${
+                className={`flex items-center rounded-xl transition-all duration-200 ${
+                  collapsed 
+                    ? "justify-center h-12 w-12" 
+                    : "w-full gap-3 px-4 py-3 text-xs"
+                } font-black uppercase tracking-wider ${
                   active 
-                    ? "bg-indigo-600 text-white" 
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                    ? "bg-sky-500/15 text-sky-400 border border-sky-500/25" 
+                    : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
                 }`}
                 title={n.label}
               >
-                <Icon className="h-4 w-4 flex-shrink-0" />
+                <Icon className={`h-5 w-5 flex-shrink-0 ${active ? "text-sky-400" : "text-slate-400"}`} />
                 {!collapsed && <span>{n.label}</span>}
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-800">
+        <div className="p-3 border-t border-slate-800/60 flex flex-col gap-2 items-center">
           <Button 
             variant="ghost" 
             onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/auth" }); }}
-            className={`w-full text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg justify-start ${collapsed ? "px-2" : "px-4"}`}
+            className={`w-full text-slate-400 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl justify-start ${collapsed ? "px-0 justify-center h-12 w-12" : "px-4 py-3"}`}
           >
-            <LogOut className="h-4 w-4 flex-shrink-0 mr-2" />
-            {!collapsed && <span className="text-[10px] font-black uppercase tracking-wider">Sair</span>}
+            <LogOut className="h-5 w-5 flex-shrink-0" />
+            {!collapsed && <span className="text-[10px] font-black uppercase tracking-wider ml-2">Sair</span>}
+          </Button>
+
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setCollapsed(!collapsed)} 
+            className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-10 w-10 mt-1"
+          >
+            {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
           </Button>
         </div>
       </aside>
 
       {/* HEADER FOR MOBILE */}
-      <header className="md:hidden border-b bg-slate-900 text-white h-16 flex items-center justify-between px-4">
+      <header className="md:hidden border-b bg-[#0f172a] text-white h-16 flex items-center justify-between px-4 border-slate-800">
         <Link to="/cco" className="flex items-center gap-2">
-          <div className="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center">
-            <Truck className="h-5 w-5 text-white" />
+          <div className="h-9 w-9 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+            <Globe className="h-5 w-5 text-sky-400" />
           </div>
-          <span className="font-black text-sm uppercase tracking-wider">Operação Busato</span>
+          <span className="font-black text-sm uppercase tracking-wider text-slate-100">Operação Busato</span>
         </Link>
         <Button 
           variant="ghost" 
@@ -246,7 +251,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* MOBILE DRAWER */}
       {mobileOpen && (
-        <div className="md:hidden bg-slate-900 text-white border-b border-slate-800 p-4 space-y-2 animate-in slide-in-from-top duration-200">
+        <div className="md:hidden bg-[#0f172a] text-white border-b border-slate-800 p-4 space-y-2 animate-in slide-in-from-top duration-200">
           <nav className="space-y-1">
             {nav.map((n) => {
               const Icon = n.icon;
@@ -258,7 +263,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   onClick={() => setMobileOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-colors ${
                     active 
-                      ? "bg-indigo-600 text-white" 
+                      ? "bg-sky-500/15 text-sky-400 border border-sky-500/25" 
                       : "text-slate-400 hover:text-white hover:bg-slate-800"
                   }`}
                 >
