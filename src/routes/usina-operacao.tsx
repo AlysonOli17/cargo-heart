@@ -126,6 +126,7 @@ function UsinaOperacaoPage() {
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [schedules, setSchedules] = useState<UsinaSchedule[]>([]);
   const [correctiveLogs, setCorrectiveLogs] = useState<CorrectiveLog[]>([]);
+  const [programming, setProgramming] = useState<any[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; identifier: string; plate?: string | null; model?: string | null; status?: string | null }[]>([]);
   const [search, setSearch] = useState("");
   const [shiftFilter, setShiftFilter] = useState<"todos" | "dia" | "noite">("todos");
@@ -202,6 +203,7 @@ function UsinaOperacaoPage() {
       };
     }
 
+    // 1. Check if the equipment is registered as unavailable or in maintenance status in general
     const unavailableStatuses = ["manutencao", "indisponivel", "programado", "finalizacao"];
     if (unavailableStatuses.includes(match.status || "")) {
       const statusLabel = STATUS_LABELS[match.status as keyof typeof STATUS_LABELS] || match.status;
@@ -209,6 +211,35 @@ function UsinaOperacaoPage() {
         type: "unavailable",
         message: `Substituição Necessária (${statusLabel})`,
         color: "bg-rose-100 text-rose-800 border-rose-300"
+      };
+    }
+
+    // 2. Check for scheduling conflicts (planned stops/maintenance scheduled for today)
+    const weekdayName = format(new Date(selectedDate + "T12:00:00"), "EEEE", { locale: ptBR });
+    const weekdayClean = weekdayName.split("-")[0].trim().toLowerCase();
+
+    const stopRecord = programming.find(p => {
+      const isSameEquip = p.equipment_id === match.id;
+      if (!isSameEquip) return false;
+      
+      const isCompleted = p.is_completed;
+      if (isCompleted) return false;
+
+      // Match either exact date or day of week
+      if (p.scheduled_date === selectedDate) return true;
+      if (p.day_of_week) {
+        const pDayClean = p.day_of_week.split("-")[0].trim().toLowerCase();
+        if (pDayClean === weekdayClean) return true;
+      }
+      return false;
+    });
+
+    if (stopRecord) {
+      const stopType = stopRecord.stop_type || "Manutenção";
+      return {
+        type: "programming_conflict",
+        message: `Substituição Necessária (Parada: ${stopType})`,
+        color: "bg-rose-100 text-rose-800 border-rose-300 font-bold"
       };
     }
 
@@ -259,6 +290,11 @@ function UsinaOperacaoPage() {
       
       const { data: logs, error: e2 } = await supabase.from("usina_corrective_logs").select("*");
       if (e2) throw e2;
+
+      const { data: progs, error: eProg } = await supabase.from("programming").select("*").eq("is_completed", false);
+      if (eProg) throw eProg;
+      setProgramming(progs ?? []);
+      localStorage.setItem("local_programming", JSON.stringify(progs ?? []));
 
       // Check if we have daily schedules for selectedDate
       const dayScheds = (scheds ?? []).filter(s => s.scheduled_date === selectedDate);
@@ -313,6 +349,9 @@ function UsinaOperacaoPage() {
       // Fallback localStorage para escalas e corretivas
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
       const localLogs = JSON.parse(localStorage.getItem("local_usina_corrective_logs") || "[]");
+      const localProgs = JSON.parse(localStorage.getItem("local_programming") || "[]");
+
+      setProgramming(localProgs);
 
       const dayScheds = localScheds.filter((s: any) => s.scheduled_date === selectedDate);
       let mergedScheds = [...localScheds];
@@ -348,9 +387,11 @@ function UsinaOperacaoPage() {
     loadData();
     const chSched = supabase.channel("usina-sched-rt").on("postgres_changes", { event: "*", schema: "public", table: "usina_daily_schedules" }, loadData).subscribe();
     const chLogs = supabase.channel("usina-logs-rt").on("postgres_changes", { event: "*", schema: "public", table: "usina_corrective_logs" }, loadData).subscribe();
+    const chProg = supabase.channel("usina-prog-rt").on("postgres_changes", { event: "*", schema: "public", table: "programming" }, loadData).subscribe();
     return () => {
       supabase.removeChannel(chSched);
       supabase.removeChannel(chLogs);
+      supabase.removeChannel(chProg);
     };
   }, [user, selectedDate]);
 
@@ -909,6 +950,14 @@ function UsinaOperacaoPage() {
     return result;
   }, [schedules, selectedDate, search, shiftFilter, sortColumn, sortDirection]);
 
+  // Find all schedules with active conflicts for the warning banner
+  const conflictedSchedules = useMemo(() => {
+    return filteredSchedules.map(s => {
+      const warn = getEquipmentWarning(s.equipment, s.plate);
+      return { schedule: s, warning: warn };
+    }).filter(item => item.warning !== null && (item.warning.type === "unavailable" || item.warning.type === "programming_conflict"));
+  }, [filteredSchedules, programming, equipments]);
+
   // Filter habitual schedules (the template week 2000-01-02 to 2000-01-08)
   const habitualSchedules = useMemo(() => {
     return schedules.filter(s => {
@@ -1147,6 +1196,42 @@ function UsinaOperacaoPage() {
           </div>
 
           {/* Active Grid Table view */}
+          {conflictedSchedules.length > 0 && (
+            <div className="mb-4 p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 shadow-sm animate-in fade-in slide-in-from-top duration-300">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-rose-600 shrink-0 mt-0.5" />
+                <div className="w-full">
+                  <h4 className="font-black text-xs uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
+                    ⚠️ Substituição Necessária - Conflito de Agenda Detectado
+                  </h4>
+                  <p className="text-[11px] text-rose-700 mt-1 font-medium">
+                    Os seguintes equipamentos foram escalados para hoje, mas possuem conflito com manutenção ou parada programada. Favor designar outro equipamento:
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {conflictedSchedules.map(({ schedule, warning }) => (
+                      <div key={schedule.id} className="p-2.5 bg-white border border-rose-100 rounded-lg shadow-sm flex flex-col gap-1 text-[11px]">
+                        <div className="flex justify-between items-start gap-1">
+                          <span className="font-black text-slate-800 uppercase truncate">
+                            {schedule.equipment || schedule.plate}
+                          </span>
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-150 px-1.5 py-0.5 rounded shrink-0">
+                            {schedule.shift}
+                          </span>
+                        </div>
+                        <div className="text-slate-500 font-semibold truncate">
+                          {schedule.model || "Modelo —"}
+                        </div>
+                        <div className="mt-1 px-2 py-1 rounded bg-rose-50 border border-rose-150 text-rose-700 font-bold text-[9px] uppercase tracking-tight text-center">
+                          {warning?.message}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
             <div className="bg-slate-50 border-b p-3 flex justify-between items-center flex-wrap gap-2">
               <div className="flex items-center gap-3">

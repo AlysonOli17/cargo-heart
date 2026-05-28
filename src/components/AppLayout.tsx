@@ -176,12 +176,35 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* SIDEBAR FOR DESKTOP */}
       <aside className={`hidden md:flex flex-col bg-[#0f172a] text-slate-300 border-r border-slate-800 transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}>
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800/60">
-          <Link to="/cco" className="flex items-center gap-2 overflow-hidden mx-auto">
-            <div className="h-10 w-10 rounded-full bg-slate-800/40 flex items-center justify-center flex-shrink-0 border border-slate-700/60">
-              <Globe className="h-6 w-6 text-sky-400" />
+          {!collapsed ? (
+            <>
+              <Link to="/cco" className="flex items-center gap-2 overflow-hidden mr-2">
+                <div className="h-10 w-10 rounded-full bg-slate-800/40 flex items-center justify-center flex-shrink-0 border border-slate-700/60">
+                  <Globe className="h-6 w-6 text-sky-400" />
+                </div>
+                <span className="font-black text-sm uppercase tracking-wider whitespace-nowrap text-slate-100">Operação Busato</span>
+              </Link>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => setCollapsed(true)} 
+                className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-9 w-9 shrink-0"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </Button>
+            </>
+          ) : (
+            <div className="flex items-center justify-center w-full">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => setCollapsed(false)} 
+                className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-10 w-10"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </Button>
             </div>
-            {!collapsed && <span className="font-black text-sm uppercase tracking-wider whitespace-nowrap text-slate-100">Operação Busato</span>}
-          </Link>
+          )}
         </div>
 
         <nav className="flex-1 py-6 px-3 space-y-2.5 overflow-y-auto flex flex-col items-center">
@@ -210,7 +233,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="p-3 border-t border-slate-800/60 flex flex-col gap-2 items-center">
+        <div className="p-3 border-t border-slate-800/60 w-full flex justify-center">
           <Button 
             variant="ghost" 
             onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/auth" }); }}
@@ -218,15 +241,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           >
             <LogOut className="h-5 w-5 flex-shrink-0" />
             {!collapsed && <span className="text-[10px] font-black uppercase tracking-wider ml-2">Sair</span>}
-          </Button>
-
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => setCollapsed(!collapsed)} 
-            className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-10 w-10 mt-1"
-          >
-            {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
           </Button>
         </div>
       </aside>
