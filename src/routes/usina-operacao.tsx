@@ -26,7 +26,8 @@ import {
   Trash2, 
   AlertCircle,
   CheckCircle2,
-  Pencil
+  Pencil,
+  ArrowUpDown
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useAuth } from "@/hooks/use-auth";
@@ -128,6 +129,17 @@ function UsinaOperacaoPage() {
   const [equipments, setEquipments] = useState<{ id: string; identifier: string; plate?: string | null; model?: string | null; status?: string | null }[]>([]);
   const [search, setSearch] = useState("");
   const [shiftFilter, setShiftFilter] = useState<"todos" | "dia" | "noite">("todos");
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortDirection("asc");
+    }
+  };
   
   // Selection state for bulk delete
   const [selectedOperacaoIds, setSelectedOperacaoIds] = useState<Set<string>>(new Set());
@@ -832,7 +844,7 @@ function UsinaOperacaoPage() {
 
   // Filter schedules
   const filteredSchedules = useMemo(() => {
-    return schedules.filter(s => {
+    const result = schedules.filter(s => {
       if (s.scheduled_date !== selectedDate) return false;
       
       const term = search.toLowerCase();
@@ -869,7 +881,33 @@ function UsinaOperacaoPage() {
 
       return true;
     });
-  }, [schedules, selectedDate, search, shiftFilter]);
+
+    if (sortColumn) {
+      result.sort((a, b) => {
+        let valA = a[sortColumn as keyof typeof a];
+        let valB = b[sortColumn as keyof typeof b];
+
+        if (valA === null || valA === undefined) valA = "";
+        if (valB === null || valB === undefined) valB = "";
+        
+        const strA = valA.toString().trim().toLowerCase();
+        const strB = valB.toString().trim().toLowerCase();
+
+        // Compare times numerically if sorting by valley_start or valley_end
+        if (sortColumn === "valley_start" || sortColumn === "valley_end") {
+          const minA = timeToMinutes(valA.toString());
+          const minB = timeToMinutes(valB.toString());
+          return sortDirection === "asc" ? minA - minB : minB - minA;
+        }
+
+        if (strA < strB) return sortDirection === "asc" ? -1 : 1;
+        if (strA > strB) return sortDirection === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [schedules, selectedDate, search, shiftFilter, sortColumn, sortDirection]);
 
   // Filter habitual schedules (the template week 2000-01-02 to 2000-01-08)
   const habitualSchedules = useMemo(() => {
@@ -1155,16 +1193,66 @@ function UsinaOperacaoPage() {
                         title="Selecionar todos"
                       />
                     </TableHead>
-                    <TableHead className="py-2.5">Equipamento</TableHead>
-                    <TableHead className="py-2.5">Placa</TableHead>
-                    <TableHead className="py-2.5">Modelo</TableHead>
-                    <TableHead className="py-2.5">Horário Início</TableHead>
-                    <TableHead className="py-2.5">Horário Fim</TableHead>
-                    <TableHead className="py-2.5">Centro Custo</TableHead>
-                    <TableHead className="py-2.5">Local</TableHead>
-                    <TableHead className="py-2.5">Atividade</TableHead>
-                    <TableHead className="py-2.5">Operador</TableHead>
-                    <TableHead className="py-2.5">OS</TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("equipment")}>
+                      <div className="flex items-center gap-1">
+                        Equipamento
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "equipment" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("plate")}>
+                      <div className="flex items-center gap-1">
+                        Placa
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "plate" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("model")}>
+                      <div className="flex items-center gap-1">
+                        Modelo
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "model" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("valley_start")}>
+                      <div className="flex items-center gap-1">
+                        Horário Início
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "valley_start" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("valley_end")}>
+                      <div className="flex items-center gap-1">
+                        Horário Fim
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "valley_end" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("cost_center")}>
+                      <div className="flex items-center gap-1">
+                        Centro Custo
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "cost_center" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("local")}>
+                      <div className="flex items-center gap-1">
+                        Local
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "local" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("activity")}>
+                      <div className="flex items-center gap-1">
+                        Atividade
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "activity" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("operator")}>
+                      <div className="flex items-center gap-1">
+                        Operador
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "operator" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
+                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("os_number")}>
+                      <div className="flex items-center gap-1">
+                        OS
+                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "os_number" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
+                      </div>
+                    </TableHead>
                     <TableHead className="py-2.5">Corretivas</TableHead>
                     <TableHead className="py-2.5 text-right">Ação</TableHead>
                   </TableRow>
