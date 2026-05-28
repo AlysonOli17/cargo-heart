@@ -160,6 +160,18 @@ function UsinaOperacaoPage() {
   const [stopStartStr, setStopStartStr] = useState(format(new Date(), "HH:mm"));
   const [stopEndStr, setStopEndStr] = useState("");
 
+  // Edit Stop Dialog State
+  const [editStopOpen, setEditStopOpen] = useState(false);
+  const [editingStopLog, setEditingStopLog] = useState<CorrectiveLog | null>(null);
+  const [editStopStartStr, setEditStopStartStr] = useState("");
+  const [editStopEndStr, setEditStopEndStr] = useState("");
+  const [editStopReason, setEditStopReason] = useState("");
+  const [editStopNotes, setEditStopNotes] = useState("");
+
+  // Schedule Details Dialog State
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsSchedule, setDetailsSchedule] = useState<UsinaSchedule | null>(null);
+
   const [editOpen, setEditOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<UsinaSchedule | null>(null);
   const [editEquipmentId, setEditEquipmentId] = useState("");
@@ -804,6 +816,66 @@ function UsinaOperacaoPage() {
     }
   };
 
+  const openEditStop = (log: CorrectiveLog) => {
+    setEditingStopLog(log);
+    const startStr = log.stop_start ? format(new Date(log.stop_start), "HH:mm") : "";
+    const endStr = log.stop_end ? format(new Date(log.stop_end), "HH:mm") : "";
+    setEditStopStartStr(startStr);
+    setEditStopEndStr(endStr);
+    setEditStopReason(log.reason || "");
+    setEditStopNotes(log.notes || "");
+    setEditStopOpen(true);
+  };
+
+  const handleSaveEditStop = async () => {
+    if (!editingStopLog || !editStopReason) {
+      toast.error("Motivo é obrigatório");
+      return;
+    }
+    
+    const baseDateStr = format(new Date(editingStopLog.stop_start), "yyyy-MM-dd");
+    const stop_start = `${baseDateStr}T${editStopStartStr || "00:00"}:00`;
+    const stop_end = editStopEndStr ? `${baseDateStr}T${editStopEndStr}:00` : null;
+
+    const payload = {
+      stop_start,
+      stop_end,
+      reason: editStopReason,
+      notes: editStopNotes
+    };
+
+    try {
+      const { error } = await supabase.from("usina_corrective_logs").update(payload).eq("id", editingStopLog.id);
+      if (error) throw error;
+      toast.success("Parada corretiva atualizada!");
+      loadData();
+    } catch (err) {
+      const localLogs = JSON.parse(localStorage.getItem("local_usina_corrective_logs") || "[]");
+      const updated = localLogs.map((l: any) => l.id === editingStopLog.id ? { ...l, ...payload } : l);
+      localStorage.setItem("local_usina_corrective_logs", JSON.stringify(updated));
+      toast.success("Parada corretiva atualizada localmente");
+      loadData();
+    }
+
+    setEditStopOpen(false);
+    setEditingStopLog(null);
+  };
+
+  const handleDeleteStop = async (logId: string) => {
+    try {
+      const { error } = await supabase.from("usina_corrective_logs").delete().eq("id", logId);
+      if (error) throw error;
+      toast.success("Parada corretiva excluída!");
+      loadData();
+    } catch (err) {
+      const localLogs = JSON.parse(localStorage.getItem("local_usina_corrective_logs") || "[]");
+      const filtered = localLogs.filter((l: any) => l.id !== logId);
+      localStorage.setItem("local_usina_corrective_logs", JSON.stringify(filtered));
+      toast.success("Parada corretiva excluída localmente");
+      loadData();
+    }
+  };
+
   const handleDeleteSchedule = async (id: string) => {
     try {
       const { error } = await supabase.from("usina_daily_schedules").delete().eq("id", id);
@@ -1051,40 +1123,31 @@ function UsinaOperacaoPage() {
 
   return (
     <Tabs defaultValue="operacao" className="w-full space-y-4">
-      {/* Tabs list at the very top of the page */}
-      <div className="flex justify-start">
-        <TabsList className="bg-slate-100 p-1 rounded-xl">
-          <TabsTrigger value="operacao" className="font-bold text-xs uppercase px-4 py-2">
-            <Activity className="h-4 w-4 mr-2 text-indigo-600" />
-            Operação Diária
-          </TabsTrigger>
-          <TabsTrigger value="habituais" className="font-bold text-xs uppercase px-4 py-2">
-            <Clock className="h-4 w-4 mr-2 text-indigo-600" />
-            Demandas Habituais
-          </TabsTrigger>
-          <TabsTrigger value="aderencia" className="font-bold text-xs uppercase px-4 py-2">
-            <Activity className="h-4 w-4 mr-2 text-indigo-600" />
-            Aderência & Indicadores
-          </TabsTrigger>
-          <TabsTrigger value="corretivas" className="font-bold text-xs uppercase px-4 py-2">
-            <Wrench className="h-4 w-4 mr-2 text-indigo-600" />
-            Corretivas
-          </TabsTrigger>
-        </TabsList>
-      </div>
-      
-      {/* Title & Import section */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
-        <div>
-          <h1 className="text-xl font-black uppercase tracking-tighter text-slate-900 flex items-center gap-1.5">
-            <Activity className="h-5 w-5 text-indigo-600 animate-pulse" />
-            Operação Diária Usina
-          </h1>
-          <p className="text-muted-foreground font-medium text-[9px] uppercase tracking-widest mt-0.5">Acompanhamento e Registro de Escalas diárias</p>
+      {/* Tabs and Date picker row at the very top of the page */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
+        <div className="flex justify-start">
+          <TabsList className="bg-slate-100 p-1 rounded-xl">
+            <TabsTrigger value="operacao" className="font-bold text-xs uppercase px-4 py-2">
+              <Activity className="h-4 w-4 mr-2 text-indigo-600" />
+              Operação Diária
+            </TabsTrigger>
+            <TabsTrigger value="habituais" className="font-bold text-xs uppercase px-4 py-2">
+              <Clock className="h-4 w-4 mr-2 text-indigo-600" />
+              Demandas Habituais
+            </TabsTrigger>
+            <TabsTrigger value="aderencia" className="font-bold text-xs uppercase px-4 py-2">
+              <Activity className="h-4 w-4 mr-2 text-indigo-600" />
+              Aderência & Indicadores
+            </TabsTrigger>
+            <TabsTrigger value="corretivas" className="font-bold text-xs uppercase px-4 py-2">
+              <Wrench className="h-4 w-4 mr-2 text-indigo-600" />
+              Corretivas
+            </TabsTrigger>
+          </TabsList>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Date Picker */}
+        <div className="flex items-center gap-2 self-end sm:self-center">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Data da Operação:</span>
           <Input 
             type="date" 
             value={selectedDate} 
@@ -1095,34 +1158,34 @@ function UsinaOperacaoPage() {
       </div>
  
       {/* KPI Cards (Compact Row) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
         <Card className="bg-slate-950 text-white border-none shadow-sm">
-          <CardContent className="p-3 flex items-center justify-between">
+          <CardContent className="p-2 px-3 flex items-center justify-between">
             <div>
-              <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Aderência Geral Usina</p>
-              <h3 className="text-xl font-black mt-0.5 text-indigo-400">{analytics.overallAdherence}%</h3>
+              <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Aderência Geral Usina</p>
+              <h3 className="text-base font-black mt-0.5 text-indigo-400">{analytics.overallAdherence}%</h3>
             </div>
-            <Activity className="h-7 w-7 text-indigo-500 opacity-30" />
+            <Activity className="h-5 w-5 text-indigo-500 opacity-30" />
           </CardContent>
         </Card>
  
         <Card className="bg-white border border-slate-200 shadow-sm">
-          <CardContent className="p-3 flex items-center justify-between">
+          <CardContent className="p-2 px-3 flex items-center justify-between">
             <div>
-              <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Equipamentos Escalados</p>
-              <h3 className="text-xl font-black mt-0.5 text-slate-900">{analytics.totalScheduledCount}</h3>
+              <p className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Equipamentos Escalados</p>
+              <h3 className="text-base font-black mt-0.5 text-slate-900">{analytics.totalScheduledCount}</h3>
             </div>
-            <Clock className="h-7 w-7 text-slate-400 opacity-20" />
+            <Clock className="h-5 w-5 text-slate-400 opacity-20" />
           </CardContent>
         </Card>
  
         <Card className="bg-red-50 border border-red-200 shadow-sm">
-          <CardContent className="p-3 flex items-center justify-between">
+          <CardContent className="p-2 px-3 flex items-center justify-between">
             <div>
-              <p className="text-[9px] font-black uppercase text-red-600 tracking-wider">Tempo de Corretiva Total</p>
-              <h3 className="text-xl font-black mt-0.5 text-red-700">{analytics.totalBreakdownHours} hrs</h3>
+              <p className="text-[8px] font-black uppercase text-red-600 tracking-wider">Tempo de Corretiva Total</p>
+              <h3 className="text-base font-black mt-0.5 text-red-700">{analytics.totalBreakdownHours} hrs</h3>
             </div>
-            <Wrench className="h-7 w-7 text-red-400 opacity-35" />
+            <Wrench className="h-5 w-5 text-red-400 opacity-35" />
           </CardContent>
         </Card>
       </div>
@@ -2230,7 +2293,226 @@ function UsinaOperacaoPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
- 
+
+      {/* Edit Corrective Stop Dialog */}
+      <Dialog open={editStopOpen} onOpenChange={setEditStopOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase text-slate-800 flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-red-650" />
+              Editar Parada Corretiva
+            </DialogTitle>
+            <DialogDescription className="sr-only">Edite as informações ou encerre a parada corretiva selecionada.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase">Hora da Quebra / Parada (HH:MM)</Label>
+              <Input 
+                type="time" 
+                value={editStopStartStr} 
+                onChange={e => setEditStopStartStr(e.target.value)} 
+                className="font-mono font-bold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase">Hora do Retorno / Liberação (HH:MM)</Label>
+              <Input 
+                type="time" 
+                value={editStopEndStr} 
+                onChange={e => setEditStopEndStr(e.target.value)} 
+                className="font-mono font-bold"
+                placeholder="ex: 14:30"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase">Motivo Principal</Label>
+              <Input 
+                value={editStopReason} 
+                onChange={e => setEditStopReason(e.target.value)} 
+                className="font-bold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase">Observações</Label>
+              <Input 
+                value={editStopNotes} 
+                onChange={e => setEditStopNotes(e.target.value)} 
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex justify-between items-center w-full gap-2">
+            {editingStopLog && (
+              <Button 
+                variant="destructive" 
+                onClick={() => {
+                  if (confirm("Tem certeza que deseja excluir esta parada?")) {
+                    handleDeleteStop(editingStopLog.id);
+                    setEditStopOpen(false);
+                  }
+                }}
+                className="font-bold text-xs"
+              >
+                Excluir Parada
+              </Button>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <Button variant="outline" onClick={() => setEditStopOpen(false)} className="font-bold text-xs">Cancelar</Button>
+              <Button onClick={handleSaveEditStop} className="bg-red-650 hover:bg-red-700 text-white font-bold text-xs">Salvar</Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Schedule Details Dialog */}
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase text-slate-800 flex items-center gap-2">
+              <Activity className="h-5 w-5 text-indigo-600" />
+              Detalhes do Equipamento Escalado
+            </DialogTitle>
+            <DialogDescription className="sr-only">Informações detalhadas do agendamento diário e histórico de paradas.</DialogDescription>
+          </DialogHeader>
+          
+          {detailsSchedule && (
+            <div className="space-y-5 py-3 text-xs">
+              {/* Header card */}
+              <div className="p-3.5 bg-slate-50 border rounded-xl flex flex-col gap-2">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-sm font-black uppercase text-slate-900">
+                    {detailsSchedule.equipment || "—"}
+                  </span>
+                  <span className="px-2 py-0.5 rounded font-mono font-black text-indigo-700 bg-indigo-50 border border-indigo-200">
+                    {detailsSchedule.plate}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-slate-500 font-semibold mt-1">
+                  <div>Modelo: <strong className="text-slate-850 font-bold">{detailsSchedule.model || "—"}</strong></div>
+                  <div>Turno: <strong className="text-slate-850 font-bold uppercase">{detailsSchedule.shift || "—"}</strong></div>
+                </div>
+              </div>
+
+              {/* General details grid */}
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 p-1">
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Horário Planejado</span>
+                  <span className="font-mono font-bold text-slate-800 text-xs">
+                    {detailsSchedule.valley_start || "—"} às {detailsSchedule.valley_end || "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Centro de Custo</span>
+                  <span className="font-mono font-bold text-slate-800 text-xs">{detailsSchedule.cost_center || "—"}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Frente / Local</span>
+                  <span className="font-bold text-indigo-900 text-xs uppercase">{detailsSchedule.local || "—"}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Ordem de Serviço (OS)</span>
+                  <span className="font-mono font-bold text-slate-800 text-xs">{detailsSchedule.os_number || "—"}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Atividade</span>
+                  <span className="font-bold text-slate-800 text-xs">{detailsSchedule.activity || "—"}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="text-[10px] font-black uppercase text-slate-400 block tracking-wider">Operador / Motorista</span>
+                  <span className="font-bold text-slate-800 text-xs uppercase">{detailsSchedule.operator || "—"}</span>
+                </div>
+              </div>
+
+              <hr className="border-slate-100" />
+
+              {/* Corrective Logs Section */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-black text-[10px] uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                    <Wrench className="h-3.5 w-3.5 text-red-500" /> Histórico de Paradas Corretivas
+                  </h4>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    className="h-6 text-[9px] font-black uppercase tracking-tight text-red-600 border-red-200 hover:bg-red-50"
+                    onClick={() => {
+                      setActiveSchedule(detailsSchedule);
+                      setStopStartStr(format(new Date(), "HH:mm"));
+                      setStopEndStr("");
+                      setStopReason("");
+                      setStopNotes("");
+                      setStopOpen(true);
+                    }}
+                  >
+                    + Lançar Parada
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  {(() => {
+                    const stops = correctiveLogs.filter(l => l.schedule_id === detailsSchedule.id);
+                    if (stops.length === 0) {
+                      return (
+                        <div className="text-center py-4 bg-emerald-50/30 border border-emerald-100 rounded-lg text-emerald-800 font-bold uppercase text-[9px]">
+                          ✓ Nenhuma parada corretiva registrada. Equipamento 100% Operacional!
+                        </div>
+                      );
+                    }
+                    return stops.map(log => {
+                      const durMin = log.stop_end 
+                        ? Math.round((new Date(log.stop_end).getTime() - new Date(log.stop_start).getTime()) / 60000)
+                        : null;
+                      return (
+                        <div key={log.id} className="p-3 bg-slate-50 border rounded-lg flex justify-between items-center gap-3">
+                          <div className="space-y-1 col-span-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-black text-slate-700">
+                                ⏰ {format(new Date(log.stop_start), "HH:mm")} → {log.stop_end ? format(new Date(log.stop_end), "HH:mm") : "Parado"}
+                              </span>
+                              {durMin !== null && (
+                                <span className="text-[9px] font-black bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded shrink-0">
+                                  {durMin >= 60 ? `${Math.floor(durMin / 60)}h ${durMin % 60}m` : `${durMin}m`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="font-bold text-slate-800 uppercase text-[10px]">
+                              Motivo: {log.reason}
+                            </div>
+                            {log.notes && (
+                              <div className="text-[10px] text-slate-400 font-medium italic">
+                                Obs: {log.notes}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex gap-1.5 shrink-0">
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="h-6 text-[9px] font-black uppercase text-indigo-700 border-indigo-200 hover:bg-indigo-50 px-2"
+                              onClick={() => openEditStop(log)}
+                            >
+                              Editar
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setDetailsOpen(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold w-full uppercase tracking-wider text-xs">
+              Fechar Detalhes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </Tabs>
   );
 }
