@@ -117,7 +117,8 @@ function CCOPage() {
 
     // 2. Carrega alocações do CCO
     try {
-      const { data: allocs } = await supabase.from("cco_allocations").select("*").eq("scheduled_date", selectedDate);
+      const { data: allocs, error: eAlloc } = await supabase.from("cco_allocations").select("*").eq("scheduled_date", selectedDate);
+      if (eAlloc) throw eAlloc;
       setAllocations((allocs ?? []) as Allocation[]);
     } catch (_) {
       const localAllocs = JSON.parse(localStorage.getItem("local_cco_allocations") || "[]");
@@ -126,16 +127,18 @@ function CCOPage() {
 
     // 3. Carrega programações CCM
     try {
-      const { data: progs } = await supabase.from("programming").select("*").eq("is_completed", false);
+      const { data: progs, error: eProg } = await supabase.from("programming").select("*").eq("is_completed", false);
+      if (eProg) throw eProg;
       setProgramming((progs ?? []) as Programming[]);
     } catch (_) {}
 
     // 4. Carrega escalas Usina — busca data real E templates (2000-01-0x)
     try {
-      let { data: scheds } = await supabase
+      let { data: scheds, error: eSched } = await supabase
         .from("usina_daily_schedules")
         .select("*")
         .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+      if (eSched) throw eSched;
 
       const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
 
@@ -166,10 +169,11 @@ function CCOPage() {
             owner_id: user?.id
           }));
 
-          const { data: inserted } = await supabase
+          const { data: inserted, error: eInsert } = await supabase
             .from("usina_daily_schedules")
             .insert(clones)
             .select();
+          if (eInsert) throw eInsert;
 
           if (inserted) {
             scheds = [...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate), ...inserted];
@@ -179,7 +183,12 @@ function CCOPage() {
 
       const finalScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
       setUsinaSchedules(finalScheds);
-      localStorage.setItem("local_usina_schedules", JSON.stringify(finalScheds));
+
+      // Merge with local storage instead of overwriting other dates
+      const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
+      const otherDatesScheds = localScheds.filter((s: any) => s.scheduled_date !== selectedDate);
+      const merged = [...otherDatesScheds, ...finalScheds];
+      localStorage.setItem("local_usina_schedules", JSON.stringify(merged));
     } catch (_) {
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
       setUsinaSchedules(localScheds.filter((s: any) => s.scheduled_date === selectedDate));
@@ -187,7 +196,8 @@ function CCOPage() {
 
     // 5. Carrega logs de paradas
     try {
-      const { data: logs } = await supabase.from("usina_corrective_logs").select("*");
+      const { data: logs, error: eLogs } = await supabase.from("usina_corrective_logs").select("*");
+      if (eLogs) throw eLogs;
       setCorrectiveLogs(logs ?? []);
       localStorage.setItem("local_usina_corrective_logs", JSON.stringify(logs ?? []));
     } catch (_) {

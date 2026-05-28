@@ -291,6 +291,12 @@ function UsinaOperacaoPage() {
 
       setSchedules((scheds ?? []) as UsinaSchedule[]);
       setCorrectiveLogs((logs ?? []) as CorrectiveLog[]);
+
+      // Update local storage cache for the selected date, keeping other dates intact
+      const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
+      const otherDatesScheds = localScheds.filter((s: any) => s.scheduled_date !== selectedDate);
+      const merged = [...otherDatesScheds, ...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate)];
+      localStorage.setItem("local_usina_schedules", JSON.stringify(merged));
     } catch (err) {
       // Fallback localStorage para escalas e corretivas
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
