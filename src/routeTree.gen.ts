@@ -9,14 +9,22 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UsinaOperacaoRouteImport } from './routes/usina-operacao'
 import { Route as OperacaoRouteImport } from './routes/operacao'
 import { Route as ManutencaoRouteImport } from './routes/manutencao'
 import { Route as HistoricoRouteImport } from './routes/historico'
+import { Route as FidelizacaoRouteImport } from './routes/fidelizacao'
 import { Route as EquipamentosRouteImport } from './routes/equipamentos'
+import { Route as CcoRouteImport } from './routes/cco'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AcessoRouteImport } from './routes/acesso'
 import { Route as IndexRouteImport } from './routes/index'
 
+const UsinaOperacaoRoute = UsinaOperacaoRouteImport.update({
+  id: '/usina-operacao',
+  path: '/usina-operacao',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OperacaoRoute = OperacaoRouteImport.update({
   id: '/operacao',
   path: '/operacao',
@@ -32,9 +40,19 @@ const HistoricoRoute = HistoricoRouteImport.update({
   path: '/historico',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FidelizacaoRoute = FidelizacaoRouteImport.update({
+  id: '/fidelizacao',
+  path: '/fidelizacao',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EquipamentosRoute = EquipamentosRouteImport.update({
   id: '/equipamentos',
   path: '/equipamentos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CcoRoute = CcoRouteImport.update({
+  id: '/cco',
+  path: '/cco',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthRoute = AuthRouteImport.update({
@@ -57,29 +75,38 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
+  '/cco': typeof CcoRoute
   '/equipamentos': typeof EquipamentosRoute
+  '/fidelizacao': typeof FidelizacaoRoute
   '/historico': typeof HistoricoRoute
   '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
+  '/usina-operacao': typeof UsinaOperacaoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
+  '/cco': typeof CcoRoute
   '/equipamentos': typeof EquipamentosRoute
+  '/fidelizacao': typeof FidelizacaoRoute
   '/historico': typeof HistoricoRoute
   '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
+  '/usina-operacao': typeof UsinaOperacaoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
+  '/cco': typeof CcoRoute
   '/equipamentos': typeof EquipamentosRoute
+  '/fidelizacao': typeof FidelizacaoRoute
   '/historico': typeof HistoricoRoute
   '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
+  '/usina-operacao': typeof UsinaOperacaoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -87,42 +114,61 @@ export interface FileRouteTypes {
     | '/'
     | '/acesso'
     | '/auth'
+    | '/cco'
     | '/equipamentos'
+    | '/fidelizacao'
     | '/historico'
     | '/manutencao'
     | '/operacao'
+    | '/usina-operacao'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/acesso'
     | '/auth'
+    | '/cco'
     | '/equipamentos'
+    | '/fidelizacao'
     | '/historico'
     | '/manutencao'
     | '/operacao'
+    | '/usina-operacao'
   id:
     | '__root__'
     | '/'
     | '/acesso'
     | '/auth'
+    | '/cco'
     | '/equipamentos'
+    | '/fidelizacao'
     | '/historico'
     | '/manutencao'
     | '/operacao'
+    | '/usina-operacao'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AcessoRoute: typeof AcessoRoute
   AuthRoute: typeof AuthRoute
+  CcoRoute: typeof CcoRoute
   EquipamentosRoute: typeof EquipamentosRoute
+  FidelizacaoRoute: typeof FidelizacaoRoute
   HistoricoRoute: typeof HistoricoRoute
   ManutencaoRoute: typeof ManutencaoRoute
   OperacaoRoute: typeof OperacaoRoute
+  UsinaOperacaoRoute: typeof UsinaOperacaoRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/usina-operacao': {
+      id: '/usina-operacao'
+      path: '/usina-operacao'
+      fullPath: '/usina-operacao'
+      preLoaderRoute: typeof UsinaOperacaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/operacao': {
       id: '/operacao'
       path: '/operacao'
@@ -144,11 +190,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HistoricoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/fidelizacao': {
+      id: '/fidelizacao'
+      path: '/fidelizacao'
+      fullPath: '/fidelizacao'
+      preLoaderRoute: typeof FidelizacaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/equipamentos': {
       id: '/equipamentos'
       path: '/equipamentos'
       fullPath: '/equipamentos'
       preLoaderRoute: typeof EquipamentosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cco': {
+      id: '/cco'
+      path: '/cco'
+      fullPath: '/cco'
+      preLoaderRoute: typeof CcoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/auth': {
@@ -179,10 +239,13 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AcessoRoute: AcessoRoute,
   AuthRoute: AuthRoute,
+  CcoRoute: CcoRoute,
   EquipamentosRoute: EquipamentosRoute,
+  FidelizacaoRoute: FidelizacaoRoute,
   HistoricoRoute: HistoricoRoute,
   ManutencaoRoute: ManutencaoRoute,
   OperacaoRoute: OperacaoRoute,
+  UsinaOperacaoRoute: UsinaOperacaoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
@@ -12,8 +12,9 @@ import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/")({
-  head: () => ({ meta: [{ title: "CCO Dashboard — Frota Busato" }] }),
-  component: () => <AppLayout><Dashboard /></AppLayout>,
+  beforeLoad: () => {
+    throw redirect({ to: "/cco" });
+  }
 });
 
 type Equipment = {

@@ -4,17 +4,19 @@ import { useRole } from "@/hooks/use-role";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LayoutDashboard, Wrench, LogOut, Truck, Activity, Shield, History, CheckCircle2 } from "lucide-react";
+import { LayoutDashboard, Wrench, LogOut, Truck, Activity, Shield, History, CheckCircle2, Menu, ChevronLeft, ChevronRight } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { MaintenanceGovernanceAlert } from "./MaintenanceGovernanceAlert";
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const baseNav = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/cco", label: "CCO Central", icon: Activity },
+  { to: "/usina-operacao", label: "Operação Usina", icon: Activity },
   { to: "/operacao", label: "Operação", icon: Activity },
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
   { to: "/manutencao", label: "Manutenção", icon: Wrench },
+  { to: "/fidelizacao", label: "Fidelização", icon: CheckCircle2 },
   { to: "/historico", label: "Histórico", icon: History },
 ];
 
@@ -28,6 +30,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     : baseNav;
 
   const [releaseAlert, setReleaseAlert] = useState<{ open: boolean; identifier: string }>({ open: false, identifier: "" });
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/auth" });
@@ -129,7 +133,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           o.start(t);
           o.stop(t + dur + 0.05);
         };
-        // "ding-dong" estilo chamada de senha de banco, repetido 2x bem alto
         playTone(1568, 0.0, 0.45);   // Sol5
         playTone(1175, 0.45, 0.6);   // Ré5
         playTone(1568, 1.2, 0.45);
@@ -167,47 +170,123 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50/50">
       <MaintenanceGovernanceAlert />
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-lg bg-primary flex items-center justify-center">
-              <Truck className="h-5 w-5 text-primary-foreground" />
+      
+      {/* SIDEBAR FOR DESKTOP */}
+      <aside className={`hidden md:flex flex-col bg-slate-900 text-white border-r border-slate-800 transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}>
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
+          <Link to="/cco" className="flex items-center gap-2 overflow-hidden">
+            <div className="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
+              <Truck className="h-5 w-5 text-white" />
             </div>
-            <span className="font-bold text-lg">Disponibilidade Frota Busato</span>
+            {!collapsed && <span className="font-black text-sm uppercase tracking-wider whitespace-nowrap">Operação Busato</span>}
           </Link>
-          <nav className="hidden md:flex items-center gap-1">
-            {nav.map((n) => {
-              const Icon = n.icon;
-              const active = loc.pathname === n.to;
-              return (
-                <Link key={n.to} to={n.to}
-                  className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${active ? "bg-primary text-primary-foreground" : "hover:bg-secondary"}`}>
-                  <Icon className="h-4 w-4" />{n.label}
-                </Link>
-              );
-            })}
-          </nav>
-          <Button variant="ghost" size="sm" onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/auth" }); }}>
-            <LogOut className="h-4 w-4 mr-2" />Sair
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setCollapsed(!collapsed)} 
+            className="text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg h-8 w-8"
+          >
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
         </div>
-        <nav className="md:hidden border-t flex">
+
+        <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto">
           {nav.map((n) => {
             const Icon = n.icon;
             const active = loc.pathname === n.to;
             return (
-              <Link key={n.to} to={n.to}
-                className={`flex-1 py-3 text-xs font-medium flex flex-col items-center gap-1 ${active ? "text-primary" : "text-muted-foreground"}`}>
-                <Icon className="h-4 w-4" />{n.label}
+              <Link 
+                key={n.to} 
+                to={n.to}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-colors ${
+                  active 
+                    ? "bg-indigo-600 text-white" 
+                    : "text-slate-400 hover:text-white hover:bg-slate-800"
+                }`}
+                title={n.label}
+              >
+                <Icon className="h-4 w-4 flex-shrink-0" />
+                {!collapsed && <span>{n.label}</span>}
               </Link>
             );
           })}
         </nav>
+
+        <div className="p-4 border-t border-slate-800">
+          <Button 
+            variant="ghost" 
+            onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/auth" }); }}
+            className={`w-full text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg justify-start ${collapsed ? "px-2" : "px-4"}`}
+          >
+            <LogOut className="h-4 w-4 flex-shrink-0 mr-2" />
+            {!collapsed && <span className="text-[10px] font-black uppercase tracking-wider">Sair</span>}
+          </Button>
+        </div>
+      </aside>
+
+      {/* HEADER FOR MOBILE */}
+      <header className="md:hidden border-b bg-slate-900 text-white h-16 flex items-center justify-between px-4">
+        <Link to="/cco" className="flex items-center gap-2">
+          <div className="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center">
+            <Truck className="h-5 w-5 text-white" />
+          </div>
+          <span className="font-black text-sm uppercase tracking-wider">Operação Busato</span>
+        </Link>
+        <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={() => setMobileOpen(!mobileOpen)} 
+          className="text-white hover:bg-slate-800 h-9 w-9"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
       </header>
-      <main className="flex-1 container mx-auto px-4 py-6">{children}</main>
+
+      {/* MOBILE DRAWER */}
+      {mobileOpen && (
+        <div className="md:hidden bg-slate-900 text-white border-b border-slate-800 p-4 space-y-2 animate-in slide-in-from-top duration-200">
+          <nav className="space-y-1">
+            {nav.map((n) => {
+              const Icon = n.icon;
+              const active = loc.pathname === n.to;
+              return (
+                <Link 
+                  key={n.to} 
+                  to={n.to}
+                  onClick={() => setMobileOpen(false)}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-colors ${
+                    active 
+                      ? "bg-indigo-600 text-white" 
+                      : "text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span>{n.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+          <Button 
+            variant="ghost" 
+            onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/auth" }); }}
+            className="w-full text-slate-400 hover:text-white hover:bg-slate-800 justify-start"
+          >
+            <LogOut className="h-4 w-4 mr-3" />
+            <span className="text-xs font-black uppercase">Sair</span>
+          </Button>
+        </div>
+      )}
+
+      {/* MAIN CONTENT AREA */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <main className="flex-1 p-4 md:p-8 overflow-y-auto">{children}</main>
+      </div>
+
       <Toaster />
+
+      {/* Dialog release notify */}
       <AlertDialog open={releaseAlert.open} onOpenChange={(o) => setReleaseAlert((s) => ({ ...s, open: o }))}>
         <AlertDialogContent className="border-2 border-[oklch(0.65_0.18_150)]">
           <AlertDialogHeader>
