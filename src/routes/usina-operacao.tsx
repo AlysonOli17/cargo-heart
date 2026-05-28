@@ -382,9 +382,9 @@ function UsinaOperacaoPage() {
         const osParts = rawOS.split("/").map(o => o.trim());
         const os1 = osParts[0];
         const os2 = osParts[1] || osParts[0];
+        const nextDayDate = format(addDays(new Date(selectedDate + "T12:00:00"), 1), "yyyy-MM-dd");
 
         const basePayload = {
-          scheduled_date: selectedDate,
           equipment: row.equipamento || row.equipment || null,
           plate: rawPlaca,
           model: row.modelo || row.model || null,
@@ -401,6 +401,7 @@ function UsinaOperacaoPage() {
         // Record 1: from start time to 23:59
         finalPayloads.push({
           ...basePayload,
+          scheduled_date: selectedDate,
           shift: "NOITE (P1)",
           valley_time: `${valley_start} - 23:59`,
           valley_start,
@@ -411,6 +412,7 @@ function UsinaOperacaoPage() {
         // Record 2: from 00:00 to end time
         finalPayloads.push({
           ...basePayload,
+          scheduled_date: nextDayDate,
           shift: "NOITE (P2)",
           valley_time: `00:00 - ${valley_end || "07:00"}`,
           valley_start: "00:00",
@@ -419,8 +421,18 @@ function UsinaOperacaoPage() {
         });
       } else {
         // Standard single record
+        // If it starts after midnight (e.g. 00:00 to 07:00), schedule it to the next day
+        let finalScheduledDate = selectedDate;
+        if (valley_start) {
+          const parts = valley_start.split(":");
+          const startHour = parseInt(parts[0], 10);
+          if (!isNaN(startHour) && startHour >= 0 && startHour < 7) {
+            finalScheduledDate = format(addDays(new Date(selectedDate + "T12:00:00"), 1), "yyyy-MM-dd");
+          }
+        }
+
         finalPayloads.push({
-          scheduled_date: selectedDate,
+          scheduled_date: finalScheduledDate,
           equipment: row.equipamento || row.equipment || null,
           plate: rawPlaca,
           model: row.modelo || row.model || null,
@@ -694,6 +706,7 @@ function UsinaOperacaoPage() {
                       <Table>
                         <TableHeader className="bg-slate-50 sticky top-0">
                           <TableRow className="text-[9px] uppercase font-black">
+                            <TableHead className="py-1">Data</TableHead>
                             <TableHead className="py-1">Equipamento</TableHead>
                             <TableHead className="py-1">Placa</TableHead>
                             <TableHead className="py-1">Turno/Horário</TableHead>
@@ -711,8 +724,43 @@ function UsinaOperacaoPage() {
                             }
                             const warn = getEquipmentWarning(equipName, rawPlaca);
 
+                            // Determine valley start and end times for preview
+                            const timeRegex = /(\d{2}:\d{2})\s*(?:-|as|to|às|a|x)\s*(\d{2}:\d{2})/i;
+                            const rawValley = (row.horariovale || row.valley_time || row.horario || "").toString().trim();
+                            const match = rawValley.match(timeRegex);
+                            let valley_start = null;
+                            if (match) {
+                              valley_start = match[1];
+                            } else if (rawValley) {
+                              valley_start = rawValley;
+                            }
+
+                            let isNightShift = false;
+                            if (valley_start) {
+                              const parts = valley_start.split(":");
+                              const startHour = parseInt(parts[0], 10);
+                              if (!isNaN(startHour) && startHour >= 18) {
+                                isNightShift = true;
+                              }
+                            }
+
+                            const rawOS = (row.os || row.ordemdeservico || row.osnumber || "").toString().trim();
+                            const nextDayDate = format(addDays(new Date(selectedDate + "T12:00:00"), 1), "yyyy-MM-dd");
+                            let displayDate = format(new Date(selectedDate + "T12:00:00"), "dd/MM");
+                            
+                            if (isNightShift && rawOS.includes("/")) {
+                              displayDate = `${format(new Date(selectedDate + "T12:00:00"), "dd/MM")} & ${format(new Date(nextDayDate + "T12:00:00"), "dd/MM")}`;
+                            } else if (valley_start) {
+                              const parts = valley_start.split(":");
+                              const startHour = parseInt(parts[0], 10);
+                              if (!isNaN(startHour) && startHour >= 0 && startHour < 7) {
+                                displayDate = format(new Date(nextDayDate + "T12:00:00"), "dd/MM");
+                              }
+                            }
+
                             return (
                               <TableRow key={idx} className={warn?.type === "unavailable" ? "bg-rose-50/50" : ""}>
+                                <TableCell className="py-1 font-mono text-[10px] text-slate-500">{displayDate}</TableCell>
                                 <TableCell className="py-1 font-mono">{equipName || "—"}</TableCell>
                                 <TableCell className="py-1 font-mono">{rawPlaca || "—"}</TableCell>
                                 <TableCell className="py-1">{row.turno || row.shift || "DIA"} ({row.horariovale || row.valley_time || "—"})</TableCell>
