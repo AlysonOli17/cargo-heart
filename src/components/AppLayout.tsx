@@ -30,12 +30,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     : baseNav;
 
   const [releaseAlert, setReleaseAlert] = useState<{ open: boolean; identifier: string }>({ open: false, identifier: "" });
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    return localStorage.getItem("sidebar_collapsed") === "true";
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleSetCollapsed = (value: boolean) => {
+    setCollapsed(value);
+    localStorage.setItem("sidebar_collapsed", String(value));
+  };
 
   useEffect(() => {
     if (!loading && !user) navigate({ to: "/auth" });
   }, [loading, user, navigate]);
+
 
   useEffect(() => {
     if (!user || !isAdmin) return;
@@ -187,7 +195,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <Button 
                 variant="ghost" 
                 size="icon" 
-                onClick={() => setCollapsed(true)} 
+                onClick={() => handleSetCollapsed(true)} 
                 className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-9 w-9 shrink-0"
               >
                 <ChevronLeft className="h-5 w-5" />
@@ -198,7 +206,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <Button 
                 variant="ghost" 
                 size="icon" 
-                onClick={() => setCollapsed(false)} 
+                onClick={() => handleSetCollapsed(false)} 
                 className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-10 w-10"
               >
                 <ChevronRight className="h-5 w-5" />
