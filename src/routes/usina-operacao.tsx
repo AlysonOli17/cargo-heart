@@ -1323,7 +1323,7 @@ function UsinaOperacaoPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <Table className="min-w-[1200px]">
+              <Table className="min-w-[1000px] w-full text-[10.5px] [&_td]:py-1 [&_td]:px-1.5 [&_th]:py-1 [&_th]:px-1.5">
                 <TableHeader className="bg-slate-100/50">
                   <TableRow className="text-[10px] uppercase font-black tracking-wider text-slate-600">
                     <TableHead className="py-2.5 w-8">
@@ -1405,7 +1405,7 @@ function UsinaOperacaoPage() {
                     <TableHead className="py-2.5 text-right">Ação</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody className="divide-y divide-slate-100 text-xs font-bold text-slate-900">
+                <TableBody className="divide-y divide-slate-100 text-[10.5px] font-bold text-slate-900">
                   {filteredSchedules.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={13} className="text-center py-8 text-slate-400 italic font-black">Nenhum equipamento escalado hoje.</TableCell>
@@ -1734,7 +1734,7 @@ function UsinaOperacaoPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <Table className="min-w-[1200px]">
+              <Table className="min-w-[1000px] w-full text-[10.5px] [&_td]:py-1 [&_td]:px-1.5 [&_th]:py-1 [&_th]:px-1.5">
                 <TableHeader className="bg-slate-100/50">
                   <TableRow className="text-[10px] uppercase font-black tracking-wider text-slate-600">
                     <TableHead className="py-2.5 w-8">
@@ -1767,7 +1767,7 @@ function UsinaOperacaoPage() {
                     <TableHead className="py-2.5 text-right">Ação</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody className="divide-y divide-slate-100 text-xs font-bold text-slate-900">
+                <TableBody className="divide-y divide-slate-100 text-[10.5px] font-bold text-slate-900">
                   {habitualSchedules.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={14} className="text-center py-8 text-slate-400 italic font-black">Nenhuma demanda habitual importada ainda. Use o botão "Importar Programação" acima.</TableCell>
@@ -1985,7 +1985,7 @@ function UsinaOperacaoPage() {
             </div>
             
             <div className="overflow-x-auto">
-              <Table className="min-w-[1000px]">
+              <Table className="min-w-[900px] w-full text-[10.5px] [&_td]:py-1 [&_td]:px-1.5 [&_th]:py-1 [&_th]:px-1.5">
                 <TableHeader className="bg-slate-100/50">
                   <TableRow className="text-[10px] uppercase font-black tracking-wider text-slate-600">
                     <TableHead className="py-2.5">Equipamento</TableHead>
@@ -1997,7 +1997,7 @@ function UsinaOperacaoPage() {
                     <TableHead className="py-2.5 text-right">Aderência Individual</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody className="divide-y divide-slate-100 text-xs font-bold text-slate-900">
+                <TableBody className="divide-y divide-slate-100 text-[10.5px] font-bold text-slate-900">
                   {schedules.filter(s => correctiveLogs.some(l => l.schedule_id === s.id)).length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-8 text-slate-400 italic font-black">Nenhum equipamento com corretiva registrada hoje.</TableCell>
