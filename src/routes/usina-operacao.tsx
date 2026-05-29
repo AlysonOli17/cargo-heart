@@ -33,6 +33,13 @@ import * as XLSX from "xlsx";
 import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS } from "@/lib/equipment";
 
+const tzOffset = () => {
+  const tzo = -new Date().getTimezoneOffset();
+  const dif = tzo >= 0 ? '+' : '-';
+  const pad = (num: number) => String(Math.floor(Math.abs(num))).padStart(2, '0');
+  return `${dif}${pad(tzo / 60)}:${pad(tzo % 60)}`;
+};
+
 export const Route = createFileRoute("/usina-operacao")({
   head: () => ({ meta: [{ title: "Operação Usina — Frota Busato" }] }),
   component: () => <AppLayout><UsinaOperacaoPage /></AppLayout>,
@@ -802,8 +809,8 @@ function UsinaOperacaoPage() {
 
     // Parse stop times into full ISO string
     const todayStr = format(new Date(), "yyyy-MM-dd");
-    const stop_start = `${todayStr}T${stopStartStr || "00:00"}:00`;
-    const stop_end = stopEndStr ? `${todayStr}T${stopEndStr}:00` : null;
+    const stop_start = `${todayStr}T${stopStartStr || "00:00"}:00${tzOffset()}`;
+    const stop_end = stopEndStr ? `${todayStr}T${stopEndStr}:00${tzOffset()}` : null;
 
     const payload = {
       schedule_id: activeSchedule.id,
@@ -833,7 +840,7 @@ function UsinaOperacaoPage() {
 
   const handleFinishStop = async (logId: string, endTime: string) => {
     const todayStr = format(new Date(), "yyyy-MM-dd");
-    const stop_end = `${todayStr}T${endTime}:00`;
+    const stop_end = `${todayStr}T${endTime}:00${tzOffset()}`;
 
     try {
       const { error } = await supabase.from("usina_corrective_logs").update({ stop_end }).eq("id", logId);
@@ -867,8 +874,8 @@ function UsinaOperacaoPage() {
     }
     
     const baseDateStr = format(new Date(editingStopLog.stop_start), "yyyy-MM-dd");
-    const stop_start = `${baseDateStr}T${editStopStartStr || "00:00"}:00`;
-    const stop_end = editStopEndStr ? `${baseDateStr}T${editStopEndStr}:00` : null;
+    const stop_start = `${baseDateStr}T${editStopStartStr || "00:00"}:00${tzOffset()}`;
+    const stop_end = editStopEndStr ? `${baseDateStr}T${editStopEndStr}:00${tzOffset()}` : null;
 
     const payload = {
       stop_start,
