@@ -185,36 +185,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <MaintenanceGovernanceAlert />
       
       {/* SIDEBAR FOR DESKTOP */}
-      <aside className={`hidden md:flex flex-col bg-[#0f172a] text-slate-300 border-r border-slate-800 transition-all duration-300 ${collapsed ? "w-20" : "w-64"}`}>
-        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800/60">
+      <aside className={`hidden md:flex flex-col bg-[#0f172a] text-slate-300 border-r border-slate-800 transition-all duration-300 h-screen sticky top-0 ${collapsed ? "w-20" : "w-64"}`}>
+        <div className="h-16 flex items-center justify-center px-4 border-b border-slate-800/60 shrink-0">
           {!collapsed ? (
-            <>
-              <Link to="/cco" className="flex items-center gap-2 overflow-hidden mr-2">
-                <img src={logoBusato} alt="Busato" className="h-9 object-contain brightness-0 invert" />
-              </Link>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                onClick={() => handleSetCollapsed(true)} 
-                className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-9 w-9 shrink-0"
-              >
-                <ChevronLeft className="h-5 w-5" />
-              </Button>
-            </>
+            <Link to="/cco" className="flex items-center gap-2 overflow-hidden w-full justify-center">
+              <img src={logoBusato} alt="Busato" className="h-9 object-contain brightness-0 invert" />
+            </Link>
           ) : (
-            <div className="flex flex-col items-center gap-2 justify-center w-full">
-              <Link to="/cco" className="mb-0.5">
-                <img src={logoGlobo} alt="Busato" className="h-8 w-8 object-contain" />
-              </Link>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                onClick={() => handleSetCollapsed(false)} 
-                className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-8 w-8"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
+            <Link to="/cco" className="flex items-center justify-center">
+              <img src={logoGlobo} alt="Busato" className="h-8 w-8 object-contain" />
+            </Link>
           )}
         </div>
 
@@ -244,13 +224,26 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="p-3 border-t border-slate-800/60 w-full flex justify-center">
+        <div className="p-3 border-t border-slate-800/60 w-full space-y-2 shrink-0">
+          <Button 
+            variant="ghost" 
+            onClick={() => handleSetCollapsed(!collapsed)}
+            className={`w-full text-slate-400 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl justify-start ${collapsed ? "px-0 justify-center h-12 w-12" : "px-4 py-3"}`}
+          >
+            {collapsed ? (
+              <ChevronRight className="h-5 w-5 flex-shrink-0 text-slate-400" />
+            ) : (
+              <ChevronLeft className="h-5 w-5 flex-shrink-0 text-slate-400" />
+            )}
+            {!collapsed && <span className="text-[10px] font-black uppercase tracking-wider ml-2">Recolher</span>}
+          </Button>
+
           <Button 
             variant="ghost" 
             onClick={async () => { await supabase.auth.signOut(); navigate({ to: "/auth" }); }}
-            className={`w-full text-slate-400 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl justify-start ${collapsed ? "px-0 justify-center h-12 w-12" : "px-4 py-3"}`}
+            className={`w-full text-slate-400 hover:text-red-400 hover:bg-red-950/20 rounded-xl justify-start ${collapsed ? "px-0 justify-center h-12 w-12" : "px-4 py-3"}`}
           >
-            <LogOut className="h-5 w-5 flex-shrink-0" />
+            <LogOut className="h-5 w-5 flex-shrink-0 text-slate-400" />
             {!collapsed && <span className="text-[10px] font-black uppercase tracking-wider ml-2">Sair</span>}
           </Button>
         </div>
