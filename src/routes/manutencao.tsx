@@ -564,7 +564,6 @@ function MaintenancePage() {
                             <span className={cn("text-lg font-black", isOverdue && "text-red-600")}>{dias}</span>
                           </td>
                           <td className="px-4 py-4 text-right flex items-center justify-end gap-2">
-                            <Button variant="outline" size="sm" onClick={() => handleQuickVerify(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50"><CheckCircle2 className="h-3 w-3 mr-1" /> VERIFICAR</Button>
                             <Button variant="outline" size="sm" onClick={() => handleStartEdit(e)} className="font-black border-2 h-8 text-[10px] text-amber-600 border-amber-100 hover:bg-amber-50"><Edit3 className="h-3 w-3 mr-1" /> EDITAR</Button>
                             <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="font-black border-2 h-8 text-[10px] text-blue-600 border-blue-100 hover:bg-blue-50">HISTÓRICO</Button>
                             <Button variant="outline" size="sm" onClick={() => release(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
