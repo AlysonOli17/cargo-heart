@@ -212,12 +212,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     : "w-full gap-3 px-4 py-3 text-xs"
                 } font-black uppercase tracking-wider ${
                   active 
-                    ? "bg-sky-500/15 text-sky-400 border border-sky-500/25" 
+                    ? "bg-primary/20 text-primary border border-primary/30" 
                     : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/40"
                 }`}
                 title={n.label}
               >
-                <Icon className={`h-5 w-5 flex-shrink-0 ${active ? "text-sky-400" : "text-slate-400"}`} />
+                <Icon className={`h-5 w-5 flex-shrink-0 ${active ? "text-primary" : "text-slate-400"}`} />
                 {!collapsed && <span>{n.label}</span>}
               </Link>
             );
@@ -278,7 +278,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   onClick={() => setMobileOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-black uppercase tracking-wider transition-colors ${
                     active 
-                      ? "bg-sky-500/15 text-sky-400 border border-sky-500/25" 
+                      ? "bg-primary/20 text-primary border border-primary/30" 
                       : "text-slate-400 hover:text-white hover:bg-slate-800"
                   }`}
                 >
