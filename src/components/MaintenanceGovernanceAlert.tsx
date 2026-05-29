@@ -17,6 +17,7 @@ type CriticalEquipment = {
 };
 
 export function MaintenanceGovernanceAlert() {
+  return null;
   const { user } = useAuth();
   const [profile, setProfile] = useState<{ department: string; receives_alerts: boolean } | null>(null);
   const [criticalItems, setCriticalItems] = useState<CriticalEquipment[]>([]);
