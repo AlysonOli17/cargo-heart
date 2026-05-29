@@ -211,9 +211,17 @@ function PortoOperacaoPage() {
     }
   };
   
-  // Selection state for bulk delete
   const [selectedOperacaoIds, setSelectedOperacaoIds] = useState<Set<string>>(new Set());
   const [selectedHabituaisIds, setSelectedHabituaisIds] = useState<Set<string>>(new Set());
+
+  // Real-time ticking state for minute-by-minute calculations
+  const [timeTick, setTimeTick] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeTick(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Excel File State
   const [file, setFile] = useState<File | null>(null);
@@ -617,6 +625,29 @@ function PortoOperacaoPage() {
             const normKey = normalizePortoHeader(cleanKey);
             newRow[normKey] = row[index];
           });
+
+          // Split merged equipment & plate values if present
+          let plateVal = newRow.placa ? newRow.placa.toString().trim() : "";
+          let equipVal = newRow.equipamento ? newRow.equipamento.toString().trim() : "";
+
+          if (plateVal && plateVal.includes("-") && plateVal.length > 10) {
+            const lastIndex = plateVal.lastIndexOf("-");
+            const left = plateVal.substring(0, lastIndex).trim();
+            const right = plateVal.substring(lastIndex + 1).trim();
+            if (left && right) {
+              newRow.equipamento = left;
+              newRow.placa = right;
+            }
+          } else if (equipVal && equipVal.includes("-") && equipVal.length > 10 && !plateVal) {
+            const lastIndex = equipVal.lastIndexOf("-");
+            const left = equipVal.substring(0, lastIndex).trim();
+            const right = equipVal.substring(lastIndex + 1).trim();
+            if (left && right) {
+              newRow.equipamento = left;
+              newRow.placa = right;
+            }
+          }
+
           return newRow;
         });
 
@@ -684,7 +715,7 @@ function PortoOperacaoPage() {
         const nextDayDate = format(addDays(rowDateObj, 1), "yyyy-MM-dd");
 
         const basePayload = {
-          equipment: row.placa || null,
+          equipment: row.equipamento || row.equipment || row.placa || null,
           plate: rawPlaca,
           model: row.modelo || null,
           client: row.cliente || null,
@@ -727,9 +758,9 @@ function PortoOperacaoPage() {
           }
         }
 
-        finalPayloads.push({
+         finalPayloads.push({
           scheduled_date: finalScheduledDate,
-          equipment: row.placa || null,
+          equipment: row.equipamento || row.equipment || row.placa || null,
           plate: rawPlaca,
           model: row.modelo || null,
           client: row.cliente || null,
@@ -1082,6 +1113,7 @@ function PortoOperacaoPage() {
     const daySchedules = schedules.filter(s => s.scheduled_date === selectedDate);
     let totalScheduledCount = daySchedules.length;
     let totalBreakdownMinutes = 0;
+    let unattendedCount = 0;
 
     daySchedules.forEach(s => {
       const localKey = s.local || "OUTROS";
@@ -1093,11 +1125,18 @@ function PortoOperacaoPage() {
 
       // Sum breakdown time for this schedule
       const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      
+      // Determine if currently unattended (has active stop with no end date)
+      const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
+      if (hasActiveStop) {
+        unattendedCount++;
+      }
+
       stops.forEach(st => {
         adherenceByLocal[localKey].totalBreakdowns++;
         if (st.stop_start) {
           const start = new Date(st.stop_start).getTime();
-          const end = st.stop_end ? new Date(st.stop_end).getTime() : Date.now();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
           const diffMin = Math.floor((end - start) / 60000);
           if (diffMin > 0) {
             adherenceByLocal[localKey].breakdownMinutes += diffMin;
@@ -1125,13 +1164,21 @@ function PortoOperacaoPage() {
     const overallUptime = Math.max(0, totalScheduledMinutes - totalBreakdownMinutes);
     const overallAdherence = totalScheduledMinutes > 0 ? Math.round((overallUptime / totalScheduledMinutes) * 100) : 100;
 
+    const activeCount = Math.max(0, totalScheduledCount - unattendedCount);
+    const equipmentAdherence = totalScheduledCount > 0 ? Math.round((activeCount / totalScheduledCount) * 100) : 100;
+    const totalPlannedHours = totalScheduledCount * 12;
+
     return {
       localList,
       overallAdherence,
       totalScheduledCount,
-      totalBreakdownHours: (totalBreakdownMinutes / 60).toFixed(1)
+      totalBreakdownHours: (totalBreakdownMinutes / 60).toFixed(1),
+      unattendedCount,
+      activeCount,
+      equipmentAdherence,
+      totalPlannedHours
     };
-  }, [schedules, correctiveLogs, selectedDate]);
+  }, [schedules, correctiveLogs, selectedDate, timeTick]);
 
   return (
     <Tabs defaultValue="operacao" className="w-full space-y-4">
@@ -1174,8 +1221,9 @@ function PortoOperacaoPage() {
         <Card className="bg-slate-950 text-white border-none shadow-sm">
           <CardContent className="p-2 px-3 flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Aderência Geral Porto</p>
+              <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Aderência Geral de Tempo</p>
               <h3 className="text-base font-black mt-0.5 text-indigo-400">{analytics.overallAdherence}%</h3>
+              <p className="text-[7.5px] font-bold text-slate-400">Calculado minuto a minuto</p>
             </div>
             <Activity className="h-5 w-5 text-indigo-500 opacity-30" />
           </CardContent>
@@ -1184,20 +1232,22 @@ function PortoOperacaoPage() {
         <Card className="bg-white border border-slate-200 shadow-sm">
           <CardContent className="p-2 px-3 flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Equipamentos Escalados</p>
-              <h3 className="text-base font-black mt-0.5 text-slate-900">{analytics.totalScheduledCount}</h3>
+              <p className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Aderência de Equipamentos</p>
+              <h3 className="text-base font-black mt-0.5 text-slate-900">{analytics.activeCount} / {analytics.totalScheduledCount} Ativos</h3>
+              <p className="text-[7.5px] font-bold text-red-650 text-red-650">{analytics.unattendedCount} em corretiva ({analytics.equipmentAdherence}% operacional)</p>
             </div>
-            <Clock className="h-5 w-5 text-slate-400 opacity-20" />
+            <CheckCircle2 className="h-5 w-5 text-emerald-500 opacity-30" />
           </CardContent>
         </Card>
  
         <Card className="bg-red-50 border border-red-200 shadow-sm">
           <CardContent className="p-2 px-3 flex items-center justify-between">
             <div>
-              <p className="text-[8px] font-black uppercase text-red-600 tracking-wider">Tempo de Corretiva Total</p>
-              <h3 className="text-base font-black mt-0.5 text-red-700">{analytics.totalBreakdownHours} hrs</h3>
+              <p className="text-[8px] font-black uppercase text-red-600 tracking-wider">Previsto vs. Perdido (Tempo Real)</p>
+              <h3 className="text-base font-black mt-0.5 text-red-700">{analytics.totalPlannedHours}h / {analytics.totalBreakdownHours}h</h3>
+              <p className="text-[7.5px] font-bold text-red-600">Perdido minuto a minuto</p>
             </div>
-            <Wrench className="h-5 w-5 text-red-400 opacity-35" />
+            <Clock className="h-5 w-5 text-red-400 opacity-35" />
           </CardContent>
         </Card>
       </div>
@@ -1931,6 +1981,57 @@ function PortoOperacaoPage() {
         </TabsContent>
 
         <TabsContent value="aderencia" className="space-y-6 mt-0">
+          {/* Sub-cards de detalhamento de Aderência */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-indigo-50 to-white border border-indigo-100 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <span className="text-[10px] font-black text-indigo-800 uppercase tracking-wider">Aderência Contratual</span>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-2xl font-black text-indigo-950">{analytics.overallAdherence}%</span>
+                <span className="text-[10px] font-bold text-slate-500">Mínimo: 90%</span>
+              </div>
+              <div className="w-full bg-indigo-100 h-1.5 rounded-full mt-3 overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-500 ${analytics.overallAdherence >= 90 ? "bg-emerald-500" : analytics.overallAdherence >= 75 ? "bg-amber-500" : "bg-red-500"}`} 
+                  style={{ width: `${analytics.overallAdherence}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Frota Operante</span>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-2xl font-black text-slate-900">{analytics.activeCount}</span>
+                <span className="text-xs font-bold text-slate-500">/ {analytics.totalScheduledCount} equipamentos</span>
+              </div>
+              <p className="text-[10px] font-bold text-slate-500 mt-3 flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                Ativos em campo no momento
+              </p>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Indisponibilidade</span>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-2xl font-black text-red-650 text-red-650">{analytics.unattendedCount}</span>
+                <span className="text-xs font-bold text-slate-550 text-slate-500">em corretiva</span>
+              </div>
+              <p className="text-[10px] font-bold text-red-650 mt-3 flex items-center gap-1">
+                ⚠️ Requer atenção imediata
+              </p>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Downtime Acumulado</span>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className="text-2xl font-black text-red-650">{analytics.totalBreakdownHours}</span>
+                <span className="text-xs font-bold text-slate-550 text-slate-500">horas hoje</span>
+              </div>
+              <p className="text-[10px] font-bold text-slate-500 mt-3">
+                Calculado minuto a minuto
+              </p>
+            </div>
+          </div>
+
           {/* Adherence Scores grouped by Service local lines */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
