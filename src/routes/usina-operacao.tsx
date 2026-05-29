@@ -2018,13 +2018,13 @@ function UsinaOperacaoPage() {
             </div>
 
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Downtime Acumulado</span>
+              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Aderência por Horas</span>
               <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-red-650">{analytics.totalBreakdownHours}</span>
-                <span className="text-xs font-bold text-slate-550 text-slate-500">horas hoje</span>
+                <span className="text-2xl font-black text-slate-900">{analytics.overallAdherence}%</span>
+                <span className="text-xs font-bold text-red-600">-{analytics.totalBreakdownHours}h</span>
               </div>
               <p className="text-[10px] font-bold text-slate-500 mt-3">
-                Calculado minuto a minuto
+                Perdido {analytics.totalBreakdownHours}h de {analytics.totalPlannedHours}h previstas
               </p>
             </div>
           </div>
