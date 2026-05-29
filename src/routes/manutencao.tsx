@@ -63,6 +63,20 @@ function MaintenancePage() {
   const [releasingEq, setReleasingEq] = useState<Equipment | null>(null);
   const [releaseInfo, setReleaseInfo] = useState("");
 
+  // Estado para o Dialog de Edição Completa
+  const [editingEq, setEditingEq] = useState<Equipment | null>(null);
+  const [editForm, setEditForm] = useState({
+    status: "manutencao" as EquipmentStatus,
+    problem: "",
+    priority: "Média",
+    responsible: "",
+    entryDate: "",
+    expectedReturn: "",
+    expectedReturnTime: "17:00",
+    alertUserId: "",
+    maintenanceType: "Manutenção Geral"
+  });
+
   const [form, setForm] = useState({
     status: "manutencao" as EquipmentStatus,
     problem: "",
@@ -244,6 +258,53 @@ function MaintenancePage() {
   const release = (e: Equipment) => {
     setReleasingEq(e);
     setReleaseInfo("");
+  };
+
+  const handleStartEdit = (e: Equipment) => {
+    setEditingEq(e);
+    const startDate = e.maintenance_started_at ? e.maintenance_started_at.split("T")[0] : "";
+    let returnDate = "";
+    let returnTime = "17:00";
+    if (e.maintenance_expected_return) {
+      const parts = e.maintenance_expected_return.split("T");
+      returnDate = parts[0];
+      if (parts[1]) {
+        returnTime = parts[1].slice(0, 5);
+      }
+    }
+    setEditForm({
+      status: e.status,
+      problem: e.maintenance_problem || "",
+      priority: e.maintenance_priority || "Média",
+      responsible: e.maintenance_responsible || "",
+      entryDate: startDate,
+      expectedReturn: returnDate,
+      expectedReturnTime: returnTime,
+      alertUserId: (e as any).alert_user_id || "",
+      maintenanceType: e.maintenance_type || "Manutenção Geral"
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingEq) return;
+    const { error } = await supabase.from("equipment").update({
+      status: editForm.status,
+      maintenance_problem: editForm.problem,
+      maintenance_priority: editForm.priority,
+      maintenance_responsible: editForm.responsible,
+      alert_user_id: editForm.alertUserId || null,
+      maintenance_expected_return: editForm.expectedReturn ? `${editForm.expectedReturn}T${editForm.expectedReturnTime || '00:00'}:00` : null,
+      maintenance_started_at: editForm.entryDate ? new Date(editForm.entryDate + "T12:00:00").toISOString() : null,
+      maintenance_type: editForm.maintenanceType
+    }).eq("id", editingEq.id);
+
+    if (error) {
+      toast.error(`Erro ao salvar edição: ${error.message}`);
+    } else {
+      toast.success("Intervenção editada com sucesso!");
+      setEditingEq(null);
+      load();
+    }
   };
 
   const getDiasParado = (dateStr: string | null) => {
@@ -504,7 +565,8 @@ function MaintenancePage() {
                           </td>
                           <td className="px-4 py-4 text-right flex items-center justify-end gap-2">
                             <Button variant="outline" size="sm" onClick={() => handleQuickVerify(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50"><CheckCircle2 className="h-3 w-3 mr-1" /> VERIFICAR</Button>
-                            <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="font-black border-2 h-8 text-[10px] text-blue-600 border-blue-100 hover:bg-blue-50"><Edit3 className="h-3 w-3 mr-1" /> ATUALIZAR</Button>
+                            <Button variant="outline" size="sm" onClick={() => handleStartEdit(e)} className="font-black border-2 h-8 text-[10px] text-amber-600 border-amber-100 hover:bg-amber-50"><Edit3 className="h-3 w-3 mr-1" /> EDITAR</Button>
+                            <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="font-black border-2 h-8 text-[10px] text-blue-600 border-blue-100 hover:bg-blue-50">HISTÓRICO</Button>
                             <Button variant="outline" size="sm" onClick={() => release(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
                           </td>
                         </tr>
@@ -570,6 +632,99 @@ function MaintenancePage() {
           <DialogFooter>
             <Button onClick={handleFinalRelease} className="w-full h-12 font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700">
               CONFIRMAR E LIBERAR EQUIPAMENTO
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG DE EDIÇÃO COMPLETA */}
+      <Dialog open={!!editingEq} onOpenChange={(o) => !o && setEditingEq(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase flex items-center gap-2 text-amber-650">
+              <Edit3 className="h-5 w-5 text-amber-600" /> Editar Intervenção - {editingEq?.identifier}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase">Data de Entrada</Label>
+                <Input type="date" value={editForm.entryDate} onChange={(e) => setEditForm({...editForm, entryDate: e.target.value})} className="h-10 font-bold" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase text-primary">Previsão Retorno (Data)</Label>
+                <Input type="date" value={editForm.expectedReturn} onChange={(e) => setEditForm({...editForm, expectedReturn: e.target.value})} className="h-10 font-bold border-primary/30" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase text-primary">Hora Prevista</Label>
+                <Input type="time" value={editForm.expectedReturnTime} onChange={(e) => setEditForm({...editForm, expectedReturnTime: e.target.value})} className="h-10 font-bold border-primary/30" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase">Usuário para Alerta</Label>
+                <Select value={editForm.alertUserId} onValueChange={(v) => setEditForm({...editForm, alertUserId: v})}>
+                  <SelectTrigger className="h-10 font-bold">
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {users.map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.full_name || "Sem Nome"}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase">Status</Label>
+                <Select value={editForm.status} onValueChange={(v) => setEditForm({...editForm, status: v as any})}>
+                  <SelectTrigger className="h-10 font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manutencao">Manutenção</SelectItem>
+                    <SelectItem value="indisponivel">Indisponível</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase">Prioridade</Label>
+                <Select value={editForm.priority} onValueChange={(v) => setEditForm({...editForm, priority: v})}>
+                  <SelectTrigger className="h-10 font-bold">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Média">Média</SelectItem>
+                    <SelectItem value="Crítica">Crítica</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black uppercase">Tipo de Intervenção</Label>
+              <Select value={editForm.maintenanceType} onValueChange={(v) => setEditForm({...editForm, maintenanceType: v})}>
+                <SelectTrigger className="h-10 font-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Manutenção Geral">Manutenção Geral</SelectItem>
+                  <SelectItem value="MEV">MEV</SelectItem>
+                  <SelectItem value="Lavador">Lavador</SelectItem>
+                  <SelectItem value="Mola">Mola</SelectItem>
+                  <SelectItem value="Preventiva">Preventiva</SelectItem>
+                  <SelectItem value="Elétrica">Elétrica</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black uppercase">Observações / Problema</Label>
+              <Textarea value={editForm.problem} onChange={(e) => setEditForm({...editForm, problem: e.target.value})} className="h-24" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={handleSaveEdit} className="w-full h-12 font-black uppercase bg-amber-600 hover:bg-amber-700 text-white">
+              SALVAR EDIÇÃO
             </Button>
           </DialogFooter>
         </DialogContent>

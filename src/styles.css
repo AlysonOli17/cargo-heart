@@ -149,5 +149,7 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    font-size: 0.95rem;
+    font-weight: 500;
   }
 }
