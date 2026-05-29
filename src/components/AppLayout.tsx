@@ -9,6 +9,8 @@ import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { MaintenanceGovernanceAlert } from "./MaintenanceGovernanceAlert";
 import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import logoBusato from "@/assets/logo-busato.png";
+import logoGlobo from "@/assets/logo-globo.png";
 
 const baseNav = [
   { to: "/cco", label: "CCO Central", icon: Globe },
@@ -188,10 +190,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {!collapsed ? (
             <>
               <Link to="/cco" className="flex items-center gap-2 overflow-hidden mr-2">
-                <div className="h-10 w-10 rounded-full bg-slate-800/40 flex items-center justify-center flex-shrink-0 border border-slate-700/60">
-                  <Globe className="h-6 w-6 text-sky-400" />
-                </div>
-                <span className="font-black text-sm uppercase tracking-wider whitespace-nowrap text-slate-100">Operação Busato</span>
+                <img src={logoBusato} alt="Busato" className="h-9 object-contain brightness-0 invert" />
               </Link>
               <Button 
                 variant="ghost" 
@@ -203,14 +202,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </Button>
             </>
           ) : (
-            <div className="flex items-center justify-center w-full">
+            <div className="flex flex-col items-center gap-2 justify-center w-full">
+              <Link to="/cco" className="mb-0.5">
+                <img src={logoGlobo} alt="Busato" className="h-8 w-8 object-contain" />
+              </Link>
               <Button 
                 variant="ghost" 
                 size="icon" 
                 onClick={() => handleSetCollapsed(false)} 
-                className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-10 w-10"
+                className="text-slate-500 hover:text-slate-100 hover:bg-slate-800/40 rounded-xl h-8 w-8"
               >
-                <ChevronRight className="h-5 w-5" />
+                <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
           )}
@@ -257,10 +259,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       {/* HEADER FOR MOBILE */}
       <header className="md:hidden border-b bg-[#0f172a] text-white h-16 flex items-center justify-between px-4 border-slate-800">
         <Link to="/cco" className="flex items-center gap-2">
-          <div className="h-9 w-9 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
-            <Globe className="h-5 w-5 text-sky-400" />
-          </div>
-          <span className="font-black text-sm uppercase tracking-wider text-slate-100">Operação Busato</span>
+          <img src={logoBusato} alt="Busato" className="h-8 object-contain brightness-0 invert" />
         </Link>
         <Button 
           variant="ghost" 

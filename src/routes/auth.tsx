@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Truck } from "lucide-react";
+import logoCompleto from "@/assets/logo-completo.png";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({ meta: [{ title: "Entrar — Disponibilidade Frota Busato" }] }),
@@ -76,11 +77,9 @@ function AuthPage() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-background to-secondary">
       <Card className="w-full max-w-md p-8">
-        <div className="flex items-center gap-2 mb-6">
-          <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
-            <Truck className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <span className="text-xl font-bold">Disponibilidade Frota Busato</span>
+        <div className="flex flex-col items-center justify-center mb-6">
+          <img src={logoCompleto} alt="Busato Soluções Inteligentes" className="h-16 object-contain" />
+          <span className="text-sm font-black tracking-widest uppercase mt-3 text-slate-500">Gestão de Frota</span>
         </div>
         <h1 className="text-2xl font-bold mb-1">{isSignUp ? "Criar conta" : "Entrar"}</h1>
         <p className="text-sm text-muted-foreground mb-6">
