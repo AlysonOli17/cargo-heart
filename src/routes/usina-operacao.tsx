@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Fragment } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -160,6 +160,8 @@ function UsinaOperacaoPage() {
     }, 30000);
     return () => clearInterval(timer);
   }, []);
+
+  const [expandedLocal, setExpandedLocal] = useState<string | null>(null);
 
   // Excel File State
   const [file, setFile] = useState<File | null>(null);
@@ -2049,19 +2051,94 @@ function UsinaOperacaoPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody className="text-xs font-bold text-slate-800">
-                    {analytics.localList.map(g => (
-                      <TableRow key={g.local}>
-                        <TableCell className="uppercase">{g.local}</TableCell>
-                        <TableCell>{g.totalScheduled}</TableCell>
-                        <TableCell>{g.totalBreakdowns} paradas</TableCell>
-                        <TableCell className="font-mono text-red-600">{g.breakdownHours} hrs</TableCell>
-                        <TableCell className="text-right">
-                          <span className={`px-2 py-0.5 rounded font-black ${g.adherence >= 90 ? "bg-emerald-100 text-emerald-700" : g.adherence >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                            {g.adherence}%
-                          </span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {analytics.localList.map(g => {
+                      const isExpanded = expandedLocal === g.local;
+                      return (
+                        <Fragment key={g.local}>
+                          <TableRow 
+                            className="hover:bg-slate-50/50 cursor-pointer transition-colors"
+                            onClick={() => setExpandedLocal(isExpanded ? null : g.local)}
+                          >
+                            <TableCell className="uppercase flex items-center gap-1.5 py-3">
+                              <ChevronRight className={`h-4 w-4 text-slate-405 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`} />
+                              <span className="font-bold text-slate-900">{g.local}</span>
+                            </TableCell>
+                            <TableCell>{g.totalScheduled}</TableCell>
+                            <TableCell>{g.totalBreakdowns} paradas</TableCell>
+                            <TableCell className="font-mono text-red-600">{g.breakdownHours} hrs</TableCell>
+                            <TableCell className="text-right">
+                              <span className={`px-2 py-0.5 rounded font-black ${g.adherence >= 90 ? "bg-emerald-100 text-emerald-700" : g.adherence >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                                {g.adherence}%
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                          {isExpanded && (
+                            <TableRow className="bg-slate-50/30 hover:bg-slate-50/30">
+                              <TableCell colSpan={5} className="p-3 border-t border-b">
+                                <div className="bg-white border rounded-lg p-3 shadow-inner space-y-2">
+                                  <h4 className="text-[10px] font-black uppercase text-indigo-900 tracking-wider flex items-center gap-1">
+                                    📋 Equipamentos Vinculados a {g.local}
+                                  </h4>
+                                  <Table className="text-[10px] w-full min-w-full">
+                                    <TableHeader className="bg-slate-50 text-[9px] font-black uppercase">
+                                      <TableRow>
+                                        <TableHead className="py-1">Equipamento</TableHead>
+                                        <TableHead className="py-1">Placa</TableHead>
+                                        <TableHead className="py-1">Operador</TableHead>
+                                        <TableHead className="py-1">OS</TableHead>
+                                        <TableHead className="py-1">Tempo Parado</TableHead>
+                                        <TableHead className="py-1 text-right">Aderência</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody className="font-bold text-slate-800 text-[10px]">
+                                      {schedules
+                                        .filter(s => s.scheduled_date === selectedDate && (s.local || "OUTROS") === g.local)
+                                        .map(s => {
+                                          const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+                                          let breakdownMinutes = 0;
+                                          stops.forEach(st => {
+                                            if (st.stop_start) {
+                                              const start = new Date(st.stop_start).getTime();
+                                              const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+                                              const diff = Math.floor((end - start) / 60000);
+                                              if (diff > 0) breakdownMinutes += diff;
+                                            }
+                                          });
+                                          const totalMinutes = 720;
+                                          const uptime = Math.max(0, totalMinutes - breakdownMinutes);
+                                          const adherenceScore = Math.round((uptime / totalMinutes) * 100);
+                                          const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
+
+                                          return (
+                                            <TableRow key={s.id} className={hasActiveStop ? "bg-red-50/20 animate-pulse-slow" : ""}>
+                                              <TableCell className="py-1.5">{s.equipment || "—"}</TableCell>
+                                              <TableCell className="py-1.5">
+                                                <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] ${hasActiveStop ? "bg-red-100 text-red-700 border border-red-200" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
+                                                  {s.plate}
+                                                </span>
+                                              </TableCell>
+                                              <TableCell className="py-1.5 uppercase">{s.operator || "—"}</TableCell>
+                                              <TableCell className="py-1.5 font-mono">{s.os_number || "—"}</TableCell>
+                                              <TableCell className={`py-1.5 font-mono ${breakdownMinutes > 0 ? "text-red-600" : "text-slate-400"}`}>
+                                                {(breakdownMinutes / 60).toFixed(1)} hrs
+                                              </TableCell>
+                                              <TableCell className="py-1.5 text-right">
+                                                <span className={`px-1.5 py-0.5 rounded font-black ${adherenceScore >= 90 ? "bg-emerald-100 text-emerald-700" : adherenceScore >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                                                  {adherenceScore}%
+                                                </span>
+                                              </TableCell>
+                                            </TableRow>
+                                          );
+                                        })}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                     {analytics.localList.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center py-6 text-slate-400 italic font-bold">Sem dados de aderência para hoje.</TableCell>
