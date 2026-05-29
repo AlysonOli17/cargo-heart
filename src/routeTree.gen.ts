@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as UsinaOperacaoRouteImport } from './routes/usina-operacao'
+import { Route as PortoOperacaoRouteImport } from './routes/porto-operacao'
 import { Route as OperacaoRouteImport } from './routes/operacao'
 import { Route as ManutencaoRouteImport } from './routes/manutencao'
 import { Route as HistoricoRouteImport } from './routes/historico'
@@ -23,6 +24,11 @@ import { Route as IndexRouteImport } from './routes/index'
 const UsinaOperacaoRoute = UsinaOperacaoRouteImport.update({
   id: '/usina-operacao',
   path: '/usina-operacao',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortoOperacaoRoute = PortoOperacaoRouteImport.update({
+  id: '/porto-operacao',
+  path: '/porto-operacao',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OperacaoRoute = OperacaoRouteImport.update({
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/historico': typeof HistoricoRoute
   '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
+  '/porto-operacao': typeof PortoOperacaoRoute
   '/usina-operacao': typeof UsinaOperacaoRoute
 }
 export interface FileRoutesByTo {
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/historico': typeof HistoricoRoute
   '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
+  '/porto-operacao': typeof PortoOperacaoRoute
   '/usina-operacao': typeof UsinaOperacaoRoute
 }
 export interface FileRoutesById {
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/historico': typeof HistoricoRoute
   '/manutencao': typeof ManutencaoRoute
   '/operacao': typeof OperacaoRoute
+  '/porto-operacao': typeof PortoOperacaoRoute
   '/usina-operacao': typeof UsinaOperacaoRoute
 }
 export interface FileRouteTypes {
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/historico'
     | '/manutencao'
     | '/operacao'
+    | '/porto-operacao'
     | '/usina-operacao'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/historico'
     | '/manutencao'
     | '/operacao'
+    | '/porto-operacao'
     | '/usina-operacao'
   id:
     | '__root__'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/historico'
     | '/manutencao'
     | '/operacao'
+    | '/porto-operacao'
     | '/usina-operacao'
   fileRoutesById: FileRoutesById
 }
@@ -157,6 +169,7 @@ export interface RootRouteChildren {
   HistoricoRoute: typeof HistoricoRoute
   ManutencaoRoute: typeof ManutencaoRoute
   OperacaoRoute: typeof OperacaoRoute
+  PortoOperacaoRoute: typeof PortoOperacaoRoute
   UsinaOperacaoRoute: typeof UsinaOperacaoRoute
 }
 
@@ -167,6 +180,13 @@ declare module '@tanstack/react-router' {
       path: '/usina-operacao'
       fullPath: '/usina-operacao'
       preLoaderRoute: typeof UsinaOperacaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/porto-operacao': {
+      id: '/porto-operacao'
+      path: '/porto-operacao'
+      fullPath: '/porto-operacao'
+      preLoaderRoute: typeof PortoOperacaoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/operacao': {
@@ -245,6 +265,7 @@ const rootRouteChildren: RootRouteChildren = {
   HistoricoRoute: HistoricoRoute,
   ManutencaoRoute: ManutencaoRoute,
   OperacaoRoute: OperacaoRoute,
+  PortoOperacaoRoute: PortoOperacaoRoute,
   UsinaOperacaoRoute: UsinaOperacaoRoute,
 }
 export const routeTree = rootRouteImport

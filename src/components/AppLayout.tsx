@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescript
 const baseNav = [
   { to: "/cco", label: "CCO Central", icon: Globe },
   { to: "/usina-operacao", label: "Operação Usina", icon: Calendar },
+  { to: "/porto-operacao", label: "Operação Porto", icon: CalendarDays },
   { to: "/operacao", label: "Operação", icon: HardDrive },
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
   { to: "/manutencao", label: "Manutenção", icon: FileText },
