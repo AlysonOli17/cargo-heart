@@ -63,7 +63,7 @@ export function MaintenanceGovernanceAlert() {
       const isOverdue = e.maintenance_expected_return ? new Date(e.maintenance_expected_return) < now : false;
       const isUserAlerted = e.alert_user_id === user.id;
 
-      return isDurationCritical || (isOverdue && isUserAlerted);
+      return (isDurationCritical || isOverdue) && isUserAlerted;
     }).map(e => ({
       id: e.id,
       identifier: e.identifier,
