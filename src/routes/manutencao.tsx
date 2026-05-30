@@ -24,8 +24,23 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
 
+const tzOffset = () => {
+  const tzo = -new Date().getTimezoneOffset();
+  const dif = tzo >= 0 ? '+' : '-';
+  const pad = (num: number) => String(Math.floor(Math.abs(num))).padStart(2, '0');
+  return `${dif}${pad(tzo / 60)}:${pad(tzo % 60)}`;
+};
+
+const getLocalDateString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const Route = createFileRoute("/manutencao")({
-  head: () => ({ meta: [{ title: "CCO Manutenção — Frota Busato" }] }),
+  head: () => ({ meta: [{ title: "CCM MANUTENÇÃO — Frota Busato" }] }),
   component: () => <AppLayout><MaintenancePage /></AppLayout>,
 });
 
@@ -82,8 +97,8 @@ function MaintenancePage() {
     problem: "",
     priority: "Média",
     responsible: "",
-    entryDate: new Date().toISOString().split("T")[0], // Data de entrada manual
-    scheduledDate: new Date().toISOString().split("T")[0],
+    entryDate: getLocalDateString(), // Local current date
+    scheduledDate: getLocalDateString(),
     expectedReturn: "",
     expectedReturnTime: "17:00", // Default time
     alertUserId: "", // User to be alerted
@@ -132,8 +147,8 @@ function MaintenancePage() {
         maintenance_priority: form.priority,
         maintenance_responsible: form.responsible,
         alert_user_id: form.alertUserId || null,
-        maintenance_expected_return: form.expectedReturn ? `${form.expectedReturn}T${form.expectedReturnTime || '00:00'}:00` : null,
-        maintenance_started_at: new Date(form.entryDate).toISOString(),
+        maintenance_expected_return: form.expectedReturn ? `${form.expectedReturn}T${form.expectedReturnTime || '00:00'}:00${tzOffset()}` : null,
+        maintenance_started_at: form.entryDate ? `${form.entryDate}T12:00:00${tzOffset()}` : null,
         maintenance_type: form.maintenanceType
       }).eq("id", selectedEqId);
       
@@ -293,8 +308,8 @@ function MaintenancePage() {
       maintenance_priority: editForm.priority,
       maintenance_responsible: editForm.responsible,
       alert_user_id: editForm.alertUserId || null,
-      maintenance_expected_return: editForm.expectedReturn ? `${editForm.expectedReturn}T${editForm.expectedReturnTime || '00:00'}:00` : null,
-      maintenance_started_at: editForm.entryDate ? new Date(editForm.entryDate + "T12:00:00").toISOString() : null,
+      maintenance_expected_return: editForm.expectedReturn ? `${editForm.expectedReturn}T${editForm.expectedReturnTime || '00:00'}:00${tzOffset()}` : null,
+      maintenance_started_at: editForm.entryDate ? `${editForm.entryDate}T12:00:00${tzOffset()}` : null,
       maintenance_type: editForm.maintenanceType
     }).eq("id", editingEq.id);
 
@@ -415,7 +430,7 @@ function MaintenancePage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90"><Wrench className="h-8 w-8 text-primary" /> CCO Manutenção</h1>
+          <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90"><Wrench className="h-8 w-8 text-primary" /> CCM MANUTENÇÃO</h1>
           <p className="text-muted-foreground font-medium italic">{items.length} máquinas em intervenção</p>
         </div>
         <div className="md:hidden w-full">
@@ -448,140 +463,144 @@ function MaintenancePage() {
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
             <DialogTrigger asChild><Button className="font-bold uppercase shadow-lg h-10 text-xs"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
             <DialogContent className="max-w-md">
-              <DialogHeader><DialogTitle className="font-black uppercase">Controle de Frota</DialogTitle></DialogHeader>
-              <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
-                <TabsList className="grid grid-cols-2 w-full mb-4 h-12">
-                  <TabsTrigger value="now" className="font-bold text-[10px]">PARAR AGORA</TabsTrigger>
-                  <TabsTrigger value="schedule" className="font-bold text-[10px]">AGENDAR PARADA</TabsTrigger>
-                </TabsList>
-                <div className="space-y-4">
-                  <div className="flex flex-col space-y-2">
-                    <Label className="text-[10px] font-black uppercase">Equipamento</Label>
-                    <Popover open={openCombo} onOpenChange={setOpenCombo}>
-                      <PopoverTrigger asChild><Button variant="outline" className="w-full justify-between h-12 font-bold">{selectedEqId ? availableEqs.find(x => x.id === selectedEqId)?.identifier : "PESQUISAR PLACA..."}<ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" /></Button></PopoverTrigger>
-                      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0"><Command><CommandInput placeholder="Digite a placa..." /><CommandList><CommandEmpty>Não encontrado.</CommandEmpty><CommandGroup>{availableEqs.map((eq) => (<CommandItem key={eq.id} onSelect={() => { setSelectedEqId(eq.id); setOpenCombo(false); }}><Check className={cn("mr-2 h-4 w-4", selectedEqId === eq.id ? "opacity-100" : "opacity-0")} />{eq.identifier}</CommandItem>))}</CommandGroup></CommandList></Command></PopoverContent>
-                    </Popover>
-                  </div>
-                  {mode === "now" ? (
-                    <>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Data de Entrada</Label><Input type="date" value={form.entryDate} onChange={(e) => setForm({...form, entryDate: e.target.value})} className="h-10 font-bold" /></div>
-                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-primary">Previsão Retorno (Data)</Label><Input type="date" value={form.expectedReturn} onChange={(e) => setForm({...form, expectedReturn: e.target.value})} className="h-10 font-bold border-primary/30" /></div>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3">
-                        <div className="space-y-2">
-                          <Label className="text-[10px] font-black uppercase text-primary">Hora Prevista para Liberação</Label>
-                          <Input 
-                            type="time" 
-                            value={form.expectedReturnTime} 
-                            onChange={(e) => setForm({...form, expectedReturnTime: e.target.value})} 
-                            className="h-10 font-bold border-primary/30" 
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-[10px] font-black uppercase">Usuário para Alerta de Atraso</Label>
-                          <Select value={form.alertUserId} onValueChange={(v) => setForm({...form, alertUserId: v})}>
-                            <SelectTrigger className="h-10 font-bold">
-                              <SelectValue placeholder="Selecione um usuário..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {users.map(u => (
-                                <SelectItem key={u.id} value={u.id}>{u.full_name || "Sem Nome"}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Status</Label><Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manutencao">Manutenção</SelectItem><SelectItem value="indisponivel">Indisponível</SelectItem></SelectContent></Select></div>
-                        <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Prioridade</Label><Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Média">Média</SelectItem><SelectItem value="Crítica">Crítica</SelectItem></SelectContent></Select></div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-[10px] font-black uppercase">Tipo de Intervenção</Label>
-                        <Select value={form.maintenanceType} onValueChange={(v) => setForm({...form, maintenanceType: v})}>
-                          <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Manutenção Geral">Manutenção Geral</SelectItem>
-                            <SelectItem value="MEV">MEV</SelectItem>
-                            <SelectItem value="Lavador">Lavador</SelectItem>
-                            <SelectItem value="Mola">Mola</SelectItem>
-                            <SelectItem value="Preventiva">Preventiva</SelectItem>
-                            <SelectItem value="Elétrica">Elétrica</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Data</Label><Input type="date" value={form.scheduledDate} onChange={(e) => setForm({...form, scheduledDate: e.target.value})} className="h-10 font-bold" /></div>
-                      <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Tipo</Label><Select value={form.stopType} onValueChange={(v) => setForm({...form, stopType: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent>{STOP_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
-                    </div>
-                  )}
-                  <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Observações Iniciais</Label><Textarea value={form.problem} onChange={(e) => setForm({...form, problem: e.target.value})} placeholder="Defeito relatado..." /></div>
-                  <Button onClick={handleSubmit} className="w-full h-12 font-black uppercase bg-primary text-white">CONFIRMAR REGISTRO</Button>
+              <DialogHeader><DialogTitle className="font-black uppercase">Controle de Frota — Nova Intervenção</DialogTitle></DialogHeader>
+              <div className="max-h-[70vh] overflow-y-auto pr-1 space-y-4 py-2">
+                <div className="flex flex-col space-y-2">
+                  <Label className="text-[10px] font-black uppercase">Equipamento</Label>
+                  <Popover open={openCombo} onOpenChange={setOpenCombo}>
+                    <PopoverTrigger asChild><Button variant="outline" className="w-full justify-between h-12 font-bold">{selectedEqId ? availableEqs.find(x => x.id === selectedEqId)?.identifier : "PESQUISAR PLACA..."}<ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" /></Button></PopoverTrigger>
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0"><Command><CommandInput placeholder="Digite a placa..." /><CommandList><CommandEmpty>Não encontrado.</CommandEmpty><CommandGroup>{availableEqs.map((eq) => (<CommandItem key={eq.id} onSelect={() => { setSelectedEqId(eq.id); setOpenCombo(false); }}><Check className={cn("mr-2 h-4 w-4", selectedEqId === eq.id ? "opacity-100" : "opacity-0")} />{eq.identifier}</CommandItem>))}</CommandGroup></CommandList></Command></PopoverContent>
+                  </Popover>
                 </div>
-              </Tabs>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Data de Entrada</Label><Input type="date" value={form.entryDate} onChange={(e) => setForm({...form, entryDate: e.target.value})} className="h-10 font-bold" /></div>
+                  <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-primary">Previsão Retorno (Data)</Label><Input type="date" value={form.expectedReturn} onChange={(e) => setForm({...form, expectedReturn: e.target.value})} className="h-10 font-bold border-primary/30" /></div>
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black uppercase text-primary">Hora Prevista para Liberação</Label>
+                    <Input 
+                      type="time" 
+                      value={form.expectedReturnTime} 
+                      onChange={(e) => setForm({...form, expectedReturnTime: e.target.value})} 
+                      className="h-10 font-bold border-primary/30" 
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black uppercase">Usuário para Alerta de Atraso</Label>
+                    <Select value={form.alertUserId} onValueChange={(v) => setForm({...form, alertUserId: v})}>
+                      <SelectTrigger className="h-10 font-bold">
+                        <SelectValue placeholder="Selecione um usuário..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {users.map(u => (
+                          <SelectItem key={u.id} value={u.id}>{u.full_name || "Sem Nome"}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Status</Label><Select value={form.status} onValueChange={(v) => setForm({...form, status: v as any})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="manutencao">Manutenção</SelectItem><SelectItem value="indisponivel">Indisponível</SelectItem></SelectContent></Select></div>
+                  <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Prioridade</Label><Select value={form.priority} onValueChange={(v) => setForm({...form, priority: v})}><SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Média">Média</SelectItem><SelectItem value="Crítica">Crítica</SelectItem></SelectContent></Select></div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-[10px] font-black uppercase">Tipo de Intervenção</Label>
+                  <Select value={form.maintenanceType} onValueChange={(v) => setForm({...form, maintenanceType: v})}>
+                    <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Manutenção Geral">Manutenção Geral</SelectItem>
+                      <SelectItem value="MEV">MEV</SelectItem>
+                      <SelectItem value="Lavador">Lavador</SelectItem>
+                      <SelectItem value="Mola">Mola</SelectItem>
+                      <SelectItem value="Preventiva">Preventiva</SelectItem>
+                      <SelectItem value="Elétrica">Elétrica</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2"><Label className="text-[10px] font-black uppercase">Observações Iniciais</Label><Textarea value={form.problem} onChange={(e) => setForm({...form, problem: e.target.value})} placeholder="Defeito relatado..." /></div>
+                <Button onClick={handleSubmit} className="w-full h-12 font-black uppercase bg-primary text-white">CONFIRMAR REGISTRO</Button>
+              </div>
             </DialogContent>
           </Dialog>
         </div>
       </div>
-
-      <div className="space-y-8">
+         <div className="space-y-8">
         {sortedGroups.map(group => (
           <section key={group} className="animate-in fade-in duration-500">
-            <h2 className="text-lg font-black uppercase mb-3 flex items-center gap-2 border-b-2 pb-2 text-foreground/70"><Tag className="h-4 w-4 text-primary" /> {group === 'MEV' ? 'Equipamentos em MEV' : `Frota: ${group}`}</h2>
-            <Card className="overflow-hidden border shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left border-collapse">
-                  <thead className="bg-muted/50 text-[10px] uppercase font-black tracking-widest text-muted-foreground">
-                    <tr><th className="px-4 py-4">Equipamento</th><th className="px-4 py-4 min-w-[200px]">Status / Histórico</th><th className="px-4 py-4 text-center">Entrada</th><th className="px-4 py-4 text-center">Previsão</th><th className="px-4 py-4 text-center">Dias</th><th className="px-4 py-4 text-right">Ações</th></tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {grouped[group].map(e => {
-                      const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
-                      const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
-                      const isOverdue = dias >= threshold;
+            <h2 className="text-sm font-black uppercase mb-3 flex items-center gap-2 border-b-2 pb-1.5 text-foreground/75">
+              <Tag className="h-4 w-4 text-primary" /> 
+              {group === 'MEV' ? 'Equipamentos em MEV' : `Frota: ${group}`}
+            </h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {grouped[group].map(e => {
+                const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
+                const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
+                const isOverdue = dias >= threshold;
 
-                      return (
-                        <tr key={e.id} className={cn("hover:bg-muted/20 transition-colors", isOverdue && "bg-red-50/50")}>
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-2">
-                              <p className="font-mono font-black text-base">{e.identifier}</p>
-                              {isOverdue && <AlertCircle className="h-4 w-4 text-red-600 animate-pulse" />}
-                            </div>
-                            <p className="text-[9px] font-bold text-muted-foreground uppercase">{e.type}</p>
-                            {e.contract_type && (
-                              <p className="text-[9px] font-black text-primary uppercase mt-0.5">{e.contract_type}</p>
-                            )}
-                          </td>
-                          <td className="px-4 py-4">
-                            <div className="bg-muted/30 p-2 rounded-lg text-xs font-medium border mb-1 whitespace-pre-wrap">{e.maintenance_problem || '—'}</div>
-                            <Badge variant={e.maintenance_priority === 'Crítica' ? 'destructive' : 'secondary'} className="text-[9px] font-bold">{e.maintenance_priority || 'Média'}</Badge>
-                          </td>
-                          <td className="px-4 py-4 text-center font-medium text-muted-foreground">{e.maintenance_started_at ? formatDate(e.maintenance_started_at) : '—'}</td>
-                          <td className="px-4 py-4 text-center">{e.maintenance_expected_return ? (<Badge variant="outline" className="border-primary text-primary font-black text-[10px]">{formatDate(e.maintenance_expected_return)}</Badge>) : <span className="text-muted-foreground/30 text-[10px] font-bold italic">NÃO INF.</span>}</td>
-                          <td className="px-4 py-4 text-center">
-                            <span className={cn("text-lg font-black", isOverdue && "text-red-600")}>{dias}</span>
-                          </td>
-                          <td className="px-4 py-4 text-right flex items-center justify-end gap-2">
-                            <Button variant="outline" size="sm" onClick={() => handleStartEdit(e)} className="font-black border-2 h-8 text-[10px] text-amber-600 border-amber-100 hover:bg-amber-50"><Edit3 className="h-3 w-3 mr-1" /> EDITAR</Button>
-                            <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="font-black border-2 h-8 text-[10px] text-blue-600 border-blue-100 hover:bg-blue-50">HISTÓRICO</Button>
-                            <Button variant="outline" size="sm" onClick={() => release(e)} className="font-black border-2 h-8 text-[10px] text-emerald-600 border-emerald-100 hover:bg-emerald-50">LIBERAR</Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+                return (
+                  <Card key={e.id} className={cn("p-3 flex flex-col justify-between border shadow-sm space-y-2.5", isOverdue && "border-red-200 bg-red-50/10")}>
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-start gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <p className="font-mono font-black text-sm text-slate-800">{e.identifier}</p>
+                          {isOverdue && <AlertCircle className="h-3.5 w-3.5 text-red-600 animate-pulse" />}
+                        </div>
+                        <div className="text-[10px] font-black text-slate-900 bg-slate-100/80 px-1.5 py-0.5 rounded flex items-center gap-1">
+                          <Clock className="h-3 w-3 text-slate-500" />
+                          <span>{dias}d</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1 text-[9px] font-bold uppercase">
+                        <span className="text-muted-foreground">{e.type}</span>
+                        {e.contract_type && (
+                          <span className="text-primary font-black">· {e.contract_type}</span>
+                        )}
+                      </div>
+
+                      <div className="bg-slate-50/80 border border-slate-100 p-2 rounded text-[11px] text-slate-650 max-h-16 overflow-y-auto whitespace-pre-wrap leading-tight">
+                        {e.maintenance_problem || '—'}
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                        <div>
+                          <span className="block text-[8px] font-black uppercase text-slate-400">Entrada</span>
+                          <span>{e.maintenance_started_at ? formatDate(e.maintenance_started_at).split(" ")[0] : '—'}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="block text-[8px] font-black uppercase text-slate-400">Previsão</span>
+                          {e.maintenance_expected_return ? (
+                            <span className="text-primary font-black">{formatDate(e.maintenance_expected_return).split(" ")[0]}</span>
+                          ) : (
+                            <span className="italic text-slate-400 text-[9px]">N/I</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-1 pt-1.5 border-t border-slate-100">
+                      <Button variant="outline" size="sm" onClick={() => handleStartEdit(e)} className="flex-1 font-bold h-7 text-[9px] text-amber-600 border-amber-100 hover:bg-amber-50 px-1.5">
+                        EDITAR
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="flex-1 font-bold h-7 text-[9px] text-blue-600 border-blue-100 hover:bg-blue-50 px-1.5">
+                        HISTÓRICO
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => release(e)} className="flex-1 font-bold h-7 text-[9px] text-emerald-600 border-emerald-100 hover:bg-emerald-50 px-1.5">
+                        LIBERAR
+                      </Button>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
           </section>
         ))}
       </div>
 
       {/* DIALOG DE ATUALIZAÇÃO DE STATUS / HISTÓRICO */}
       <Dialog open={!!updatingEq} onOpenChange={(o) => !o && setUpdatingEq(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="font-black uppercase flex items-center gap-2"><Edit3 className="h-5 w-5 text-blue-600" /> Atualizar {updatingEq?.identifier}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-4">
              <div className="space-y-2">
@@ -607,7 +626,7 @@ function MaintenancePage() {
 
       {/* DIALOG DE LIBERAÇÃO FINAL (FECHAMENTO) */}
       <Dialog open={!!releasingEq} onOpenChange={(o) => !o && setReleasingEq(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-black uppercase flex items-center gap-2 text-emerald-600">
               <CheckCircle2 className="h-5 w-5" /> Liberar {releasingEq?.identifier}
@@ -638,7 +657,7 @@ function MaintenancePage() {
 
       {/* DIALOG DE EDIÇÃO COMPLETA */}
       <Dialog open={!!editingEq} onOpenChange={(o) => !o && setEditingEq(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-black uppercase flex items-center gap-2 text-amber-650">
               <Edit3 className="h-5 w-5 text-amber-600" /> Editar Intervenção - {editingEq?.identifier}

@@ -92,6 +92,13 @@ function CCOPage() {
   const [allocShift, setAllocShift] = useState("12 HORAS (Dia)");
   const [allocNotes, setAllocNotes] = useState("");
 
+  // States for Agendar Parada (moved from CCM Manutenção)
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [schedEqId, setSchedEqId] = useState("");
+  const [schedDate, setSchedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [schedStopType, setSchedStopType] = useState("Manutenção Geral");
+  const [schedNotes, setSchedNotes] = useState("");
+
   const loadData = async () => {
     // 1. Carrega equipamentos de forma independente
     try {
@@ -277,6 +284,30 @@ function CCOPage() {
       localStorage.setItem("local_cco_allocations", JSON.stringify(filtered));
       setAllocations(filtered.filter((a: any) => a.scheduled_date === selectedDate));
       toast.success("Removido localmente");
+    }
+  };
+
+  const handleConfirmSchedule = async () => {
+    if (!schedEqId) {
+      toast.error("Selecione o equipamento");
+      return;
+    }
+    const { error } = await supabase.from("programming").insert({
+      equipment_id: schedEqId,
+      scheduled_date: schedDate,
+      day_of_week: "Calendário",
+      stop_type: schedStopType,
+      notes: schedNotes,
+      owner_id: user?.id
+    });
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("Parada agendada com sucesso!");
+      setScheduleOpen(false);
+      setSchedEqId("");
+      setSchedNotes("");
+      loadData();
     }
   };
 
@@ -528,11 +559,17 @@ function CCOPage() {
 
         {/* Tab 0: Gestão de Atendimento Diário */}
         <TabsContent value="atendimento" className="mt-6 space-y-6">
-          <div className="bg-teal-700 text-white p-4 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4 shadow">
-            <h2 className="font-black text-sm uppercase tracking-wider flex items-center gap-2">
+          <div className="bg-teal-700 text-white p-3 rounded-xl flex flex-col md:flex-row items-center justify-between gap-3 shadow">
+            <div className="flex items-center gap-2">
               <Activity className="h-5 w-5 animate-pulse text-teal-300" />
-              Gestão de Atendimento Diário - Equipamentos móveis
-            </h2>
+              <Button 
+                onClick={() => setScheduleOpen(true)}
+                className="bg-teal-800 hover:bg-teal-900 border border-teal-650 text-white font-black uppercase text-[10px] tracking-wider h-8 rounded-lg"
+              >
+                <Calendar className="h-4 w-4 mr-1.5" />
+                Agendar Parada
+              </Button>
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1.5 text-xs font-bold">
                 <span>Contrato:</span>
@@ -575,10 +612,9 @@ function CCOPage() {
             {/* Left Column: Gauge & KPIs & Meta */}
             <div className="lg:col-span-6 space-y-6">
               
-              {/* Circular Gauge */}
-              <Card className="bg-white shadow-sm border border-slate-200">
-                <CardHeader className="bg-slate-50 border-b py-2.5 flex flex-row items-center justify-between">
-                  <CardTitle className="text-[10px] font-black text-slate-700 uppercase tracking-wider">
+                          <Card className="bg-white shadow-sm border border-slate-200">
+                <CardHeader className="bg-slate-50 border-b py-2 flex flex-row items-center justify-between">
+                  <CardTitle className="text-[9px] font-black text-slate-700 uppercase tracking-wider">
                     Atendimento {selectedDashboardContract ? `— Contrato ${selectedDashboardContract}` : ""}
                   </CardTitle>
                   {selectedDashboardContract && (
@@ -587,14 +623,14 @@ function CCOPage() {
                       onClick={() => {
                         setSelectedDashboardContract(null);
                       }} 
-                      className="h-5 px-1.5 text-[8px] font-black uppercase text-indigo-600 hover:text-indigo-800 p-0"
+                      className="h-5 px-1.5 text-[8px] font-black uppercase text-indigo-650 hover:text-indigo-800 p-0"
                     >
                       Limpar Filtro [x]
                     </Button>
                   )}
                 </CardHeader>
-                <CardContent className="p-6 flex flex-col items-center">
-                  <div className="relative w-full max-w-[200px] h-[100px] mb-4">
+                <CardContent className="p-3 flex flex-col items-center">
+                  <div className="relative w-full max-w-[130px] h-[65px] mb-2">
                     <svg viewBox="0 0 100 50" className="w-full h-full">
                       {/* Gauge Base Ring */}
                       <path 
@@ -643,17 +679,14 @@ function CCOPage() {
                       })()}
                     </svg>
                   </div>
-                  <div className="text-3xl font-black text-slate-800 tracking-tighter">
+                  <div className="text-xl font-black text-slate-800 tracking-tighter">
                     [{dashboardStats.pct}.00%]
                   </div>
 
                   {/* Meta Status Indicator inside Gauge Card */}
-                  <div className={`mt-4 w-full p-4 rounded-xl text-white text-center flex flex-col items-center justify-center space-y-1 ${stats.pct >= 95 ? "bg-teal-600" : stats.pct >= 85 ? "bg-amber-600" : "bg-red-600"}`}>
-                    <span className="text-3xl animate-bounce">
-                      {stats.pct >= 95 ? "👍" : stats.pct >= 85 ? "✋" : "⚠️"}
-                    </span>
-                    <span className="font-black text-[10px] uppercase tracking-wider">
-                      {stats.pct >= 95 ? "Meta Atingida com Sucesso!" : stats.pct >= 85 ? "Próximo da Meta" : "Abaixo da Meta Operacional"}
+                  <div className={`mt-2 w-full p-2 rounded-lg text-white text-center flex flex-col items-center justify-center ${stats.pct >= 95 ? "bg-teal-650" : stats.pct >= 85 ? "bg-amber-600" : "bg-red-650"}`}>
+                    <span className="font-black text-[9px] uppercase tracking-wider">
+                      {stats.pct >= 95 ? "✓ Meta Atingida!" : stats.pct >= 85 ? "⚠️ Próximo da Meta" : "🚨 Abaixo da Meta"}
                     </span>
                   </div>
                 </CardContent>
@@ -662,27 +695,26 @@ function CCOPage() {
               {/* KPIs stack */}
               <div className="grid grid-cols-3 gap-2">
                 <Card className="bg-slate-50 border border-slate-200">
-                  <CardContent className="p-3 text-center">
-                    <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Total de Demandas Programadas</p>
-                    <h3 className="text-2xl font-black text-slate-800 mt-1">{stats.total}</h3>
+                  <CardContent className="p-2 text-center">
+                    <p className="text-[8.5px] font-black uppercase text-slate-550 tracking-tighter leading-none">Total Programado</p>
+                    <h3 className="text-lg font-black text-slate-850 mt-1">{stats.total}</h3>
                   </CardContent>
                 </Card>
 
                 <Card className="bg-slate-50 border border-slate-200">
-                  <CardContent className="p-3 text-center">
-                    <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Total de Demandas Atendidas</p>
-                    <h3 className="text-2xl font-black text-emerald-700 mt-1">{stats.atendidos}</h3>
+                  <CardContent className="p-2 text-center">
+                    <p className="text-[8.5px] font-black uppercase text-slate-555 tracking-tighter leading-none">Total Atendido</p>
+                    <h3 className="text-lg font-black text-emerald-700 mt-1">{stats.atendidos}</h3>
                   </CardContent>
                 </Card>
 
                 <Card className="bg-slate-50 border border-slate-200">
-                  <CardContent className="p-3 text-center">
-                    <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Demandas Não Atendidas</p>
-                    <h3 className="text-2xl font-black text-rose-700 mt-1">{stats.naoAtendidos}</h3>
+                  <CardContent className="p-2 text-center">
+                    <p className="text-[8.5px] font-black uppercase text-slate-555 tracking-tighter leading-none">Não Atendido</p>
+                    <h3 className="text-lg font-black text-rose-700 mt-1">{stats.naoAtendidos}</h3>
                   </CardContent>
                 </Card>
               </div>
-
             </div>
 
             {/* Right Column: Company Grid */}
@@ -975,6 +1007,67 @@ function CCOPage() {
           <DialogFooter>
             <Button onClick={() => setDrillDownContract(null)} className="font-bold">Fechar</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog for Agendar Parada */}
+      <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-teal-600" />
+              Agendar Parada
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-3">
+            <div className="flex flex-col space-y-2">
+              <Label className="text-[10px] font-black uppercase">Equipamento</Label>
+              <Select value={schedEqId} onValueChange={setSchedEqId}>
+                <SelectTrigger className="h-10 font-bold">
+                  <SelectValue placeholder="Selecione o equipamento..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {equipment.map((eq) => (
+                    <SelectItem key={eq.id} value={eq.id}>
+                      {eq.identifier} ({eq.type || "—"})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase">Data da Parada</Label>
+                <Input type="date" value={schedDate} onChange={(e) => setSchedDate(e.target.value)} className="h-10 font-bold" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase">Tipo de Parada</Label>
+                <Select value={schedStopType} onValueChange={setSchedStopType}>
+                  <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Manutenção Geral", "MEV", "Lavador", "Mola", "Borracharia", "Preventiva", "Elétrica", "Motor", "Solda"].map(t => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black uppercase">Observações / Notas</Label>
+              <textarea 
+                value={schedNotes} 
+                onChange={(e) => setSchedNotes(e.target.value)} 
+                placeholder="Motivo do agendamento..." 
+                className="flex min-h-[80px] w-full rounded-md border border-slate-200 bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <Button 
+              onClick={handleConfirmSchedule} 
+              className="w-full h-12 font-black uppercase bg-teal-700 hover:bg-teal-600 text-white"
+            >
+              CONFIRMAR AGENDAMENTO
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

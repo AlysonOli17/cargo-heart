@@ -46,6 +46,7 @@ function EquipmentPage() {
   const [editing, setEditing] = useState<Equipment | null>(null);
   const [historyFor, setHistoryFor] = useState<Equipment | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedDetail, setSelectedDetail] = useState<Equipment | null>(null);
 
   const load = async () => {
     if (!user) return;
@@ -146,7 +147,7 @@ function EquipmentPage() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-2 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {items
           .filter(eq => 
             eq.identifier.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -155,50 +156,97 @@ function EquipmentPage() {
             (eq.model || "").toLowerCase().includes(searchQuery.toLowerCase())
           )
           .map((eq) => (
-          <Card key={eq.id} className="p-4 space-y-3">
-            <div className="flex justify-between items-start gap-2">
-              <div className="min-w-0">
-                <h3 className="font-black text-lg uppercase truncate">{eq.identifier}</h3>
-                <p className="text-xs font-bold text-muted-foreground truncate uppercase">
-                  {[eq.brand, eq.model].filter(Boolean).join(" ") || eq.type || "—"}
-                </p>
-                {eq.te_tag && (
-                  <p className="text-[9.5px] font-bold text-indigo-600 uppercase leading-normal">
-                    TE+TAG: {eq.te_tag}
-                  </p>
-                )}
-                {eq.implement_type && (
-                  <p className="text-[9.5px] font-bold text-amber-600 uppercase leading-normal">
-                    IMPLEMENTO: {eq.implement_type}
-                  </p>
-                )}
-                {eq.capacity && (
-                  <p className="text-[9.5px] font-bold text-emerald-600 uppercase leading-normal">
-                    CAPACIDADE: {eq.capacity}
-                  </p>
-                )}
-                {eq.description && (
-                  <p className="text-[9.5px] font-medium text-slate-500 italic truncate max-w-[200px]" title={eq.description}>
-                    "{eq.description}"
-                  </p>
-                )}
-                {eq.contract_type && (
-                  <p className="text-[10px] font-black text-primary/80 uppercase tracking-tighter leading-normal pt-0.5">
-                    CONTRATO: {eq.contract_type}
-                  </p>
-                )}
+          <Card 
+            key={eq.id} 
+            className="p-3 hover:shadow-md cursor-pointer transition-all border border-slate-100 flex flex-col justify-between"
+            onClick={() => setSelectedDetail(eq)}
+          >
+            <div className="space-y-1.5 min-w-0">
+              <div className="flex justify-between items-start gap-1">
+                <h3 className="font-black text-sm uppercase truncate font-mono text-slate-800">{eq.identifier}</h3>
+                <span className="text-[7.5px] px-1.5 py-0.5 rounded-full font-black uppercase bg-[oklch(0.65_0.18_150)] text-white">
+                  Operacional
+                </span>
               </div>
-              <Badge status={eq.status} />
-            </div>
-            
-            <div className="flex gap-1 pt-2">
-              <Button variant="outline" size="sm" className="flex-1 font-bold" onClick={() => setHistoryFor(eq)}>Histórico</Button>
-              <Button variant="ghost" size="icon" onClick={() => { setEditing(eq); setOpen(true); }}><Pencil className="h-4 w-4" /></Button>
-              <Button variant="ghost" size="icon" onClick={() => remove(eq.id)} className="text-red-500"><Trash2 className="h-4 w-4" /></Button>
+              <p className="text-[9.5px] font-bold text-muted-foreground truncate uppercase">
+                {[eq.brand, eq.model].filter(Boolean).join(" ") || eq.type || "—"}
+              </p>
+              {eq.contract_type && (
+                <p className="text-[8.5px] font-black text-primary/80 uppercase tracking-tighter">
+                  CONTRATO: {eq.contract_type}
+                </p>
+              )}
             </div>
           </Card>
         ))}
       </div>
+
+      <Dialog open={!!selectedDetail} onOpenChange={(o) => !o && setSelectedDetail(null)}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-black text-xl uppercase text-slate-800 flex items-center gap-2">
+              <Truck className="h-5 w-5 text-indigo-650" /> Detalhes do Equipamento
+            </DialogTitle>
+          </DialogHeader>
+          {selectedDetail && (
+            <div className="space-y-4 py-3">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Placa / ID</p>
+                  <p className="font-mono font-bold text-slate-800 text-lg uppercase">{selectedDetail.identifier}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">TE + TAG</p>
+                  <p className="font-semibold text-indigo-650 uppercase">{selectedDetail.te_tag || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Fabricante / Marca</p>
+                  <p className="font-semibold uppercase">{selectedDetail.brand || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Modelo</p>
+                  <p className="font-semibold uppercase">{selectedDetail.model || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Tipo de Implemento</p>
+                  <p className="font-semibold text-amber-600 uppercase">{selectedDetail.implement_type || selectedDetail.type || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Capacidade</p>
+                  <p className="font-semibold text-emerald-600 uppercase">{selectedDetail.capacity || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Contrato</p>
+                  <p className="font-bold text-primary uppercase">{selectedDetail.contract_type || "Nenhum"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Status</p>
+                  <span className="text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest bg-[oklch(0.65_0.18_150)] text-white">
+                    Operacional
+                  </span>
+                </div>
+              </div>
+              {selectedDetail.description && (
+                <div className="bg-slate-50 border rounded-lg p-3">
+                  <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Descrição / Observações</p>
+                  <p className="text-xs text-slate-700 italic">"{selectedDetail.description}"</p>
+                </div>
+              )}
+              <div className="flex gap-2 pt-2 border-t mt-4">
+                <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase" onClick={() => { setHistoryFor(selectedDetail); setSelectedDetail(null); }}>
+                  <History className="h-3.5 w-3.5 mr-1" /> Histórico
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase text-amber-600 border-amber-200 hover:bg-amber-50" onClick={() => { setEditing(selectedDetail); setOpen(true); setSelectedDetail(null); }}>
+                  <Pencil className="h-3.5 w-3.5 mr-1" /> Editar
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase text-red-650 border-red-200 hover:bg-red-50" onClick={() => { remove(selectedDetail.id); setSelectedDetail(null); }}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Excluir
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!historyFor} onOpenChange={(o) => !o && setHistoryFor(null)}>
         <DialogContent>
@@ -478,29 +526,17 @@ function EquipmentForm({ equipment, userId, onDone }: { equipment: Equipment | n
 
   // Initialize unified value
   const [selectedContract, setSelectedContract] = useState<string>(() => {
-    if (equipment?.status === "disponivel" || equipment?.status === "operacional" && equipment?.contract_type !== "Usina" && equipment?.contract_type !== "Porto") {
-      return "none";
+    if (equipment?.contract_type && equipment.contract_type !== "Eventual") {
+      return equipment.contract_type;
     }
-    return equipment?.contract_type ?? "Eventual";
+    return "none";
   });
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    let status = form.status;
-    let contract_type = selectedContract;
-
-    if (selectedContract === "none") {
-      status = "disponivel";
-      contract_type = "Eventual";
-    } else if (selectedContract === "Usina") {
-      status = "operacional";
-    } else if (selectedContract === "Porto") {
-      status = "operacional";
-    } else if (selectedContract === "Eventual") {
-      status = "com_cliente";
-    }
+    let contract_type = selectedContract === "none" ? null : selectedContract;
 
     const serializedNotes = JSON.stringify({
       realNotes: form.description,
@@ -517,7 +553,7 @@ function EquipmentForm({ equipment, userId, onDone }: { equipment: Equipment | n
       type: form.type || form.implement_type || null,
       model: form.model || null,
       brand: form.brand || null,
-      status: status,
+      status: "operacional", // Force Operational status
       contract_type: contract_type,
       current_client_id: null, // Clear client id to keep it simple and clean
       notes: serializedNotes,
@@ -587,24 +623,8 @@ function EquipmentForm({ equipment, userId, onDone }: { equipment: Equipment | n
             <SelectItem value="none">Nenhum (Reserva / Disponível)</SelectItem>
             <SelectItem value="Usina">Usina</SelectItem>
             <SelectItem value="Porto">Porto</SelectItem>
-            <SelectItem value="Eventual">Eventual</SelectItem>
           </SelectContent>
         </Select>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Status Adicional</Label>
-        <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as EquipmentStatus })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="operacional">Operacional</SelectItem>
-            <SelectItem value="disponivel">Disponível</SelectItem>
-            <SelectItem value="manutencao">Em Manutenção</SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-[10px] text-muted-foreground italic">
-          * Para enviar para Oficina, selecione 'Em Manutenção'.
-        </p>
       </div>
 
       <Button type="submit" className="w-full h-12 font-bold bg-indigo-600 hover:bg-indigo-700 text-white" disabled={loading}>

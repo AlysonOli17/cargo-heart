@@ -18,7 +18,7 @@ const baseNav = [
   { to: "/porto-operacao", label: "Operação Porto", icon: CalendarDays },
   { to: "/operacao", label: "Operação", icon: HardDrive },
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
-  { to: "/manutencao", label: "Manutenção", icon: FileText },
+  { to: "/manutencao", label: "CCM Manutenção", icon: FileText },
   { to: "/fidelizacao", label: "Fidelização", icon: CalendarDays },
   { to: "/historico", label: "Histórico", icon: Clock },
 ];
