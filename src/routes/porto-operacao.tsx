@@ -117,6 +117,12 @@ const normalizePortoHeader = (cleanKey: string): string => {
 const parsePortoDate = (rawDate: any, defaultDate: string): string => {
   if (!rawDate) return defaultDate;
   
+  if (rawDate instanceof Date) {
+    if (!isNaN(rawDate.getTime())) {
+      return format(rawDate, "yyyy-MM-dd");
+    }
+  }
+
   if (typeof rawDate === "number") {
     const date = new Date((rawDate - 25569) * 86400 * 1000);
     if (!isNaN(date.getTime())) {
@@ -131,7 +137,8 @@ const parsePortoDate = (rawDate: any, defaultDate: string): string => {
   if (partsDMY.length === 3) {
     const day = partsDMY[0].padStart(2, "0");
     const month = partsDMY[1].padStart(2, "0");
-    const year = partsDMY[2];
+    let year = partsDMY[2].trim();
+    if (year.length === 2) year = "20" + year;
     return `${year}-${month}-${day}`;
   }
   
@@ -679,11 +686,26 @@ function PortoOperacaoPage() {
     setImportLoading(true);
     let count = 0;
 
-    const normalizeTime = (t: string): string => {
-      if (!t) return t;
-      t = t.trim();
-      if (/^\d{1,2}$/.test(t)) return t.padStart(2, "0") + ":00";
-      const parts = t.split(":");
+    const normalizeTime = (t: any): string => {
+      if (!t) return "";
+      if (typeof t === "number") {
+        const totalMinutes = Math.round(t * 24 * 60);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+      }
+      const str = t.toString().trim();
+      if (!str) return "";
+      // If it's a decimal number represented as string, handle as Excel fraction
+      if (!isNaN(Number(str)) && str.includes(".")) {
+        const val = Number(str);
+        const totalMinutes = Math.round(val * 24 * 60);
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+      }
+      if (/^\d{1,2}$/.test(str)) return str.padStart(2, "0") + ":00";
+      const parts = str.split(":");
       return parts[0].padStart(2, "0") + ":" + (parts[1] || "00").padStart(2, "0");
     };
 
@@ -694,8 +716,8 @@ function PortoOperacaoPage() {
       let rawPlaca = (row.placa || "").toString().trim().toUpperCase();
       if (!rawPlaca) continue;
 
-      const valley_start = row.horainicio ? normalizeTime(row.horainicio.toString()) : null;
-      const valley_end = row.horafim ? normalizeTime(row.horafim.toString()) : null;
+      const valley_start = row.horainicio ? normalizeTime(row.horainicio) : null;
+      const valley_end = row.horafim ? normalizeTime(row.horafim) : null;
       const rawValley = valley_start && valley_end ? `${valley_start} - ${valley_end}` : (valley_start || "");
 
       const rawOS = (row.os || "").toString().trim();
@@ -710,7 +732,10 @@ function PortoOperacaoPage() {
       }
 
       const rowDateStr = parsePortoDate(row.dataprogramada, selectedDate);
-      const rowDateObj = new Date(rowDateStr + "T12:00:00");
+      let rowDateObj = new Date(rowDateStr + "T12:00:00");
+      if (isNaN(rowDateObj.getTime())) {
+        rowDateObj = new Date(selectedDate + "T12:00:00");
+      }
 
       const resolvedLocal = row.local || null;
       if (resolvedLocal) {

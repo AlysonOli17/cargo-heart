@@ -161,15 +161,7 @@ function OperationPlanningPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-700">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90">
-            <LayoutDashboard className="h-8 w-8 text-primary" />
-            Central de Monitoramento
-          </h1>
-          <p className="text-muted-foreground font-medium uppercase text-[10px] tracking-widest">Controle de Frota e Oficinas</p>
-        </div>
-
+      <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
         <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-xl border">
            <Button variant="ghost" size="icon" onClick={() => setCurrentWeekStart(subWeeks(currentWeekStart, 1))} className="h-9 w-9 rounded-lg"><ChevronLeft className="h-4 w-4" /></Button>
            <div className="px-4 font-black text-[10px] uppercase flex items-center gap-2">
@@ -181,18 +173,33 @@ function OperationPlanningPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-emerald-50 border-emerald-200 p-5 flex items-center justify-between">
-          <div><p className="text-[9px] font-black text-emerald-600 uppercase">Frota Operacional</p><h2 className="text-4xl font-black text-emerald-700">{stats.ready}</h2></div>
-          <Truck className="h-10 w-10 text-emerald-500 opacity-30" />
+      <div className="grid grid-cols-3 gap-2">
+        <Card className="bg-emerald-50 border-emerald-250 shadow-sm">
+          <CardContent className="p-2 px-3 flex items-center justify-between">
+            <div>
+              <p className="text-[8px] font-black uppercase text-emerald-600 tracking-wider">Frota Operacional</p>
+              <h3 className="text-base font-black mt-0.5 text-emerald-700">{stats.ready}</h3>
+            </div>
+            <Truck className="h-5 w-5 text-emerald-500 opacity-40" />
+          </CardContent>
         </Card>
-        <Card className="bg-orange-50 border-orange-200 p-5 flex items-center justify-between">
-          <div><p className="text-[9px] font-black text-orange-600 uppercase">Em Oficina</p><h2 className="text-4xl font-black text-orange-700">{stats.activeMaint}</h2></div>
-          <Wrench className="h-10 w-10 text-orange-500 opacity-30" />
+        <Card className="bg-orange-50 border-orange-250 shadow-sm">
+          <CardContent className="p-2 px-3 flex items-center justify-between">
+            <div>
+              <p className="text-[8px] font-black uppercase text-orange-600 tracking-wider">Em Oficina</p>
+              <h3 className="text-base font-black mt-0.5 text-orange-700">{stats.activeMaint}</h3>
+            </div>
+            <Wrench className="h-5 w-5 text-orange-500 opacity-40" />
+          </CardContent>
         </Card>
-        <Card className="bg-blue-50 border-blue-200 p-5 flex items-center justify-between">
-          <div><p className="text-[9px] font-black text-blue-600 uppercase">Agendamentos</p><h2 className="text-4xl font-black text-blue-700">{stats.totalScheduled}</h2></div>
-          <Clock className="h-10 w-10 text-blue-500 opacity-30" />
+        <Card className="bg-blue-50 border-blue-250 shadow-sm">
+          <CardContent className="p-2 px-3 flex items-center justify-between">
+            <div>
+              <p className="text-[8px] font-black uppercase text-blue-600 tracking-wider">Agendamentos</p>
+              <h3 className="text-base font-black mt-0.5 text-blue-700">{stats.totalScheduled}</h3>
+            </div>
+            <Clock className="h-5 w-5 text-blue-500 opacity-40" />
+          </CardContent>
         </Card>
       </div>
 
