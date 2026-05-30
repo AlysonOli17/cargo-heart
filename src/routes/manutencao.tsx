@@ -78,6 +78,9 @@ function MaintenancePage() {
   const [releasingEq, setReleasingEq] = useState<Equipment | null>(null);
   const [releaseInfo, setReleaseInfo] = useState("");
 
+  // Estado para visualização detalhada
+  const [selectedDetail, setSelectedDetail] = useState<Equipment | null>(null);
+
   // Estado para o Dialog de Edição Completa
   const [editingEq, setEditingEq] = useState<Equipment | null>(null);
   const [editForm, setEditForm] = useState({
@@ -539,7 +542,7 @@ function MaintenancePage() {
                 const isOverdue = dias >= threshold;
 
                 return (
-                  <Card key={e.id} className={cn("p-3 flex flex-col justify-between border shadow-sm space-y-2.5", isOverdue && "border-red-200 bg-red-50/10")}>
+                  <Card key={e.id} onClick={() => setSelectedDetail(e)} className={cn("p-3 flex flex-col justify-between border shadow-sm space-y-2.5 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all duration-200", isOverdue && "border-red-200 bg-red-50/10")}>
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-start gap-1">
                         <div className="flex items-center gap-1.5">
@@ -580,13 +583,13 @@ function MaintenancePage() {
                     </div>
 
                     <div className="flex gap-1 pt-1.5 border-t border-slate-100">
-                      <Button variant="outline" size="sm" onClick={() => handleStartEdit(e)} className="flex-1 font-bold h-7 text-[9px] text-amber-600 border-amber-100 hover:bg-amber-50 px-1.5">
+                      <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); handleStartEdit(e); }} className="flex-1 font-bold h-7 text-[9px] text-amber-600 border-amber-100 hover:bg-amber-50 px-1.5">
                         EDITAR
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => setUpdatingEq(e)} className="flex-1 font-bold h-7 text-[9px] text-blue-600 border-blue-100 hover:bg-blue-50 px-1.5">
+                      <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(e); }} className="flex-1 font-bold h-7 text-[9px] text-blue-600 border-blue-100 hover:bg-blue-50 px-1.5">
                         HISTÓRICO
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => release(e)} className="flex-1 font-bold h-7 text-[9px] text-emerald-600 border-emerald-100 hover:bg-emerald-50 px-1.5">
+                      <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); release(e); }} className="flex-1 font-bold h-7 text-[9px] text-emerald-600 border-emerald-100 hover:bg-emerald-50 px-1.5">
                         LIBERAR
                       </Button>
                     </div>
@@ -745,6 +748,92 @@ function MaintenancePage() {
               SALVAR EDIÇÃO
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG DE DETALHES COMPLETO */}
+      <Dialog open={!!selectedDetail} onOpenChange={(o) => !o && setSelectedDetail(null)}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-black text-xl uppercase text-slate-800 flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-indigo-600" /> Detalhes da Intervenção
+            </DialogTitle>
+          </DialogHeader>
+          {selectedDetail && (
+            <div className="space-y-4 py-3">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Placa / Equipamento</p>
+                  <p className="font-mono font-bold text-slate-800 text-lg uppercase">{selectedDetail.identifier}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Tipo de Equipamento</p>
+                  <p className="font-semibold uppercase">{selectedDetail.type || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Contrato</p>
+                  <p className="font-bold text-primary uppercase">{selectedDetail.contract_type || "Nenhum"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Status Atual</p>
+                  <div>
+                    <span className={cn(
+                      "text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-widest inline-block border mt-1",
+                      selectedDetail.status === 'manutencao' ? "bg-red-50 text-red-700 border-red-200" : "bg-orange-50 text-orange-700 border-orange-200"
+                    )}>
+                      {STATUS_LABELS[selectedDetail.status] || selectedDetail.status}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Tipo de Intervenção</p>
+                  <p className="font-semibold uppercase">{selectedDetail.maintenance_type || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Prioridade</p>
+                  <p className={cn(
+                    "font-bold uppercase",
+                    selectedDetail.maintenance_priority === 'Crítica' ? "text-red-600" : "text-amber-600"
+                  )}>{selectedDetail.maintenance_priority || "Média"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Responsável</p>
+                  <p className="font-semibold uppercase">{selectedDetail.maintenance_responsible || "Não definido"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Tempo em Manutenção</p>
+                  <p className="font-semibold">{getDiasParado(selectedDetail.maintenance_started_at || selectedDetail.updated_at)} dias</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Data de Entrada</p>
+                  <p className="font-semibold">{selectedDetail.maintenance_started_at ? formatDate(selectedDetail.maintenance_started_at) : "—"}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-slate-400">Previsão de Retorno</p>
+                  <p className="font-semibold text-primary">{selectedDetail.maintenance_expected_return ? formatDate(selectedDetail.maintenance_expected_return) : "Não informada"}</p>
+                </div>
+              </div>
+
+              {selectedDetail.maintenance_problem && (
+                <div className="bg-slate-50 border rounded-lg p-3">
+                  <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Problemas / Histórico de Observações</p>
+                  <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{selectedDetail.maintenance_problem}</p>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2 border-t mt-4">
+                <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase text-amber-600 border-amber-200 hover:bg-amber-50" onClick={(evt) => { evt.stopPropagation(); handleStartEdit(selectedDetail); setSelectedDetail(null); }}>
+                  Editar
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase text-blue-600 border-blue-200 hover:bg-blue-50" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(selectedDetail); setSelectedDetail(null); }}>
+                  Histórico
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase text-emerald-600 border-emerald-200 hover:bg-emerald-50" onClick={(evt) => { evt.stopPropagation(); release(selectedDetail); setSelectedDetail(null); }}>
+                  Liberar
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
