@@ -32,6 +32,72 @@ import {
 import * as XLSX from "xlsx";
 import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS } from "@/lib/equipment";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+  LabelList
+} from "recharts";
+
+const CORRECTIVE_TYPES = [
+  "Mecanica",
+  "Atraso Operador",
+  "Atestado",
+  "Falta",
+  "Aguardando Mobilização Equipamento",
+  "Local errado"
+];
+
+const parseCorrectiveReason = (rawReason: string) => {
+  const match = rawReason?.match(/^\[([^\]]+)\]\s*(.*)$/);
+  if (match) {
+    const matchedType = match[1];
+    if (CORRECTIVE_TYPES.includes(matchedType)) {
+      return {
+        type: matchedType,
+        reason: match[2]
+      };
+    }
+  }
+  return {
+    type: "Mecanica",
+    reason: rawReason || ""
+  };
+};
+
+const formatMinutesToHHMMSS = (totalMinutes: number) => {
+  const h = Math.floor(totalMinutes / 60);
+  const m = Math.floor(totalMinutes % 60);
+  const s = 0;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
+
+/** Returns the planned duration in minutes between valley_start and valley_end.
+ *  Falls back to 720 (12h) if either time is missing or unparseable. */
+const calcPlannedMinutes = (valleyStart: string | null | undefined, valleyEnd: string | null | undefined): number => {
+  if (!valleyStart || !valleyEnd) return 720;
+  const parse = (t: string) => {
+    const parts = t.split(':').map(Number);
+    return parts.length >= 2 ? parts[0] * 60 + parts[1] : null;
+  };
+  const s = parse(valleyStart);
+  const e = parse(valleyEnd);
+  if (s === null || e === null) return 720;
+  const diff = e >= s ? e - s : (1440 - s) + e; // handle overnight
+  return diff > 0 ? diff : 720;
+};
 
 const tzOffset = () => {
   const tzo = -new Date().getTimezoneOffset();
@@ -131,6 +197,51 @@ const getRowTargetDate = (row: any, baseSelectedDate: string) => {
 function UsinaOperacaoPage() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [dateFilterMode, setDateFilterMode] = useState<"single" | "range" | "month">("single");
+  const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "MM"));
+  const [selectedYear, setSelectedYear] = useState(format(new Date(), "yyyy"));
+  const [expandedChart, setExpandedChart] = useState<"equipment" | "date" | "adherence" | "operator" | "location" | "maintenance" | "plates" | null>(null);
+  const [expandedSearch, setExpandedSearch] = useState("");
+
+  // ── Report-only date filter (independent from the operational date filter) ──
+  const [reportDateMode, setReportDateMode] = useState<"single" | "range" | "month">("single");
+  const [reportSingleDate, setReportSingleDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [reportStartDate, setReportStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [reportEndDate, setReportEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [reportMonth, setReportMonth] = useState(format(new Date(), "MM"));
+  const [reportYear, setReportYear] = useState(format(new Date(), "yyyy"));
+
+  const matchesReportDateFilter = (schedDate: string) => {
+    if (reportDateMode === "single") return schedDate === reportSingleDate;
+    if (reportDateMode === "range") {
+      const s = reportStartDate || "2000-01-01";
+      const e = reportEndDate   || "2999-12-31";
+      return schedDate >= s && schedDate <= e;
+    }
+    if (reportDateMode === "month") {
+      const [y, m] = schedDate.split("-");
+      return y === reportYear && m === reportMonth;
+    }
+    return true;
+  };
+
+  const matchesDateFilter = (schedDate: string) => {
+    if (dateFilterMode === "single") {
+      return schedDate === selectedDate;
+    } else if (dateFilterMode === "range") {
+      const start = startDate || "2000-01-01";
+      const end = endDate || "2999-12-31";
+      return schedDate >= start && schedDate <= end;
+    } else if (dateFilterMode === "month") {
+      if (!selectedMonth || !selectedYear) return true;
+      const [y, m] = schedDate.split("-");
+      return y === selectedYear && m === selectedMonth;
+    }
+    return true;
+  };
+
   const [schedules, setSchedules] = useState<UsinaSchedule[]>([]);
   const [correctiveLogs, setCorrectiveLogs] = useState<CorrectiveLog[]>([]);
   const [programming, setProgramming] = useState<any[]>([]);
@@ -162,6 +273,9 @@ function UsinaOperacaoPage() {
   }, []);
 
   const [expandedLocal, setExpandedLocal] = useState<string | null>(null);
+  const [stopType, setStopType] = useState("Mecanica");
+  const [editStopType, setEditStopType] = useState("Mecanica");
+  const [adherenceViewMode, setAdherenceViewMode] = useState<"charts" | "table">("charts");
 
   // Excel File State
   const [file, setFile] = useState<File | null>(null);
@@ -311,10 +425,19 @@ function UsinaOperacaoPage() {
 
     // 2. Carrega as escalas e corretivas da Usina
     try {
-      let { data: scheds, error: e1 } = await supabase
-        .from("usina_daily_schedules")
-        .select("*")
-        .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+      let schedsQuery = supabase.from("usina_daily_schedules").select("*");
+      if (dateFilterMode === "single") {
+        schedsQuery = schedsQuery.or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+      } else if (dateFilterMode === "range") {
+        const start = startDate || "2000-01-01";
+        const end = endDate || "2999-12-31";
+        schedsQuery = schedsQuery.or(`and(scheduled_date.gte.${start},scheduled_date.lte.${end}),and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+      } else if (dateFilterMode === "month") {
+        const start = `${selectedYear}-${selectedMonth}-01`;
+        const end = `${selectedYear}-${selectedMonth}-31`;
+        schedsQuery = schedsQuery.or(`and(scheduled_date.gte.${start},scheduled_date.lte.${end}),and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+      }
+      let { data: scheds, error: e1 } = await schedsQuery;
       if (e1) throw e1;
       
       const { data: logs, error: e2 } = await supabase.from("usina_corrective_logs").select("*");
@@ -327,7 +450,7 @@ function UsinaOperacaoPage() {
 
       // Check if we have daily schedules for selectedDate
       const dayScheds = (scheds ?? []).filter(s => s.scheduled_date === selectedDate);
-      if (dayScheds.length === 0) {
+      if (dayScheds.length === 0 && dateFilterMode === "single") {
         // Find templates for this weekday
         const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
         const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
@@ -385,7 +508,7 @@ function UsinaOperacaoPage() {
       const dayScheds = localScheds.filter((s: any) => s.scheduled_date === selectedDate);
       let mergedScheds = [...localScheds];
 
-      if (dayScheds.length === 0) {
+      if (dayScheds.length === 0 && dateFilterMode === "single") {
         const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
         const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
         const templatesForDay = localScheds.filter((s: any) => s.scheduled_date === templateDateStr);
@@ -404,7 +527,7 @@ function UsinaOperacaoPage() {
       }
 
       setSchedules(mergedScheds.filter((s: any) => 
-        s.scheduled_date === selectedDate || 
+        matchesDateFilter(s.scheduled_date) || 
         (s.scheduled_date >= "2000-01-02" && s.scheduled_date <= "2000-01-08")
       ));
       setCorrectiveLogs(localLogs);
@@ -422,7 +545,7 @@ function UsinaOperacaoPage() {
       supabase.removeChannel(chLogs);
       supabase.removeChannel(chProg);
     };
-  }, [user, selectedDate]);
+  }, [user, selectedDate, dateFilterMode, startDate, endDate, selectedMonth, selectedYear]);
 
   const handlePdfChange = async (selectedFile: File) => {
     try {
@@ -818,7 +941,7 @@ function UsinaOperacaoPage() {
       schedule_id: activeSchedule.id,
       stop_start,
       stop_end,
-      reason: stopReason,
+      reason: `[${stopType}] ${stopReason}`,
       notes: stopNotes,
       owner_id: user?.id
     };
@@ -837,6 +960,7 @@ function UsinaOperacaoPage() {
     setStopOpen(false);
     setStopReason("");
     setStopNotes("");
+    setStopType("Mecanica");
     loadData();
   };
 
@@ -864,7 +988,9 @@ function UsinaOperacaoPage() {
     const endStr = log.stop_end ? format(new Date(log.stop_end), "HH:mm") : "";
     setEditStopStartStr(startStr);
     setEditStopEndStr(endStr);
-    setEditStopReason(log.reason || "");
+    const parsed = parseCorrectiveReason(log.reason);
+    setEditStopReason(parsed.reason);
+    setEditStopType(parsed.type);
     setEditStopNotes(log.notes || "");
     setEditStopOpen(true);
   };
@@ -882,7 +1008,7 @@ function UsinaOperacaoPage() {
     const payload = {
       stop_start,
       stop_end,
-      reason: editStopReason,
+      reason: `[${editStopType}] ${editStopReason}`,
       notes: editStopNotes
     };
 
@@ -1000,7 +1126,7 @@ function UsinaOperacaoPage() {
   // Filter schedules
   const filteredSchedules = useMemo(() => {
     const result = schedules.filter(s => {
-      if (s.scheduled_date !== selectedDate) return false;
+      if (!matchesDateFilter(s.scheduled_date)) return false;
       
       const term = search.toLowerCase();
       const cleanTerm = term.replace(/[^a-zA-Z0-9]/g, "");
@@ -1062,7 +1188,7 @@ function UsinaOperacaoPage() {
     }
 
     return result;
-  }, [schedules, selectedDate, search, shiftFilter, sortColumn, sortDirection]);
+  }, [schedules, selectedDate, dateFilterMode, startDate, endDate, selectedMonth, selectedYear, search, shiftFilter, sortColumn, sortDirection]);
 
   // Find all schedules with active conflicts for the warning banner
   const conflictedSchedules = useMemo(() => {
@@ -1104,23 +1230,30 @@ function UsinaOperacaoPage() {
 
   // Analytics: Adherence & Downtime math
   const analytics = useMemo(() => {
-    // 12h = 720m shift as a baseline for each scheduled equipment
-    const baselineShiftMinutes = 720;
-    
     // Grouped by Local / Frente de Atendimento
-    const adherenceByLocal: Record<string, { totalScheduled: number, totalBreakdowns: number, breakdownMinutes: number }> = {};
-    const daySchedules = schedules.filter(s => s.scheduled_date === selectedDate);
+    // plannedMinutes = Σ valley_start→valley_end for each schedule in the group
+    const adherenceByLocal: Record<string, {
+      totalScheduled: number;
+      totalBreakdowns: number;
+      breakdownMinutes: number;
+      plannedMinutes: number;   // ← real sum of scheduled hours
+    }> = {};
+    const daySchedules = schedules.filter(s => matchesDateFilter(s.scheduled_date));
     let totalScheduledCount = daySchedules.length;
     let totalBreakdownMinutes = 0;
+    let totalPlannedMinutes = 0; // Σ planned hours of all lines
     let unattendedCount = 0;
 
     daySchedules.forEach(s => {
       const localKey = s.local || "OUTROS";
       if (!adherenceByLocal[localKey]) {
-        adherenceByLocal[localKey] = { totalScheduled: 0, totalBreakdowns: 0, breakdownMinutes: 0 };
+        adherenceByLocal[localKey] = { totalScheduled: 0, totalBreakdowns: 0, breakdownMinutes: 0, plannedMinutes: 0 };
       }
-      
+
+      const linePlanned = calcPlannedMinutes(s.valley_start, s.valley_end);
       adherenceByLocal[localKey].totalScheduled++;
+      adherenceByLocal[localKey].plannedMinutes += linePlanned;
+      totalPlannedMinutes += linePlanned;
 
       // Sum breakdown time for this schedule
       const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
@@ -1147,9 +1280,8 @@ function UsinaOperacaoPage() {
 
     const localList = Object.keys(adherenceByLocal).map(k => {
       const group = adherenceByLocal[k];
-      const scheduledMinutes = group.totalScheduled * baselineShiftMinutes;
-      const uptime = Math.max(0, scheduledMinutes - group.breakdownMinutes);
-      const adherenceScore = scheduledMinutes > 0 ? Math.round((uptime / scheduledMinutes) * 100) : 100;
+      const uptime = Math.max(0, group.plannedMinutes - group.breakdownMinutes);
+      const adherenceScore = group.plannedMinutes > 0 ? Math.round((uptime / group.plannedMinutes) * 100) : 100;
       return {
         local: k,
         totalScheduled: group.totalScheduled,
@@ -1159,13 +1291,134 @@ function UsinaOperacaoPage() {
       };
     });
 
-    const totalScheduledMinutes = totalScheduledCount * baselineShiftMinutes;
-    const overallUptime = Math.max(0, totalScheduledMinutes - totalBreakdownMinutes);
-    const overallAdherence = totalScheduledMinutes > 0 ? Math.round((overallUptime / totalScheduledMinutes) * 100) : 100;
+    const overallUptime = Math.max(0, totalPlannedMinutes - totalBreakdownMinutes);
+    const overallAdherence = totalPlannedMinutes > 0 ? Math.round((overallUptime / totalPlannedMinutes) * 100) : 100;
 
     const activeCount = Math.max(0, totalScheduledCount - unattendedCount);
     const equipmentAdherence = totalScheduledCount > 0 ? Math.round((activeCount / totalScheduledCount) * 100) : 100;
-    const totalPlannedHours = totalScheduledCount * 12;
+    const totalPlannedHours = (totalPlannedMinutes / 60);
+
+    const totalBreakdowns = localList.reduce((acc, l) => acc + l.totalBreakdowns, 0);
+
+    // --- Recharts Datasets ---
+    // 1. EQUIPAMENTO
+    const equipmentMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) mins += diff;
+        }
+      });
+      if (mins > 0 && s.equipment) {
+        equipmentMap[s.equipment] = (equipmentMap[s.equipment] || 0) + mins;
+      }
+    });
+    const chartDataEquipment = Object.entries(equipmentMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 5);
+
+    // 2. DATA (Trend of last 7 dates or only selectedDate if chosen)
+    const datesWithData = selectedDate
+      ? [selectedDate]
+      : Array.from(new Set(schedules.map(s => s.scheduled_date)))
+          .sort()
+          .slice(-7);
+    const chartDataDates = datesWithData.map(dateStr => {
+      const dayScheds = schedules.filter(s => s.scheduled_date === dateStr);
+      let totalMins = 0;
+      dayScheds.forEach(s => {
+        const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+        stops.forEach(st => {
+          if (st.stop_start) {
+            const start = new Date(st.stop_start).getTime();
+            const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+            const diff = Math.floor((end - start) / 60000);
+            if (diff > 0) totalMins += diff;
+          }
+        });
+      });
+      const parts = dateStr.split("-");
+      const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dateStr;
+      return { name: label, minutes: totalMins };
+    });
+
+    // 4. MANUTENÇÃO (Paradas por tipo)
+    const typesMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) {
+            const parsed = parseCorrectiveReason(st.reason);
+            typesMap[parsed.type] = (typesMap[parsed.type] || 0) + diff;
+          }
+        }
+      });
+    });
+    const chartDataTypes = Object.entries(typesMap).map(([name, val]) => ({ name, minutes: val }));
+
+    // 5. MOTORISTA/OPERADOR
+    const operatorMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) mins += diff;
+        }
+      });
+      if (mins > 0 && s.operator) {
+        operatorMap[s.operator] = (operatorMap[s.operator] || 0) + mins;
+      }
+    });
+    const chartDataOperator = Object.entries(operatorMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 5);
+
+    // 6. PLACA
+    const plateMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) mins += diff;
+        }
+      });
+      if (mins > 0 && s.plate) {
+        plateMap[s.plate] = (plateMap[s.plate] || 0) + mins;
+      }
+    });
+    const chartDataPlates = Object.entries(plateMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 5);
+
+    const fullChartDataEquipment = Object.entries(equipmentMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes);
+    const fullChartDataPlates = Object.entries(plateMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes);
+    const fullChartDataOperator = Object.entries(operatorMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes);
 
     return {
       localList,
@@ -1175,9 +1428,140 @@ function UsinaOperacaoPage() {
       unattendedCount,
       activeCount,
       equipmentAdherence,
-      totalPlannedHours
+      totalPlannedHours,
+      chartDataEquipment,
+      chartDataDates,
+      chartDataTypes,
+      chartDataOperator,
+      chartDataPlates,
+      fullChartDataEquipment,
+      fullChartDataPlates,
+      fullChartDataOperator
     };
-  }, [schedules, correctiveLogs, selectedDate, timeTick]);
+  }, [schedules, correctiveLogs, selectedDate, dateFilterMode, startDate, endDate, selectedMonth, selectedYear, timeTick]);
+
+  // ── Analytics exclusively for the Relatório Gerencial charts (uses its own date filter) ──
+  const analyticsReport = useMemo(() => {
+    const adherenceByLocal: Record<string, {
+      totalScheduled: number;
+      totalBreakdowns: number;
+      breakdownMinutes: number;
+      plannedMinutes: number;
+    }> = {};
+    const reportSchedules = schedules.filter(s => matchesReportDateFilter(s.scheduled_date));
+    let totalScheduledCount = reportSchedules.length;
+    let totalBreakdownMinutes = 0;
+    let totalPlannedMinutes = 0;
+    let unattendedCount = 0;
+
+    reportSchedules.forEach(s => {
+      const localKey = s.local || "OUTROS";
+      if (!adherenceByLocal[localKey]) {
+        adherenceByLocal[localKey] = { totalScheduled: 0, totalBreakdowns: 0, breakdownMinutes: 0, plannedMinutes: 0 };
+      }
+      const linePlanned = calcPlannedMinutes(s.valley_start, s.valley_end);
+      adherenceByLocal[localKey].totalScheduled++;
+      adherenceByLocal[localKey].plannedMinutes += linePlanned;
+      totalPlannedMinutes += linePlanned;
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
+      if (hasActiveStop) unattendedCount++;
+      stops.forEach(st => {
+        adherenceByLocal[localKey].totalBreakdowns++;
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diffMin = Math.floor((end - start) / 60000);
+          if (diffMin > 0) {
+            adherenceByLocal[localKey].breakdownMinutes += diffMin;
+            totalBreakdownMinutes += diffMin;
+          }
+        }
+      });
+    });
+
+    const localList = Object.keys(adherenceByLocal).map(k => {
+      const group = adherenceByLocal[k];
+      const uptime = Math.max(0, group.plannedMinutes - group.breakdownMinutes);
+      const adherenceScore = group.plannedMinutes > 0 ? Math.round((uptime / group.plannedMinutes) * 100) : 100;
+      return { local: k, totalScheduled: group.totalScheduled, totalBreakdowns: group.totalBreakdowns, breakdownHours: (group.breakdownMinutes / 60).toFixed(1), adherence: adherenceScore };
+    });
+
+    const totalUptimeMinutes = Math.max(0, totalPlannedMinutes - totalBreakdownMinutes);
+    const overallAdherence = totalPlannedMinutes > 0
+      ? parseFloat(((totalUptimeMinutes / totalPlannedMinutes) * 100).toFixed(2))
+      : 100;
+    const activeCount = Math.max(0, totalScheduledCount - unattendedCount);
+    const equipmentAdherence = totalScheduledCount > 0 ? Math.round((activeCount / totalScheduledCount) * 100) : 100;
+    const totalPlannedHours = totalPlannedMinutes / 60;
+
+    // --- Chart Datasets ---
+    const equipmentMap: Record<string, number> = {};
+    const operatorMap: Record<string, number> = {};
+    const plateMap: Record<string, number> = {};
+    const typesMap: Record<string, number> = {};
+
+    reportSchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) {
+            mins += diff;
+            const parsed = parseCorrectiveReason(st.reason);
+            typesMap[parsed.type] = (typesMap[parsed.type] || 0) + diff;
+          }
+        }
+      });
+      if (mins > 0 && s.equipment) equipmentMap[s.equipment] = (equipmentMap[s.equipment] || 0) + mins;
+      if (mins > 0 && s.operator)  operatorMap[s.operator]   = (operatorMap[s.operator]   || 0) + mins;
+      if (mins > 0 && s.plate)     plateMap[s.plate]         = (plateMap[s.plate]         || 0) + mins;
+    });
+
+    const chartDataEquipment = Object.entries(equipmentMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes).slice(0, 5);
+    const chartDataOperator  = Object.entries(operatorMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes).slice(0, 5);
+    const chartDataPlates    = Object.entries(plateMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes).slice(0, 5);
+    const chartDataTypes     = Object.entries(typesMap).map(([name, val]) => ({ name, minutes: val }));
+
+    const fullChartDataEquipment = Object.entries(equipmentMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes);
+    const fullChartDataPlates    = Object.entries(plateMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes);
+    const fullChartDataOperator  = Object.entries(operatorMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes);
+
+    // DATE chart: if single-day mode → show just that day; otherwise → last 7 dates with data
+    const datesWithData = reportDateMode === "single"
+      ? [reportSingleDate]
+      : Array.from(new Set(schedules.map(s => s.scheduled_date))).sort().slice(-30);
+    const datesInRange = datesWithData.filter(d => matchesReportDateFilter(d));
+    const chartDataDates = datesInRange.map(dateStr => {
+      const dayScheds = schedules.filter(s => s.scheduled_date === dateStr);
+      let totalMins = 0;
+      dayScheds.forEach(s => {
+        correctiveLogs.filter(l => l.schedule_id === s.id).forEach(st => {
+          if (st.stop_start) {
+            const start = new Date(st.stop_start).getTime();
+            const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+            const diff = Math.floor((end - start) / 60000);
+            if (diff > 0) totalMins += diff;
+          }
+        });
+      });
+      const parts = dateStr.split("-");
+      const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dateStr;
+      return { name: label, minutes: totalMins };
+    });
+
+    return {
+      localList, overallAdherence, totalScheduledCount,
+      totalBreakdownMinutes, totalPlannedMinutes, totalUptimeMinutes,
+      totalBreakdownHours: (totalBreakdownMinutes / 60),
+      unattendedCount, activeCount, equipmentAdherence, totalPlannedHours,
+      chartDataEquipment, chartDataDates, chartDataTypes, chartDataOperator, chartDataPlates,
+      fullChartDataEquipment, fullChartDataPlates, fullChartDataOperator
+    };
+  }, [schedules, correctiveLogs, reportDateMode, reportSingleDate, reportStartDate, reportEndDate, reportMonth, reportYear, timeTick]);
 
   return (
     <Tabs defaultValue="operacao" className="w-full space-y-4">
@@ -1204,14 +1588,96 @@ function UsinaOperacaoPage() {
           </TabsList>
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-center">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Data da Operação:</span>
-          <Input 
-            type="date" 
-            value={selectedDate} 
-            onChange={(e) => setSelectedDate(e.target.value)} 
-            className="w-36 h-8 text-xs font-bold bg-white" 
-          />
+        <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Filtrar Data:</span>
+          
+          <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 shadow-sm">
+            <button
+              onClick={() => setDateFilterMode("single")}
+              className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                dateFilterMode === "single" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Dia
+            </button>
+            <button
+              onClick={() => setDateFilterMode("range")}
+              className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                dateFilterMode === "range" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Período
+            </button>
+            <button
+              onClick={() => setDateFilterMode("month")}
+              className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                dateFilterMode === "month" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Mês/Ano
+            </button>
+          </div>
+
+          {dateFilterMode === "single" && (
+            <Input 
+              type="date" 
+              value={selectedDate} 
+              onChange={(e) => setSelectedDate(e.target.value)} 
+              className="w-36 h-8 text-xs font-bold bg-white" 
+            />
+          )}
+
+          {dateFilterMode === "range" && (
+            <div className="flex items-center gap-1">
+              <Input 
+                type="date" 
+                value={startDate} 
+                onChange={(e) => setStartDate(e.target.value)} 
+                className="w-32 h-8 text-xs font-bold bg-white" 
+              />
+              <span className="text-[9px] font-bold text-slate-400">a</span>
+              <Input 
+                type="date" 
+                value={endDate} 
+                onChange={(e) => setEndDate(e.target.value)} 
+                className="w-32 h-8 text-xs font-bold bg-white" 
+              />
+            </div>
+          )}
+
+          {dateFilterMode === "month" && (
+            <div className="flex items-center gap-1">
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold px-2 py-1 text-slate-800"
+              >
+                <option value="01">Janeiro</option>
+                <option value="02">Fevereiro</option>
+                <option value="03">Março</option>
+                <option value="04">Abril</option>
+                <option value="05">Maio</option>
+                <option value="06">Junho</option>
+                <option value="07">Julho</option>
+                <option value="08">Agosto</option>
+                <option value="09">Setembro</option>
+                <option value="10">Outubro</option>
+                <option value="11">Novembro</option>
+                <option value="12">Dezembro</option>
+              </select>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value)}
+                className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold px-2 py-1 text-slate-800"
+              >
+                <option value="2024">2024</option>
+                <option value="2025">2025</option>
+                <option value="2026">2026</option>
+                <option value="2027">2027</option>
+                <option value="2028">2028</option>
+              </select>
+            </div>
+          )}
         </div>
       </div>
  
@@ -1269,7 +1735,7 @@ function UsinaOperacaoPage() {
                 <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
                   shiftFilter === "todos" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
                 }`}>
-                  {schedules.filter(s => s.scheduled_date === selectedDate).length}
+                  {schedules.filter(s => matchesDateFilter(s.scheduled_date)).length}
                 </span>
               </button>
               <button
@@ -1287,7 +1753,7 @@ function UsinaOperacaoPage() {
                   shiftFilter === "dia" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"
                 }`}>
                   {schedules.filter(s => {
-                    if (s.scheduled_date !== selectedDate) return false;
+                    if (!matchesDateFilter(s.scheduled_date)) return false;
                     if (!s.valley_start) return true;
                     const [h] = s.valley_start.split(":").map(Number);
                     return h >= 6 && h < 18;
@@ -1309,7 +1775,7 @@ function UsinaOperacaoPage() {
                   shiftFilter === "noite" ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700"
                 }`}>
                   {schedules.filter(s => {
-                    if (s.scheduled_date !== selectedDate) return false;
+                    if (!matchesDateFilter(s.scheduled_date)) return false;
                     if (!s.valley_start) return false;
                     const [h] = s.valley_start.split(":").map(Number);
                     return h >= 18 || h < 6;
@@ -1980,189 +2446,567 @@ function UsinaOperacaoPage() {
         </TabsContent>
 
         <TabsContent value="aderencia" className="space-y-6 mt-0">
-          {/* Sub-cards de detalhamento de Aderência */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-gradient-to-br from-indigo-50 to-white border border-indigo-100 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-indigo-800 uppercase tracking-wider">Aderência Contratual</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-indigo-950">{analytics.overallAdherence}%</span>
-                <span className="text-[10px] font-bold text-slate-500">Mínimo: 90%</span>
-              </div>
-              <div className="w-full bg-indigo-100 h-1.5 rounded-full mt-3 overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all duration-500 ${analytics.overallAdherence >= 90 ? "bg-emerald-500" : analytics.overallAdherence >= 75 ? "bg-amber-500" : "bg-red-500"}`} 
-                  style={{ width: `${analytics.overallAdherence}%` }}
-                />
-              </div>
+          {/* Executive Presentation Buttons and Header info */}
+          <div className="flex justify-between items-center bg-slate-900 text-white rounded-xl p-4 shadow border border-slate-800">
+            <div>
+              <h2 className="font-black text-sm uppercase tracking-wider text-indigo-400">📊 Painel Gerencial de Aderência</h2>
+              <p className="text-[10px] text-slate-400 uppercase font-black mt-0.5">Indicadores Operacionais e Gerenciamento de Custos</p>
             </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Frota Operante</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-slate-900">{analytics.activeCount}</span>
-                <span className="text-xs font-bold text-slate-500">/ {analytics.totalScheduledCount} equipamentos</span>
-              </div>
-              <p className="text-[10px] font-bold text-slate-500 mt-3 flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                Ativos em campo no momento
-              </p>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Indisponibilidade</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-red-600">{analytics.unattendedCount}</span>
-                <span className="text-xs font-bold text-slate-550 text-slate-500">em corretiva</span>
-              </div>
-              <p className="text-[10px] font-bold text-red-650 mt-3 flex items-center gap-1">
-                ⚠️ Requer atenção imediata
-              </p>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Aderência por Horas</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-slate-900">{analytics.overallAdherence}%</span>
-                <span className="text-xs font-bold text-red-600">-{analytics.totalBreakdownHours}h</span>
-              </div>
-              <p className="text-[10px] font-bold text-slate-500 mt-3">
-                Perdido {analytics.totalBreakdownHours}h de {analytics.totalPlannedHours}h previstas
-              </p>
+            <div className="flex justify-end gap-2 bg-[#242424] p-1 rounded-lg border border-zinc-800">
+              <button
+                onClick={() => setAdherenceViewMode("charts")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
+                  adherenceViewMode === "charts"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:bg-zinc-800 text-zinc-300"
+                }`}
+              >
+                📊 Relatório Gerencial
+              </button>
+              <button
+                onClick={() => setAdherenceViewMode("table")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
+                  adherenceViewMode === "table"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:bg-zinc-800 text-zinc-300"
+                }`}
+              >
+                📋 Tabela de Localidades
+              </button>
             </div>
           </div>
 
-          {/* Adherence Scores grouped by Service local lines */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Left 2 Columns: Adherence table */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-                <div className="bg-slate-50 border-b p-3">
-                  <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider">Aderência por Localidade de Atendimento</h3>
-                </div>
-                <Table>
-                  <TableHeader className="bg-slate-100/50">
-                    <TableRow className="text-[10px] font-black uppercase text-slate-600">
-                      <TableHead>Local / Frente</TableHead>
-                      <TableHead>Máquinas Escaladas</TableHead>
-                      <TableHead>Intercorrências Corretivas</TableHead>
-                      <TableHead>Horas Corretiva</TableHead>
-                      <TableHead className="text-right">Aderência</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="text-xs font-bold text-slate-800">
-                    {analytics.localList.map(g => {
-                      const isExpanded = expandedLocal === g.local;
-                      return (
-                        <Fragment key={g.local}>
-                          <TableRow 
-                            className="hover:bg-slate-50/50 cursor-pointer transition-colors"
-                            onClick={() => setExpandedLocal(isExpanded ? null : g.local)}
-                          >
-                            <TableCell className="uppercase flex items-center gap-1.5 py-3">
-                              <ChevronRight className={`h-4 w-4 text-slate-405 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`} />
-                              <span className="font-bold text-slate-900">{g.local}</span>
-                            </TableCell>
-                            <TableCell>{g.totalScheduled}</TableCell>
-                            <TableCell>{g.totalBreakdowns} paradas</TableCell>
-                            <TableCell className="font-mono text-red-600">{g.breakdownHours} hrs</TableCell>
-                            <TableCell className="text-right">
-                              <span className={`px-2 py-0.5 rounded font-black ${g.adherence >= 90 ? "bg-emerald-100 text-emerald-700" : g.adherence >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                                {g.adherence}%
-                              </span>
-                            </TableCell>
-                          </TableRow>
-                          {isExpanded && (
-                            <TableRow className="bg-slate-50/30 hover:bg-slate-50/30">
-                              <TableCell colSpan={5} className="p-3 border-t border-b">
-                                <div className="bg-white border rounded-lg p-3 shadow-inner space-y-2">
-                                  <h4 className="text-[10px] font-black uppercase text-indigo-900 tracking-wider flex items-center gap-1">
-                                    📋 Equipamentos Vinculados a {g.local}
-                                  </h4>
-                                  <Table className="text-[10px] w-full min-w-full">
-                                    <TableHeader className="bg-slate-50 text-[9px] font-black uppercase">
-                                      <TableRow>
-                                        <TableHead className="py-1">Equipamento</TableHead>
-                                        <TableHead className="py-1">Placa</TableHead>
-                                        <TableHead className="py-1">Operador</TableHead>
-                                        <TableHead className="py-1">OS</TableHead>
-                                        <TableHead className="py-1">Tempo Parado</TableHead>
-                                        <TableHead className="py-1 text-right">Aderência</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody className="font-bold text-slate-800 text-[10px]">
-                                      {schedules
-                                        .filter(s => s.scheduled_date === selectedDate && (s.local || "OUTROS") === g.local)
-                                        .map(s => {
-                                          const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
-                                          let breakdownMinutes = 0;
-                                          stops.forEach(st => {
-                                            if (st.stop_start) {
-                                              const start = new Date(st.stop_start).getTime();
-                                              const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
-                                              const diff = Math.floor((end - start) / 60000);
-                                              if (diff > 0) breakdownMinutes += diff;
-                                            }
-                                          });
-                                          const totalMinutes = 720;
-                                          const uptime = Math.max(0, totalMinutes - breakdownMinutes);
-                                          const adherenceScore = Math.round((uptime / totalMinutes) * 100);
-                                          const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
 
-                                          return (
-                                            <TableRow key={s.id} className={hasActiveStop ? "bg-red-50/20 animate-pulse-slow" : ""}>
-                                              <TableCell className="py-1.5">{s.equipment || "—"}</TableCell>
-                                              <TableCell className="py-1.5">
-                                                <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] ${hasActiveStop ? "bg-red-100 text-red-700 border border-red-200" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
-                                                  {s.plate}
-                                                </span>
-                                              </TableCell>
-                                              <TableCell className="py-1.5 uppercase">{s.operator || "—"}</TableCell>
-                                              <TableCell className="py-1.5 font-mono">{s.os_number || "—"}</TableCell>
-                                              <TableCell className={`py-1.5 font-mono ${breakdownMinutes > 0 ? "text-red-600" : "text-slate-400"}`}>
-                                                {(breakdownMinutes / 60).toFixed(1)} hrs
-                                              </TableCell>
-                                              <TableCell className="py-1.5 text-right">
-                                                <span className={`px-1.5 py-0.5 rounded font-black ${adherenceScore >= 90 ? "bg-emerald-100 text-emerald-700" : adherenceScore >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                                                  {adherenceScore}%
-                                                </span>
-                                              </TableCell>
-                                            </TableRow>
-                                          );
-                                        })}
-                                    </TableBody>
-                                  </Table>
-                                </div>
+
+          {adherenceViewMode === "charts" ? (
+            <div className="bg-gradient-to-b from-[#1a1a1a] to-[#0c0c0c] border-2 border-[#2b2b2b] rounded-2xl p-6 shadow-2xl space-y-6 text-white">
+              {/* SVG Gradient definitions for cylindrical blue bars */}
+              <svg width="0" height="0" className="absolute">
+                <defs>
+                  <linearGradient id="horizontalCylinder" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#062e7d" />
+                    <stop offset="30%" stopColor="#2563eb" />
+                    <stop offset="70%" stopColor="#2563eb" />
+                    <stop offset="100%" stopColor="#062e7d" />
+                  </linearGradient>
+                  <linearGradient id="verticalCylinder" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#062e7d" />
+                    <stop offset="30%" stopColor="#2563eb" />
+                    <stop offset="70%" stopColor="#2563eb" />
+                    <stop offset="100%" stopColor="#062e7d" />
+                  </linearGradient>
+                </defs>
+              </svg>
+
+              <div className="flex flex-col gap-3 border-b border-[#2b2b2b] pb-4">
+                {/* Row 1: title + adherence badge */}
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-100">📊 Relatório Executivo Gerencial</h3>
+                    <p className="text-[10px] text-zinc-400 font-bold uppercase mt-1">Indicadores e Distribuição de Paradas Corretivas</p>
+                  </div>
+                  <div className="bg-[#242424] border border-[#3e3e3e] rounded-lg px-3 py-1.5 text-center">
+                    <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 block">Aderência Geral</span>
+                    <span className={`text-sm font-black ${analyticsReport.overallAdherence >= 90 ? "text-emerald-400" : analyticsReport.overallAdherence >= 75 ? "text-amber-400" : "text-red-400"}`}>
+                      {analyticsReport.overallAdherence}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Row 2: date filter for this report */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Filtrar Dados:</span>
+
+                  {/* Mode selector */}
+                  <div className="flex items-center bg-[#1a1a1a] border border-[#3e3e3e] rounded-lg p-0.5 gap-0.5">
+                    {(["single", "range", "month"] as const).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setReportDateMode(mode)}
+                        className={`px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-all ${
+                          reportDateMode === mode
+                            ? "bg-indigo-600 text-white shadow"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {mode === "single" ? "Dia" : mode === "range" ? "Período" : "Mês/Ano"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Single date */}
+                  {reportDateMode === "single" && (
+                    <input
+                      type="date"
+                      value={reportSingleDate}
+                      onChange={e => setReportSingleDate(e.target.value)}
+                      className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  )}
+
+                  {/* Date range */}
+                  {reportDateMode === "range" && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={reportStartDate}
+                        onChange={e => setReportStartDate(e.target.value)}
+                        className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <span className="text-[9px] text-zinc-500 font-bold">até</span>
+                      <input
+                        type="date"
+                        value={reportEndDate}
+                        onChange={e => setReportEndDate(e.target.value)}
+                        className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  )}
+
+                  {/* Month / Year */}
+                  {reportDateMode === "month" && (
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={reportMonth}
+                        onChange={e => setReportMonth(e.target.value)}
+                        className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="01">Janeiro</option>
+                        <option value="02">Fevereiro</option>
+                        <option value="03">Março</option>
+                        <option value="04">Abril</option>
+                        <option value="05">Maio</option>
+                        <option value="06">Junho</option>
+                        <option value="07">Julho</option>
+                        <option value="08">Agosto</option>
+                        <option value="09">Setembro</option>
+                        <option value="10">Outubro</option>
+                        <option value="11">Novembro</option>
+                        <option value="12">Dezembro</option>
+                      </select>
+                      <input
+                        type="number"
+                        value={reportYear}
+                        onChange={e => setReportYear(e.target.value)}
+                        min="2020"
+                        max="2099"
+                        className="h-7 w-20 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ─── Summary Panel ─── */}
+              {(() => {
+                const fmtMin = (m: number) => {
+                  const hh = Math.floor(m / 60);
+                  const mm = Math.floor(m % 60);
+                  const ss = 0;
+                  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+                };
+                const avgPerEquip = analyticsReport.totalScheduledCount > 0
+                  ? analyticsReport.totalPlannedMinutes / analyticsReport.totalScheduledCount
+                  : 0;
+                const periodLabel = reportDateMode === "single"
+                  ? reportSingleDate.split("-").reverse().join("/")
+                  : reportDateMode === "range"
+                  ? `${reportStartDate.split("-").reverse().join("/")} → ${reportEndDate.split("-").reverse().join("/")}`
+                  : `${reportMonth}/${reportYear}`;
+
+                return (
+                  <div className="w-full border border-[#3e3e3e] rounded-xl overflow-hidden text-[11px] font-bold uppercase tracking-wider">
+                    {/* Header row */}
+                    <div className="grid grid-cols-2">
+                      {/* Left: period + non-attendance + attendance */}
+                      <div className="bg-[#1e3a5f] border-r border-[#3e3e3e]">
+                        <div className="flex items-center gap-3 px-4 py-2 border-b border-[#2b4a70]">
+                          <span className="text-[9px] text-blue-300 tracking-widest">PERÍODO:</span>
+                          <span className="text-white font-black">{periodLabel}</span>
+                        </div>
+                        <div className="grid grid-cols-2 divide-x divide-[#2b4a70]">
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">NÃO ATENDIMENTO</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(analyticsReport.totalBreakdownMinutes)}</div>
+                          </div>
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">ATENDIMENTO</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(analyticsReport.totalUptimeMinutes)}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: derived metrics */}
+                      <div className="bg-[#1a2a40]">
+                        <div className="grid grid-cols-2 divide-x divide-[#2b3a50] border-b border-[#2b3a50]">
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">TOTAL HORAS PERDIDAS</div>
+                            <div className="text-red-400 font-mono font-black text-sm">{fmtMin(analyticsReport.totalBreakdownMinutes)}</div>
+                          </div>
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">TOTAL DE HORAS</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(analyticsReport.totalPlannedMinutes)}</div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 divide-x divide-[#2b3a50]">
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">HORA POR EQUIPAMENTO</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(avgPerEquip)}</div>
+                          </div>
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">TOTAL DE EQUIPAMENTOS</div>
+                            <div className="text-white font-mono font-black text-sm">{analyticsReport.totalScheduledCount}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Aderência footer */}
+                    <div className={`flex items-center justify-between px-6 py-3 ${
+                      analyticsReport.overallAdherence > 95 ? "bg-indigo-700" : analyticsReport.overallAdherence >= 95 ? "bg-amber-600" : "bg-red-700"
+                    }`}>
+                      <span className="text-white text-xs tracking-widest">ADERÊNCIA:</span>
+                      <span className="text-white font-black text-2xl font-mono tracking-tight">
+                        {analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* LEFT COLUMN (lg:col-span-5) */}
+                <div className="lg:col-span-5 flex flex-col gap-6">
+                  
+                  {/* 1. EQUIPAMENTO (Horizontal Bar) */}
+                  <div 
+                    onClick={() => setExpandedChart("equipment")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">EQUIPAMENTO</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={analyticsReport.chartDataEquipment}
+                          layout="vertical"
+                          margin={{ top: 10, right: 75, left: 10, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                          <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={130} tickLine={false} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={26}>
+                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* 4. MANUTENÇÃO (Line Chart) */}
+                  <div 
+                    onClick={() => setExpandedChart("maintenance")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">MANUTENÇÃO</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={analyticsReport.chartDataTypes.length > 0 ? analyticsReport.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]}
+                          margin={{ top: 15, right: 20, left: 10, bottom: 10 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" />
+                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                          <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
+                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                          </Line>
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* RIGHT COLUMN (lg:col-span-7) */}
+                <div className="lg:col-span-7 flex flex-col gap-6">
+                  
+                  {/* Row 1: DATA and ADERÊNCIA */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* 2. DATA (Vertical Bar) */}
+                    <div 
+                      onClick={() => setExpandedChart("date")}
+                      className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    >
+                      <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">DATA</h4>
+                      <div className="flex-1 min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={analyticsReport.chartDataDates}
+                            margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
+                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                            <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                              itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
+                              <LabelList dataKey="minutes" position="top" formatter={(v) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* 3. ADERÊNCIA (Gauge) */}
+                    <div 
+                      onClick={() => setExpandedChart("adherence")}
+                      className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    >
+                      <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">ADERÊNCIA</h4>
+                      <div className="flex-1 flex flex-col items-center justify-center relative min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={[
+                                { value: Math.min(95, analyticsReport.overallAdherence), color: "#ef4444" }, // Red zone
+                                { value: Math.max(0, Math.min(5, analyticsReport.overallAdherence - 95)), color: "#10b981" }, // Green zone
+                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#1f2937" } // Gap
+                              ]}
+                              dataKey="value"
+                              innerRadius="65%"
+                              outerRadius="85%"
+                              startAngle={180}
+                              endAngle={0}
+                              paddingAngle={0}
+                              stroke="none"
+                            >
+                              <Cell fill="#ef4444" />
+                              <Cell fill="#10b981" />
+                              <Cell fill="#242424" />
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute top-[60%] flex flex-col items-center">
+                          <span className="text-3xl font-black text-white">{analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%</span>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* 5. MOTORISTA/OPERADOR (Horizontal Bar) */}
+                  <div 
+                    onClick={() => setExpandedChart("operator")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">MOTORISTA/OPERADOR</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={analyticsReport.chartDataOperator}
+                          layout="vertical"
+                          margin={{ top: 5, right: 75, left: 10, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                          <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={120} tickLine={false} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* 6. PLACA (Vertical Bar) */}
+                  <div 
+                    onClick={() => setExpandedChart("plates")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">PLACA</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={analyticsReport.chartDataPlates}
+                          margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
+                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                          <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
+                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* Left 2 Columns: Adherence table */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-slate-50 border-b p-3">
+                    <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider">Aderência por Localidade de Atendimento</h3>
+                  </div>
+                  <Table>
+                    <TableHeader className="bg-slate-100/50">
+                      <TableRow className="text-[10px] font-black uppercase text-slate-600">
+                        <TableHead>Local / Frente</TableHead>
+                        <TableHead>Máquinas Escaladas</TableHead>
+                        <TableHead>Intercorrências Corretivas</TableHead>
+                        <TableHead>Horas Corretiva</TableHead>
+                        <TableHead className="text-right">Aderência</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="text-xs font-bold text-slate-800">
+                      {analytics.localList.map(g => {
+                        const isExpanded = expandedLocal === g.local;
+                        return (
+                          <Fragment key={g.local}>
+                            <TableRow 
+                              className="hover:bg-slate-50/50 cursor-pointer transition-colors"
+                              onClick={() => setExpandedLocal(isExpanded ? null : g.local)}
+                            >
+                              <TableCell className="uppercase flex items-center gap-1.5 py-3">
+                                <ChevronRight className={`h-4 w-4 text-slate-405 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`} />
+                                <span className="font-bold text-slate-900">{g.local}</span>
+                              </TableCell>
+                              <TableCell>{g.totalScheduled}</TableCell>
+                              <TableCell>{g.totalBreakdowns} paradas</TableCell>
+                              <TableCell className="font-mono text-red-600">{g.breakdownHours} hrs</TableCell>
+                              <TableCell className="text-right">
+                                <span className={`px-2 py-0.5 rounded font-black ${g.adherence >= 90 ? "bg-emerald-100 text-emerald-700" : g.adherence >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                                  {g.adherence}%
+                                </span>
                               </TableCell>
                             </TableRow>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                    {analytics.localList.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center py-6 text-slate-400 italic font-bold">Sem dados de aderência para hoje.</TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                            {isExpanded && (
+                              <TableRow className="bg-slate-50/30 hover:bg-slate-50/30">
+                                <TableCell colSpan={5} className="p-3 border-t border-b">
+                                  <div className="bg-white border rounded-lg p-3 shadow-inner space-y-2">
+                                    <h4 className="text-[10px] font-black uppercase text-indigo-900 tracking-wider flex items-center gap-1">
+                                      📋 Equipamentos Vinculados a {g.local}
+                                    </h4>
+                                    <Table className="text-[10px] w-full min-w-full">
+                                      <TableHeader className="bg-slate-50 text-[9px] font-black uppercase">
+                                        <TableRow>
+                                          <TableHead className="py-1">Equipamento</TableHead>
+                                          <TableHead className="py-1">Placa</TableHead>
+                                          <TableHead className="py-1">Operador</TableHead>
+                                          <TableHead className="py-1">OS</TableHead>
+                                          <TableHead className="py-1">Tempo Parado</TableHead>
+                                          <TableHead className="py-1 text-right">Aderência</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody className="font-bold text-slate-800 text-[10px]">
+                                        {schedules
+                                          .filter(s => matchesDateFilter(s.scheduled_date) && (s.local || "OUTROS") === g.local)
+                                          .map(s => {
+                                            const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+                                            let breakdownMinutes = 0;
+                                            stops.forEach(st => {
+                                              if (st.stop_start) {
+                                                const start = new Date(st.stop_start).getTime();
+                                                const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+                                                const diff = Math.floor((end - start) / 60000);
+                                                if (diff > 0) breakdownMinutes += diff;
+                                              }
+                                            });
+                                            const totalMinutes = 720;
+                                            const uptime = Math.max(0, totalMinutes - breakdownMinutes);
+                                            const adherenceScore = Math.round((uptime / totalMinutes) * 100);
+                                            const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
+  
+                                            return (
+                                              <TableRow key={s.id} className={hasActiveStop ? "bg-red-50/20 animate-pulse-slow" : ""}>
+                                                <TableCell className="py-1.5">{s.equipment || "—"}</TableCell>
+                                                <TableCell className="py-1.5">
+                                                  <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] ${hasActiveStop ? "bg-red-100 text-red-700 border border-red-200" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
+                                                    {s.plate}
+                                                  </span>
+                                                </TableCell>
+                                                <TableCell className="py-1.5 uppercase">{s.operator || "—"}</TableCell>
+                                                <TableCell className="py-1.5 font-mono">{s.os_number || "—"}</TableCell>
+                                                <TableCell className={`py-1.5 font-mono ${breakdownMinutes > 0 ? "text-red-600" : "text-slate-400"}`}>
+                                                  {(breakdownMinutes / 60).toFixed(1)} hrs
+                                                </TableCell>
+                                                <TableCell className="py-1.5 text-right">
+                                                  <span className={`px-1.5 py-0.5 rounded font-black ${adherenceScore >= 90 ? "bg-emerald-100 text-emerald-700" : adherenceScore >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                                                    {adherenceScore}%
+                                                  </span>
+                                                </TableCell>
+                                              </TableRow>
+                                            );
+                                          })}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                      {analytics.localList.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-6 text-slate-400 italic font-bold">Sem dados de aderência para hoje.</TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+  
+              {/* Right Column: Corrective stop info */}
+              <div className="bg-white border-2 border-slate-200 rounded-xl p-5 space-y-3">
+                <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4 text-indigo-500" /> Informativo de Aderência
+                </h3>
+                <p className="text-[11px] leading-relaxed text-slate-600 font-medium">
+                  O cálculo de aderência é computado a partir do baseline do turno de 12 horas (720 minutos) por equipamento programado, deduzindo os minutos em que o equipamento ficou inoperante em corretivas.
+                </p>
+                <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-[10px] text-indigo-800 font-black uppercase">
+                  Aderência mínima de contrato Vale: 90%
+                </div>
               </div>
             </div>
-
-            {/* Right Column: Corrective stop info */}
-            <div className="bg-white border-2 border-slate-200 rounded-xl p-5 space-y-3">
-              <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1">
-                <AlertCircle className="h-4 w-4 text-indigo-500" /> Informativo de Aderência
-              </h3>
-              <p className="text-[11px] leading-relaxed text-slate-600 font-medium">
-                O cálculo de aderência é computado a partir do baseline do turno de 12 horas (720 minutos) por equipamento programado, deduzindo os minutos em que o equipamento ficou inoperante em corretivas.
-              </p>
-              <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-[10px] text-indigo-800 font-black uppercase">
-                Aderência mínima de contrato Vale: 90%
-              </div>
-            </div>
-
-          </div>
+          )}
         </TabsContent>
 
         <TabsContent value="corretivas" className="space-y-6 mt-0">
@@ -2757,6 +3601,253 @@ function UsinaOperacaoPage() {
           )}
           <DialogFooter>
             <Button onClick={() => setDetailsOpen(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold w-full uppercase tracking-wider text-xs">
+              Fechar Detalhes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Expanded Chart Dialog */}
+      <Dialog open={!!expandedChart} onOpenChange={() => { setExpandedChart(null); setExpandedSearch(""); }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-zinc-950 text-white border border-zinc-800">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase text-indigo-400 flex items-center gap-2 text-base">
+              🔍 {expandedChart === "equipment" && "Tempo Parado por Equipamento"}
+              {expandedChart === "date" && "Tempo Parado por Data"}
+              {expandedChart === "adherence" && "Aderência Geral e por Localidade"}
+              {expandedChart === "operator" && "Tempo Parado por Motorista/Operador"}
+              {expandedChart === "plates" && "Tempo Parado por Placa"}
+              {expandedChart === "maintenance" && "Motivos de Manutenção Corretiva"}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-400 uppercase font-bold">
+              Visão expandida e detalhada com todos os dados do período selecionado.
+            </DialogDescription>
+          </DialogHeader>
+
+          {expandedChart && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 py-4">
+              {/* Chart Column */}
+              <div className="lg:col-span-7 bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col h-[380px]">
+                <span className="text-[10px] font-black uppercase text-center tracking-wider text-zinc-500 mb-4 block">Visualização Gráfica</span>
+                <div className="flex-1 min-h-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    {(() => {
+                      if (expandedChart === "equipment") {
+                        const data = analyticsReport.fullChartDataEquipment
+                          .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()));
+                        return (
+                          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                            <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={80} tickLine={false} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                              <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "plates") {
+                        const data = analyticsReport.fullChartDataPlates
+                          .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()));
+                        return (
+                          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                            <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={80} tickLine={false} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                              <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "operator") {
+                        const data = analyticsReport.fullChartDataOperator
+                          .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()));
+                        return (
+                          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                            <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={80} tickLine={false} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                              <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "date") {
+                        return (
+                          <BarChart data={analyticsReport.chartDataDates} margin={{ top: 20, right: 10, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
+                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                            <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
+                              <LabelList dataKey="minutes" position="top" formatter={(v) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "adherence") {
+                        return (
+                          <PieChart>
+                            <Pie
+                              data={[
+                                { value: Math.min(95, analyticsReport.overallAdherence), color: "#ef4444" },
+                                { value: Math.max(0, Math.min(5, analyticsReport.overallAdherence - 95)), color: "#10b981" },
+                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#1f2937" }
+                              ]}
+                              dataKey="value"
+                              innerRadius="65%"
+                              outerRadius="85%"
+                              startAngle={180}
+                              endAngle={0}
+                              paddingAngle={0}
+                              stroke="none"
+                            >
+                              <Cell fill="#ef4444" />
+                              <Cell fill="#10b981" />
+                              <Cell fill="#242424" />
+                            </Pie>
+                          </PieChart>
+                        );
+                      }
+                      if (expandedChart === "maintenance") {
+                        return (
+                          <LineChart data={analyticsReport.chartDataTypes.length > 0 ? analyticsReport.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]} margin={{ top: 15, right: 20, left: 10, bottom: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" />
+                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                            <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
+                              <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                            </Line>
+                          </LineChart>
+                        );
+                      }
+                      return <div className="text-zinc-500 text-xs">Sem visualização gráfica disponível.</div>;
+                    })()}
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Data Table Column */}
+              <div className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col h-[380px]">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Dados Completos</span>
+                  {(expandedChart === "equipment" || expandedChart === "plates" || expandedChart === "operator") && (
+                    <Input
+                      type="text"
+                      placeholder="Pesquisar..."
+                      value={expandedSearch}
+                      onChange={(e) => setExpandedSearch(e.target.value)}
+                      className="w-32 h-6 text-[10px] bg-zinc-800 border-zinc-700 text-white font-bold"
+                    />
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto text-xs scrollbar-thin">
+                  <Table>
+                    <TableHeader className="bg-zinc-850 sticky top-0 z-10">
+                      <TableRow className="border-b border-zinc-800 text-[9px] font-black uppercase text-zinc-400">
+                        <TableHead>{expandedChart === "adherence" ? "Localidade" : "Nome/Item"}</TableHead>
+                        <TableHead className="text-right">
+                          {expandedChart === "adherence" ? "Aderência" : "Tempo Parado"}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="font-bold text-zinc-350">
+                      {(() => {
+                        if (expandedChart === "equipment") {
+                          return analyticsReport.fullChartDataEquipment
+                            .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()))
+                            .map(item => (
+                              <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                                <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                                <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                              </TableRow>
+                            ));
+                        }
+                        if (expandedChart === "plates") {
+                          return analyticsReport.fullChartDataPlates
+                            .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()))
+                            .map(item => (
+                              <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                                <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                                <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                              </TableRow>
+                            ));
+                        }
+                        if (expandedChart === "operator") {
+                          return analyticsReport.fullChartDataOperator
+                            .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()))
+                            .map(item => (
+                              <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                                <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                                <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                              </TableRow>
+                            ));
+                        }
+                        if (expandedChart === "date") {
+                          return analyticsReport.chartDataDates.map(item => (
+                            <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                              <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                              <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                            </TableRow>
+                          ));
+                        }
+                        if (expandedChart === "adherence") {
+                          return analyticsReport.localList.map(item => (
+                            <TableRow key={item.local} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                              <TableCell className="py-2 text-zinc-200 uppercase">{item.local}</TableCell>
+                              <TableCell className="py-2 text-right">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                  item.adherence >= 90 ? "bg-emerald-950 text-emerald-400 border border-emerald-900" :
+                                  item.adherence >= 75 ? "bg-amber-950 text-amber-400 border border-amber-900" :
+                                  "bg-rose-950 text-rose-400 border border-rose-900"
+                                }`}>
+                                  {item.adherence}%
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          ));
+                        }
+                        if (expandedChart === "maintenance") {
+                          return analyticsReport.chartDataTypes.map(item => (
+                            <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                              <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                              <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                            </TableRow>
+                          ));
+                        }
+                        return null;
+                      })()}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="border-t border-zinc-800 pt-3">
+            <Button onClick={() => { setExpandedChart(null); setExpandedSearch(""); }} className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold w-full uppercase text-xs">
               Fechar Detalhes
             </Button>
           </DialogFooter>

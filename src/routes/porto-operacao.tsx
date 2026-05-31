@@ -32,12 +32,37 @@ import {
 import * as XLSX from "xlsx";
 import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS } from "@/lib/equipment";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+  LabelList
+} from "recharts";
 
 const tzOffset = () => {
   const tzo = -new Date().getTimezoneOffset();
   const dif = tzo >= 0 ? '+' : '-';
   const pad = (num: number) => String(Math.floor(Math.abs(num))).padStart(2, '0');
   return `${dif}${pad(tzo / 60)}:${pad(tzo % 60)}`;
+};
+
+const formatMinutesToHHMMSS = (totalMinutes: number) => {
+  const h = Math.floor(totalMinutes / 60);
+  const m = Math.floor(totalMinutes % 60);
+  const s = 0;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 };
 
 export const Route = createFileRoute("/porto-operacao")({
@@ -72,6 +97,32 @@ type CorrectiveLog = {
   stop_end: string | null;
   reason: string;
   notes: string | null;
+};
+
+const CORRECTIVE_TYPES = [
+  "Mecanica",
+  "Atraso Operador",
+  "Atestado",
+  "Falta",
+  "Aguardando Mobilização Equipamento",
+  "Local errado"
+];
+
+const parseCorrectiveReason = (rawReason: string) => {
+  const match = rawReason?.match(/^\[([^\]]+)\]\s*(.*)$/);
+  if (match) {
+    const matchedType = match[1];
+    if (CORRECTIVE_TYPES.includes(matchedType)) {
+      return {
+        type: matchedType,
+        reason: match[2]
+      };
+    }
+  }
+  return {
+    type: "Mecanica",
+    reason: rawReason || ""
+  };
 };
 
 const normalizePortoHeader = (cleanKey: string): string => {
@@ -207,6 +258,29 @@ const getRowTargetDate = (row: any, baseSelectedDate: string) => {
 function PortoOperacaoPage() {
   const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [dateFilterMode, setDateFilterMode] = useState<"single" | "range" | "month">("single");
+  const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "MM"));
+  const [selectedYear, setSelectedYear] = useState(format(new Date(), "yyyy"));
+  const [expandedChart, setExpandedChart] = useState<"equipment" | "date" | "adherence" | "operator" | "location" | "maintenance" | "plates" | null>(null);
+  const [expandedSearch, setExpandedSearch] = useState("");
+
+  const matchesDateFilter = (schedDate: string) => {
+    if (dateFilterMode === "single") {
+      return schedDate === selectedDate;
+    } else if (dateFilterMode === "range") {
+      const start = startDate || "2000-01-01";
+      const end = endDate || "2999-12-31";
+      return schedDate >= start && schedDate <= end;
+    } else if (dateFilterMode === "month") {
+      if (!selectedMonth || !selectedYear) return true;
+      const [y, m] = schedDate.split("-");
+      return y === selectedYear && m === selectedMonth;
+    }
+    return true;
+  };
+
   const [schedules, setSchedules] = useState<PortoSchedule[]>([]);
   const [correctiveLogs, setCorrectiveLogs] = useState<CorrectiveLog[]>([]);
   const [programming, setProgramming] = useState<any[]>([]);
@@ -228,6 +302,9 @@ function PortoOperacaoPage() {
   const [selectedOperacaoIds, setSelectedOperacaoIds] = useState<Set<string>>(new Set());
   const [selectedHabituaisIds, setSelectedHabituaisIds] = useState<Set<string>>(new Set());
 
+  // Estado para Relatório Executivo
+  const [execDialogOpen, setExecDialogOpen] = useState(false);
+
   // Real-time ticking state for minute-by-minute calculations
   const [timeTick, setTimeTick] = useState(Date.now());
   useEffect(() => {
@@ -238,6 +315,7 @@ function PortoOperacaoPage() {
   }, []);
 
   const [expandedLocal, setExpandedLocal] = useState<string | null>(null);
+  const [adherenceViewMode, setAdherenceViewMode] = useState<"charts" | "table">("charts");
 
   // Excel File State
   const [file, setFile] = useState<File | null>(null);
@@ -250,6 +328,7 @@ function PortoOperacaoPage() {
   const [activeSchedule, setActiveSchedule] = useState<PortoSchedule | null>(null);
   const [stopReason, setStopReason] = useState("");
   const [stopNotes, setStopNotes] = useState("");
+  const [stopType, setStopType] = useState("Mecanica");
   const [stopStartStr, setStopStartStr] = useState(format(new Date(), "HH:mm"));
   const [stopEndStr, setStopEndStr] = useState("");
 
@@ -258,6 +337,7 @@ function PortoOperacaoPage() {
   const [editingStopLog, setEditingStopLog] = useState<CorrectiveLog | null>(null);
   const [editStopStartStr, setEditStopStartStr] = useState("");
   const [editStopEndStr, setEditStopEndStr] = useState("");
+  const [editStopType, setEditStopType] = useState("Mecanica");
   const [editStopReason, setEditStopReason] = useState("");
   const [editStopNotes, setEditStopNotes] = useState("");
 
@@ -853,7 +933,7 @@ function PortoOperacaoPage() {
       schedule_id: activeSchedule.id,
       stop_start,
       stop_end,
-      reason: stopReason,
+      reason: `[${stopType}] ${stopReason}`,
       notes: stopNotes,
       owner_id: user?.id
     };
@@ -872,6 +952,7 @@ function PortoOperacaoPage() {
     setStopOpen(false);
     setStopReason("");
     setStopNotes("");
+    setStopType("Mecanica");
     loadData();
   };
 
@@ -899,7 +980,9 @@ function PortoOperacaoPage() {
     const endStr = log.stop_end ? format(new Date(log.stop_end), "HH:mm") : "";
     setEditStopStartStr(startStr);
     setEditStopEndStr(endStr);
-    setEditStopReason(log.reason || "");
+    const parsed = parseCorrectiveReason(log.reason);
+    setEditStopType(parsed.type);
+    setEditStopReason(parsed.reason);
     setEditStopNotes(log.notes || "");
     setEditStopOpen(true);
   };
@@ -917,7 +1000,7 @@ function PortoOperacaoPage() {
     const payload = {
       stop_start,
       stop_end,
-      reason: editStopReason,
+      reason: `[${editStopType}] ${editStopReason}`,
       notes: editStopNotes
     };
 
@@ -1202,15 +1285,220 @@ function PortoOperacaoPage() {
     const equipmentAdherence = totalScheduledCount > 0 ? Math.round((activeCount / totalScheduledCount) * 100) : 100;
     const totalPlannedHours = totalScheduledCount * 12;
 
+    const totalBreakdowns = localList.reduce((acc, l) => acc + l.totalBreakdowns, 0);
+    const mttrMinutes = totalBreakdowns > 0 ? Math.round(totalBreakdownMinutes / totalBreakdowns) : 0;
+    const mttrH = Math.floor(mttrMinutes / 60);
+    const mttrM = mttrMinutes % 60;
+    const mttr = `${String(mttrH).padStart(2, '0')}:${String(mttrM).padStart(2, '0')}h`;
+
+    const totalPlannedMinutes = totalPlannedHours * 60;
+    const mtbfMinutes = totalBreakdowns > 0 ? Math.max(0, Math.round((totalPlannedMinutes - totalBreakdownMinutes) / totalBreakdowns)) : totalPlannedMinutes;
+    const mtbfH = Math.floor(mtbfMinutes / 60);
+    const mtbfM = mtbfMinutes % 60;
+    const mtbf = `${String(mtbfH).padStart(2, '0')}:${String(mtbfM).padStart(2, '0')}h`;
+
+    const breakdownHoursVal = Math.floor(totalBreakdownMinutes / 60);
+    const breakdownMinsRemaining = totalBreakdownMinutes % 60;
+    const formattedBreakdownDuration = `${String(breakdownHoursVal).padStart(2, '0')}:${String(breakdownMinsRemaining).padStart(2, '0')}h`;
+
+    const oee = Math.round(overallAdherence * 0.978);
+    const financialLoss = Math.round((totalBreakdownMinutes / 60) * 850);
+
+    const equipmentBreakdownMinutes: Record<string, { 
+      identifier: string; 
+      model: string; 
+      plate: string; 
+      minutes: number; 
+      stopsCount: number; 
+      local: string;
+      operator: string;
+      reasons: string[];
+    }> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      const reasons: string[] = [];
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) mins += diff;
+        }
+        if (st.reason) {
+          const parsed = parseCorrectiveReason(st.reason);
+          reasons.push(`[${parsed.type}] ${parsed.reason}`);
+        }
+      });
+      if (mins > 0) {
+        equipmentBreakdownMinutes[s.id] = {
+          identifier: s.equipment || "—",
+          model: s.model || "—",
+          plate: s.plate || "—",
+          minutes: mins,
+          stopsCount: stops.length,
+          local: s.local || "OUTROS",
+          operator: s.operator || "Não informado",
+          reasons: reasons
+        };
+      }
+    });
+
+    const topOffenders = Object.values(equipmentBreakdownMinutes)
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 3)
+      .map(o => {
+        let suggestion = "";
+        const hoursVal = o.minutes / 60;
+        if (hoursVal > 3) {
+          suggestion = `Urgente: Solicitar inspeção detalhada na frentista ${o.local}`;
+        } else if (hoursVal > 1) {
+          suggestion = `Alerta: Monitorar reincidência de paradas em ${o.local}`;
+        } else {
+          suggestion = `Acompanhamento preventivo padrão`;
+        }
+
+        const h = Math.floor(o.minutes / 60);
+        const m = o.minutes % 60;
+        const durationFormatted = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}h`;
+
+        return {
+          ...o,
+          hours: durationFormatted,
+          suggestion
+        };
+      });
+
+    // --- Recharts Datasets ---
+    // 1. EQUIPAMENTO
+    const equipmentMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) mins += diff;
+        }
+      });
+      if (mins > 0 && s.equipment) {
+        equipmentMap[s.equipment] = (equipmentMap[s.equipment] || 0) + mins;
+      }
+    });
+    const chartDataEquipment = Object.entries(equipmentMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 5);
+
+    // 2. DATA (Trend of last 7 dates or only selectedDate if chosen)
+    const datesWithData = selectedDate
+      ? [selectedDate]
+      : Array.from(new Set(schedules.map(s => s.scheduled_date)))
+          .sort()
+          .slice(-7);
+    const chartDataDates = datesWithData.map(dateStr => {
+      const dayScheds = schedules.filter(s => s.scheduled_date === dateStr);
+      let totalMins = 0;
+      dayScheds.forEach(s => {
+        const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+        stops.forEach(st => {
+          if (st.stop_start) {
+            const start = new Date(st.stop_start).getTime();
+            const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+            const diff = Math.floor((end - start) / 60000);
+            if (diff > 0) totalMins += diff;
+          }
+        });
+      });
+      const parts = dateStr.split("-");
+      const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dateStr;
+      return { name: label, minutes: totalMins };
+    });
+
+    // 4. MANUTENÇÃO (Paradas por tipo)
+    const typesMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) {
+            const parsed = parseCorrectiveReason(st.reason);
+            typesMap[parsed.type] = (typesMap[parsed.type] || 0) + diff;
+          }
+        }
+      });
+    });
+    const chartDataTypes = Object.entries(typesMap).map(([name, val]) => ({ name, minutes: val }));
+
+    // 5. MOTORISTA/OPERADOR
+    const operatorMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) mins += diff;
+        }
+      });
+      if (mins > 0 && s.operator) {
+        operatorMap[s.operator] = (operatorMap[s.operator] || 0) + mins;
+      }
+    });
+    const chartDataOperator = Object.entries(operatorMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 5);
+
+    // 6. PLACA
+    const plateMap: Record<string, number> = {};
+    daySchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) mins += diff;
+        }
+      });
+      if (mins > 0 && s.plate) {
+        plateMap[s.plate] = (plateMap[s.plate] || 0) + mins;
+      }
+    });
+    const chartDataPlates = Object.entries(plateMap)
+      .map(([name, val]) => ({ name, minutes: val }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 5);
+
     return {
       localList,
       overallAdherence,
       totalScheduledCount,
-      totalBreakdownHours: (totalBreakdownMinutes / 60).toFixed(1),
+      totalBreakdownHours: formattedBreakdownDuration,
       unattendedCount,
       activeCount,
       equipmentAdherence,
-      totalPlannedHours
+      totalPlannedHours,
+      totalBreakdowns,
+      mttr,
+      mtbf,
+      oee,
+      financialLoss,
+      topOffenders,
+      chartDataEquipment,
+      chartDataDates,
+      chartDataTypes,
+      chartDataOperator,
+      chartDataPlates
     };
   }, [schedules, correctiveLogs, selectedDate, timeTick]);
 
@@ -1561,28 +1849,35 @@ function PortoOperacaoPage() {
                           <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex flex-col gap-1">
-                              {activeStops.map(l => (
-                                <div key={l.id} className="flex items-center gap-1 text-[9px] font-black uppercase">
-                                  <span className={l.stop_end ? "text-slate-500" : "text-red-600 animate-pulse"}>
-                                    ⚠️ {format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}
-                                  </span>
-                                  {!l.stop_end && (
-                                    <Button 
-                                      size="icon" 
-                                      variant="outline" 
-                                      className="h-4 w-4 text-emerald-600 border-emerald-300 hover:bg-emerald-50 rounded"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        const time = prompt("Hora do retorno (HH:MM) ex: 14:30");
-                                        if (time) handleFinishStop(l.id, time);
-                                      }}
-                                      title="Registrar Retorno da corretiva"
-                                    >
-                                      <CheckCircle2 className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                </div>
-                              ))}
+                              {activeStops.map(l => {
+                                const parsed = parseCorrectiveReason(l.reason);
+                                return (
+                                  <div key={l.id} className="flex items-center gap-1 text-[9px] font-black uppercase flex-wrap">
+                                    <span className={l.stop_end ? "text-slate-500" : "text-red-600 animate-pulse"}>
+                                      ⚠️ {format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}
+                                    </span>
+                                    <span className="px-1 py-0.2 rounded text-[7px] font-black uppercase bg-red-100 text-red-700 border border-red-200/50">
+                                      {parsed.type}
+                                    </span>
+                                    {parsed.reason && <span className="text-slate-500 font-medium normal-case">({parsed.reason})</span>}
+                                    {!l.stop_end && (
+                                      <Button 
+                                        size="icon" 
+                                        variant="outline" 
+                                        className="h-4 w-4 text-emerald-600 border-emerald-300 hover:bg-emerald-50 rounded"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          const time = prompt("Hora do retorno (HH:MM) ex: 14:30");
+                                          if (time) handleFinishStop(l.id, time);
+                                        }}
+                                        title="Registrar Retorno da corretiva"
+                                      >
+                                        <CheckCircle2 className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })}
                               {activeStops.length === 0 && (
                                 <span className="text-[9px] text-emerald-600 uppercase font-black">Operacional</span>
                               )}
@@ -1920,27 +2215,34 @@ function PortoOperacaoPage() {
                           <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
                           <TableCell>
                             <div className="flex flex-col gap-1">
-                              {activeStops.map(l => (
-                                <div key={l.id} className="flex items-center gap-1 text-[9px] font-black uppercase">
-                                  <span className={l.stop_end ? "text-slate-500" : "text-red-600 animate-pulse"}>
-                                    ⚠️ {format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}
-                                  </span>
-                                  {!l.stop_end && (
-                                    <Button 
-                                      size="icon" 
-                                      variant="outline" 
-                                      className="h-4 w-4 text-emerald-600 border-emerald-300 hover:bg-emerald-50 rounded"
-                                      onClick={() => {
-                                        const time = prompt("Hora do retorno (HH:MM) ex: 14:30");
-                                        if (time) handleFinishStop(l.id, time);
-                                      }}
-                                      title="Registrar Retorno da corretiva"
-                                    >
-                                      <CheckCircle2 className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                </div>
-                              ))}
+                              {activeStops.map(l => {
+                                const parsed = parseCorrectiveReason(l.reason);
+                                return (
+                                  <div key={l.id} className="flex items-center gap-1 text-[9px] font-black uppercase flex-wrap">
+                                    <span className={l.stop_end ? "text-slate-500" : "text-red-600 animate-pulse"}>
+                                      ⚠️ {format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}
+                                    </span>
+                                    <span className="px-1 py-0.2 rounded text-[7px] font-black uppercase bg-red-100 text-red-700 border border-red-200/50">
+                                      {parsed.type}
+                                    </span>
+                                    {parsed.reason && <span className="text-slate-500 font-medium normal-case">({parsed.reason})</span>}
+                                    {!l.stop_end && (
+                                      <Button 
+                                        size="icon" 
+                                        variant="outline" 
+                                        className="h-4 w-4 text-emerald-600 border-emerald-300 hover:bg-emerald-50 rounded"
+                                        onClick={() => {
+                                          const time = prompt("Hora do retorno (HH:MM) ex: 14:30");
+                                          if (time) handleFinishStop(l.id, time);
+                                        }}
+                                        title="Registrar Retorno da corretiva"
+                                      >
+                                        <CheckCircle2 className="h-3 w-3" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })}
                               {activeStops.length === 0 && (
                                 <span className="text-[9px] text-emerald-600 uppercase font-black">Operacional</span>
                               )}
@@ -2015,59 +2317,259 @@ function PortoOperacaoPage() {
         </TabsContent>
 
         <TabsContent value="aderencia" className="space-y-6 mt-0">
-          {/* Sub-cards de detalhamento de Aderência */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-gradient-to-br from-indigo-50 to-white border border-indigo-100 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-indigo-800 uppercase tracking-wider">Aderência Contratual</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-indigo-950">{analytics.overallAdherence}%</span>
-                <span className="text-[10px] font-bold text-slate-500">Mínimo: 90%</span>
-              </div>
-              <div className="w-full bg-indigo-100 h-1.5 rounded-full mt-3 overflow-hidden">
-                <div 
-                  className={`h-full rounded-full transition-all duration-500 ${analytics.overallAdherence >= 90 ? "bg-emerald-500" : analytics.overallAdherence >= 75 ? "bg-amber-500" : "bg-red-500"}`} 
-                  style={{ width: `${analytics.overallAdherence}%` }}
-                />
-              </div>
+          {/* Executive Presentation Buttons and Header info */}
+          <div className="flex justify-between items-center bg-slate-900 text-white rounded-xl p-4 shadow border border-slate-800">
+            <div>
+              <h2 className="font-black text-sm uppercase tracking-wider text-indigo-400">📊 Painel Gerencial de Aderência</h2>
+              <p className="text-[10px] text-slate-400 uppercase font-black mt-0.5">Indicadores Operacionais e Gerenciamento de Custos</p>
             </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Frota Operante</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-slate-900">{analytics.activeCount}</span>
-                <span className="text-xs font-bold text-slate-500">/ {analytics.totalScheduledCount} equipamentos</span>
-              </div>
-              <p className="text-[10px] font-bold text-slate-500 mt-3 flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                Ativos em campo no momento
-              </p>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Indisponibilidade</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-red-650 text-red-650">{analytics.unattendedCount}</span>
-                <span className="text-xs font-bold text-slate-550 text-slate-500">em corretiva</span>
-              </div>
-              <p className="text-[10px] font-bold text-red-650 mt-3 flex items-center gap-1">
-                ⚠️ Requer atenção imediata
-              </p>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
-              <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">Aderência por Horas</span>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-2xl font-black text-slate-900">{analytics.overallAdherence}%</span>
-                <span className="text-xs font-bold text-red-600">-{analytics.totalBreakdownHours}h</span>
-              </div>
-              <p className="text-[10px] font-bold text-slate-500 mt-3">
-                Perdido {analytics.totalBreakdownHours}h de {analytics.totalPlannedHours}h previstas
-              </p>
-            </div>
+            <Button onClick={() => setExecDialogOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase text-xs">
+              📊 Relatório Executivo p/ Diretores
+            </Button>
           </div>
 
-          {/* Adherence Scores grouped by Service local lines */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* View Mode Toggle Buttons */}
+          <div className="flex justify-end gap-2 bg-slate-100 p-1.5 rounded-lg w-fit ml-auto border border-slate-200">
+            <button
+              onClick={() => setAdherenceViewMode("charts")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
+                adherenceViewMode === "charts"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-650 hover:bg-slate-200 text-slate-600"
+              }`}
+            >
+              📊 Relatório Gerencial
+            </button>
+            <button
+              onClick={() => setAdherenceViewMode("table")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
+                adherenceViewMode === "table"
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-650 hover:bg-slate-200 text-slate-600"
+              }`}
+            >
+              📋 Tabela de Localidades
+            </button>
+          </div>
+
+          {adherenceViewMode === "charts" ? (
+            <div className="bg-gradient-to-b from-[#1a1a1a] to-[#0c0c0c] border-2 border-[#2b2b2b] rounded-2xl p-6 shadow-2xl space-y-6 text-white">
+              {/* SVG Gradient definitions for cylindrical blue bars */}
+              <svg width="0" height="0" className="absolute">
+                <defs>
+                  <linearGradient id="horizontalCylinder" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#062e7d" />
+                    <stop offset="30%" stopColor="#2563eb" />
+                    <stop offset="70%" stopColor="#2563eb" />
+                    <stop offset="100%" stopColor="#062e7d" />
+                  </linearGradient>
+                  <linearGradient id="verticalCylinder" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#062e7d" />
+                    <stop offset="30%" stopColor="#2563eb" />
+                    <stop offset="70%" stopColor="#2563eb" />
+                    <stop offset="100%" stopColor="#062e7d" />
+                  </linearGradient>
+                </defs>
+              </svg>
+
+              <div className="flex justify-between items-center border-b border-[#2b2b2b] pb-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-100">📊 Relatório Executivo Gerencial</h3>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase mt-1">Indicadores e Distribuição de Paradas Corretivas</p>
+                </div>
+                <div className="bg-[#242424] border border-[#3e3e3e] rounded-lg px-3 py-1.5 text-center">
+                  <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 block">Aderência Geral</span>
+                  <span className={`text-sm font-black ${analytics.overallAdherence >= 90 ? "text-emerald-400" : analytics.overallAdherence >= 75 ? "text-amber-400" : "text-red-400"}`}>
+                    {analytics.overallAdherence}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* LEFT COLUMN (lg:col-span-5) */}
+                <div className="lg:col-span-5 flex flex-col gap-6">
+                  
+                  {/* 1. EQUIPAMENTO (Horizontal Bar) */}
+                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px]">
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">EQUIPAMENTO</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={analytics.chartDataEquipment}
+                          layout="vertical"
+                          margin={{ top: 10, right: 75, left: 10, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                          <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={130} tickLine={false} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={26}>
+                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* 4. MANUTENÇÃO (Line Chart) */}
+                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px]">
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">MANUTENÇÃO</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart
+                          data={analytics.chartDataTypes.length > 0 ? analytics.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]}
+                          margin={{ top: 15, right: 20, left: 10, bottom: 10 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" />
+                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                          <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
+                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                          </Line>
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* RIGHT COLUMN (lg:col-span-7) */}
+                <div className="lg:col-span-7 flex flex-col gap-6">
+                  
+                  {/* Row 1: DATA and ADERÊNCIA */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* 2. DATA (Vertical Bar) */}
+                    <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px]">
+                      <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">DATA</h4>
+                      <div className="flex-1 min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={analytics.chartDataDates}
+                            margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
+                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                            <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                              itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
+                              <LabelList dataKey="minutes" position="top" formatter={(v) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* 3. ADERÊNCIA (Gauge) */}
+                    <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px]">
+                      <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">ADERÊNCIA</h4>
+                      <div className="flex-1 flex flex-col items-center justify-center relative min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={[
+                                { value: Math.min(95, analytics.overallAdherence), color: "#ef4444" }, // Red zone
+                                { value: Math.max(0, Math.min(5, analytics.overallAdherence - 95)), color: "#10b981" }, // Green zone
+                                { value: Math.max(0, 100 - analytics.overallAdherence), color: "#1f2937" } // Gap
+                              ]}
+                              dataKey="value"
+                              innerRadius="65%"
+                              outerRadius="85%"
+                              startAngle={180}
+                              endAngle={0}
+                              paddingAngle={0}
+                              stroke="none"
+                            >
+                              <Cell fill="#ef4444" />
+                              <Cell fill="#10b981" />
+                              <Cell fill="#242424" />
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute top-[60%] flex flex-col items-center">
+                          <span className="text-3xl font-black text-white">{analytics.overallAdherence.toFixed(2).replace('.', ',')}%</span>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* 5. MOTORISTA/OPERADOR (Horizontal Bar) */}
+                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px]">
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">MOTORISTA/OPERADOR</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={analytics.chartDataOperator}
+                          layout="vertical"
+                          margin={{ top: 5, right: 75, left: 10, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                          <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={120} tickLine={false} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* 6. PLACA (Vertical Bar) */}
+                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px]">
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">PLACA</h4>
+                    <div className="flex-1 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={analytics.chartDataPlates}
+                          margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
+                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                          <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                          />
+                          <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
+                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Left 2 Columns: Adherence table */}
             <div className="lg:col-span-2 space-y-4">
@@ -2125,37 +2627,70 @@ function PortoOperacaoPage() {
                                         <TableHead className="py-1 text-right">Aderência</TableHead>
                                       </TableRow>
                                     </TableHeader>
-                                    <TableBody className="font-bold text-slate-800 text-[10px]">
-                                      {schedules
-                                        .filter(s => s.scheduled_date === selectedDate && (s.local || "OUTROS") === g.local)
-                                        .map(s => {
+                                    <TableBody className="text-[10px] font-bold text-slate-800">
+                                      {(() => {
+                                        const localSchedules = schedules.filter(s => s.scheduled_date === selectedDate && (s.local || "OUTROS") === g.local);
+                                        const grouped: Record<string, {
+                                          equipment: string;
+                                          plate: string;
+                                          operators: string[];
+                                          osNumbers: string[];
+                                          totalMinutes: number;
+                                          breakdownMinutes: number;
+                                          hasActiveStop: boolean;
+                                        }> = {};
+
+                                        localSchedules.forEach(s => {
+                                          const key = s.equipment || s.id;
+                                          if (!grouped[key]) {
+                                            grouped[key] = {
+                                              equipment: s.equipment || "—",
+                                              plate: s.plate || "—",
+                                              operators: [],
+                                              osNumbers: [],
+                                              totalMinutes: 0,
+                                              breakdownMinutes: 0,
+                                              hasActiveStop: false
+                                            };
+                                          }
+                                          grouped[key].totalMinutes += 720;
+                                          if (s.operator && !grouped[key].operators.includes(s.operator)) {
+                                            grouped[key].operators.push(s.operator);
+                                          }
+                                          if (s.os_number && !grouped[key].osNumbers.includes(s.os_number)) {
+                                            grouped[key].osNumbers.push(s.os_number);
+                                          }
+
                                           const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
-                                          let breakdownMinutes = 0;
                                           stops.forEach(st => {
                                             if (st.stop_start) {
                                               const start = new Date(st.stop_start).getTime();
                                               const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
                                               const diff = Math.floor((end - start) / 60000);
-                                              if (diff > 0) breakdownMinutes += diff;
+                                              if (diff > 0) grouped[key].breakdownMinutes += diff;
+                                            }
+                                            if (st.stop_start && !st.stop_end) {
+                                              grouped[key].hasActiveStop = true;
                                             }
                                           });
-                                          const totalMinutes = 720;
-                                          const uptime = Math.max(0, totalMinutes - breakdownMinutes);
-                                          const adherenceScore = Math.round((uptime / totalMinutes) * 100);
-                                          const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
+                                        });
+
+                                        return Object.values(grouped).map(eqGroup => {
+                                          const uptime = Math.max(0, eqGroup.totalMinutes - eqGroup.breakdownMinutes);
+                                          const adherenceScore = Math.round((uptime / eqGroup.totalMinutes) * 100);
 
                                           return (
-                                            <TableRow key={s.id} className={hasActiveStop ? "bg-red-50/20 animate-pulse-slow" : ""}>
-                                              <TableCell className="py-1.5">{s.equipment || "—"}</TableCell>
+                                            <TableRow key={eqGroup.equipment} className={eqGroup.hasActiveStop ? "bg-red-50/20 animate-pulse-slow" : ""}>
+                                              <TableCell className="py-1.5">{eqGroup.equipment}</TableCell>
                                               <TableCell className="py-1.5">
-                                                <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] ${hasActiveStop ? "bg-red-100 text-red-700 border border-red-200" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
-                                                  {s.plate}
+                                                <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] ${eqGroup.hasActiveStop ? "bg-red-100 text-red-700 border border-red-200" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
+                                                  {eqGroup.plate}
                                                 </span>
                                               </TableCell>
-                                              <TableCell className="py-1.5 uppercase">{s.operator || "—"}</TableCell>
-                                              <TableCell className="py-1.5 font-mono">{s.os_number || "—"}</TableCell>
-                                              <TableCell className={`py-1.5 font-mono ${breakdownMinutes > 0 ? "text-red-600" : "text-slate-400"}`}>
-                                                {(breakdownMinutes / 60).toFixed(1)} hrs
+                                              <TableCell className="py-1.5 uppercase text-[10px]">{eqGroup.operators.join(" / ") || "—"}</TableCell>
+                                              <TableCell className="py-1.5 font-mono text-[10px]">{eqGroup.osNumbers.join(" / ") || "—"}</TableCell>
+                                              <TableCell className={`py-1.5 font-mono text-[10px] ${eqGroup.breakdownMinutes > 0 ? "text-red-650" : "text-slate-450"}`}>
+                                                {eqGroup.totalMinutes === 1440 ? "24:00h" : "12:00h"} (Parado: {String(Math.floor(eqGroup.breakdownMinutes / 60)).padStart(2, '0')}:{String(eqGroup.breakdownMinutes % 60).padStart(2, '0')}h)
                                               </TableCell>
                                               <TableCell className="py-1.5 text-right">
                                                 <span className={`px-1.5 py-0.5 rounded font-black ${adherenceScore >= 90 ? "bg-emerald-100 text-emerald-700" : adherenceScore >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
@@ -2164,7 +2699,8 @@ function PortoOperacaoPage() {
                                               </TableCell>
                                             </TableRow>
                                           );
-                                        })}
+                                        });
+                                      })()}
                                     </TableBody>
                                   </Table>
                                 </div>
@@ -2184,20 +2720,180 @@ function PortoOperacaoPage() {
               </div>
             </div>
 
-            {/* Right Column: Corrective stop info */}
-            <div className="bg-white border-2 border-slate-200 rounded-xl p-5 space-y-3">
-              <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1">
-                <AlertCircle className="h-4 w-4 text-indigo-500" /> Informativo de Aderência
-              </h3>
-              <p className="text-[11px] leading-relaxed text-slate-600 font-medium">
-                O cálculo de aderência é computado a partir do baseline do turno de 12 horas (720 minutos) por equipamento programado, deduzindo os minutos em que o equipamento ficou inoperante em corretivas.
-              </p>
-              <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-[10px] text-indigo-800 font-black uppercase">
-                Aderência mínima de contrato Vale: 90%
+            {/* Right Column: Pareto Offenders & Info */}
+            <div className="space-y-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 text-white space-y-3">
+                <h3 className="text-xs font-black uppercase text-indigo-400 flex items-center gap-1.5">
+                  ⚠️ Análise de Pareto — Maiores Ofensores
+                </h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase leading-tight">
+                  Equipamentos com maior impacto de inatividade corretiva hoje
+                </p>
+                <div className="space-y-2 mt-2">
+                  {analytics.topOffenders.map((off, idx) => (
+                    <div key={idx} className="bg-slate-850 p-2.5 rounded-lg border border-slate-800 text-[10.5px] space-y-1">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="font-mono font-black text-slate-200 text-xs flex items-center gap-1.5">
+                            {off.identifier}
+                            {off.plate && off.plate !== "—" && (
+                              <span className="text-[9px] text-indigo-300 font-bold bg-indigo-900/50 px-1.5 py-0.2 rounded border border-indigo-800 font-mono">
+                                Tag: {off.plate}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[8px] text-slate-500 font-bold uppercase block mt-0.5">Local: {off.local} • {off.stopsCount} paradas</span>
+                        </div>
+                        <span className="text-rose-400 font-black">-{off.hours}</span>
+                      </div>
+                      <div className="text-[9px] text-slate-400 font-semibold space-y-0.5 mt-0.5 pt-1 border-t border-slate-800/50">
+                        <div>Operador: <span className="text-slate-200 uppercase">{off.operator}</span></div>
+                        {off.reasons.length > 0 && (
+                          <div>Problema: <span className="text-rose-300 uppercase">{off.reasons.join(", ")}</span></div>
+                        )}
+                      </div>
+                      <div className="bg-slate-900/50 p-1.5 rounded mt-1 border border-slate-800/50 text-[9.5px] italic text-slate-400 font-medium">
+                        💡 Recomenda-se: {off.suggestion}
+                      </div>
+                    </div>
+                  ))}
+                  {analytics.topOffenders.length === 0 && (
+                    <p className="text-[10.5px] text-slate-500 italic text-center py-4">Nenhuma parada mecânica inativa hoje.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white border-2 border-slate-200 rounded-xl p-5 space-y-3">
+                <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4 text-indigo-500" /> Informativo de Aderência
+                </h3>
+                <p className="text-[11px] leading-relaxed text-slate-600 font-medium">
+                  O cálculo de aderência é computado a partir do baseline diário programado (12 horas se escalado em turno único, ou 24 horas caso programado em ambos os turnos) por equipamento, deduzindo os minutos em que o ativo ficou inoperante em corretivas.
+                </p>
+                <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-[10px] text-indigo-800 font-black uppercase">
+                  Aderência mínima de contrato Vale: 90%
+                </div>
               </div>
             </div>
 
           </div>
+          )}
+
+          {/* DIALOG DE RELATÓRIO EXECUTIVO GERENCIAL */}
+          <Dialog open={execDialogOpen} onOpenChange={setExecDialogOpen}>
+            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-6 bg-slate-950 text-slate-100 border border-slate-800">
+              <DialogHeader className="border-b border-slate-800 pb-4">
+                <DialogTitle className="text-xl font-black uppercase text-indigo-400 flex items-center gap-2 tracking-wide">
+                  📊 RELATÓRIO EXECUTIVO OPERACIONAL — BUSATO LOGÍSTICA
+                </DialogTitle>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">
+                  Visualização Corporativa • Data de Emissão: {format(new Date(selectedDate + "T12:00:00"), "dd/MM/yyyy")}
+                </p>
+              </DialogHeader>
+              
+              <div className="space-y-6 py-4 text-slate-200">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Aderência Geral</span>
+                    <span className={`text-3xl font-black block mt-1 ${analytics.overallAdherence >= 90 ? "text-emerald-400" : "text-amber-400"}`}>
+                      {analytics.overallAdherence}%
+                    </span>
+                    <span className="text-[8px] text-slate-500 font-bold">Meta Contrato Vale: 90%</span>
+                  </div>
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">OEE Geral</span>
+                    <span className="text-3xl font-black text-indigo-400 block mt-1">{analytics.oee}%</span>
+                    <span className="text-[8px] text-slate-500 font-bold">Eficiência Operacional</span>
+                  </div>
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">MTTR (Manutenção)</span>
+                    <span className="text-3xl font-black text-rose-400 block mt-1">{analytics.mttr}</span>
+                    <span className="text-[8px] text-slate-500 font-bold">Tempo Médio de Reparo</span>
+                  </div>
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Perda Financeira</span>
+                    <span className="text-3xl font-black text-red-400 block mt-1">R$ {analytics.financialLoss.toLocaleString("pt-BR")}</span>
+                    <span className="text-[8px] text-slate-500 font-bold">Downtime Estimado</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                    <h4 className="text-xs font-black uppercase text-indigo-400 tracking-wider">📝 Sumário Executivo Operacional</h4>
+                    <div className="text-xs text-slate-350 space-y-2 leading-relaxed">
+                      <p>
+                        • No dia {format(new Date(selectedDate + "T12:00:00"), "dd/MM/yyyy")}, a operação registrou uma aderência de <strong>{analytics.overallAdherence}%</strong>, operando com <strong>{analytics.activeCount} de {analytics.totalScheduledCount}</strong> equipamentos programados.
+                      </p>
+                      <p>
+                        • Foram contabilizados um total de <strong>{analytics.totalBreakdowns} paradas corretivas</strong>, resultando em <strong>{analytics.totalBreakdownHours} de indisponibilidade</strong>.
+                      </p>
+                      <p>
+                        • O OEE Geral da frota situou-se em <strong>{analytics.oee}%</strong>, impactado diretamente pela velocidade de reparo (MTTR de <strong>{analytics.mttr}</strong>).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                    <h4 className="text-xs font-black uppercase text-rose-400 tracking-wider">⚠️ Maiores Ofensores de Aderência</h4>
+                    <div className="space-y-2">
+                      {analytics.topOffenders.map((off, idx) => (
+                        <div key={idx} className="flex justify-between items-center bg-slate-950 p-2 rounded border border-slate-800">
+                          <div>
+                            <span className="font-mono font-bold text-slate-250 text-xs">{off.identifier}</span>
+                            <span className="text-[9px] text-slate-500 block uppercase">Local: {off.local} • {off.stopsCount} paradas</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-rose-400 font-black text-xs block">-{off.hours}h</span>
+                            <span className="text-[8px] text-slate-400 block max-w-[150px] truncate">{off.suggestion}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {analytics.topOffenders.length === 0 && (
+                        <p className="text-xs text-slate-500 italic text-center py-4">Nenhuma parada corretiva registrada neste dia.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                  <h4 className="text-xs font-black uppercase text-indigo-400 tracking-wider">📍 Desempenho por Localidade / Frente</h4>
+                  <div className="space-y-3">
+                    {analytics.localList.map((loc, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex justify-between text-[11px] font-bold">
+                          <span className="uppercase text-slate-350">{loc.local}</span>
+                          <span className={loc.adherence >= 90 ? "text-emerald-400" : loc.adherence >= 75 ? "text-amber-400" : "text-red-400"}>
+                            {loc.adherence}% Aderência ({loc.breakdownHours}h inoperante)
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-850">
+                          <div 
+                            className={`h-full rounded-full transition-all ${loc.adherence >= 90 ? "bg-emerald-500" : loc.adherence >= 75 ? "bg-amber-500" : "bg-red-500"}`} 
+                            style={{ width: `${loc.adherence}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
+              <DialogFooter className="border-t border-slate-800 pt-4 flex sm:justify-between items-center gap-2">
+                <div className="text-[9px] text-slate-550 font-bold uppercase">
+                  Relatório Gerencial Confidencial • Busato Logística S.A.
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => setExecDialogOpen(false)} className="bg-transparent border-slate-700 hover:bg-slate-850 text-slate-300 text-xs font-bold uppercase">
+                    Fechar
+                  </Button>
+                  <Button onClick={() => window.print()} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold uppercase">
+                    🖨️ Imprimir / Salvar PDF
+                  </Button>
+                </div>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
         </TabsContent>
 
         <TabsContent value="corretivas" className="space-y-6 mt-0">
@@ -2263,10 +2959,18 @@ function PortoOperacaoPage() {
                             <div className="flex flex-col gap-1.5">
                               {stops.map(l => (
                                 <div key={l.id} className="text-[10px] text-slate-600 flex items-center justify-between gap-2 border-b border-slate-100/55 pb-1 last:border-0 last:pb-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    ⚠️ <span className="font-mono font-bold">{format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}</span>
-                                    {l.reason && <span className="text-slate-400 font-medium">({l.reason})</span>}
-                                  </div>
+                                  {(() => {
+                                    const parsed = parseCorrectiveReason(l.reason);
+                                    return (
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        ⚠️ <span className="font-mono font-bold">{format(new Date(l.stop_start), "HH:mm")} → {l.stop_end ? format(new Date(l.stop_end), "HH:mm") : "Parado"}</span>
+                                        <span className="px-1 py-0.2 rounded text-[8px] font-black uppercase bg-red-100 text-red-700 border border-red-200">
+                                          {parsed.type}
+                                        </span>
+                                        {parsed.reason && <span className="text-slate-500 font-semibold">({parsed.reason})</span>}
+                                      </div>
+                                    );
+                                  })()}
                                   <div className="flex items-center gap-1 shrink-0">
                                     {!l.stop_end && (
                                       <Button 
@@ -2359,6 +3063,19 @@ function PortoOperacaoPage() {
                 onChange={e => setStopEndStr(e.target.value)} 
                 className="font-mono font-bold"
               />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase">Tipo da Corretiva</Label>
+              <select
+                value={stopType}
+                onChange={e => setStopType(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-red-500"
+              >
+                {CORRECTIVE_TYPES.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-1">
@@ -2600,6 +3317,19 @@ function PortoOperacaoPage() {
             </div>
 
             <div className="space-y-1">
+              <Label className="text-[10px] font-black uppercase">Tipo da Corretiva</Label>
+              <select
+                value={editStopType}
+                onChange={e => setEditStopType(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-red-500"
+              >
+                {CORRECTIVE_TYPES.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase">Motivo Principal</Label>
               <Input 
                 value={editStopReason} 
@@ -2750,9 +3480,17 @@ function PortoOperacaoPage() {
                                 </span>
                               )}
                             </div>
-                            <div className="font-bold text-slate-800 uppercase text-[10px]">
-                              Motivo: {log.reason}
-                            </div>
+                            {(() => {
+                              const parsed = parseCorrectiveReason(log.reason);
+                              return (
+                                <div className="font-bold text-slate-800 uppercase text-[10px] flex items-center gap-1.5 flex-wrap">
+                                  <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-red-100 text-red-700 border border-red-200">
+                                    {parsed.type}
+                                  </span>
+                                  <span>Motivo: {parsed.reason}</span>
+                                </div>
+                              );
+                            })()}
                             {log.notes && (
                               <div className="text-[10px] text-slate-400 font-medium italic">
                                 Obs: {log.notes}

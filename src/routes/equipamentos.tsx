@@ -48,6 +48,16 @@ function EquipmentPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDetail, setSelectedDetail] = useState<Equipment | null>(null);
 
+  const [stats, setStats] = useState<{
+    loading: boolean;
+    totalScheduledHours: number;
+    totalLostMinutes: number;
+    uniquePlates: string[];
+    correctiveCount: number;
+    uniqueOperators: string[];
+    uniqueLocals: string[];
+  } | null>(null);
+
   const load = async () => {
     if (!user) return;
     const [{ data: e }, { data: c }] = await Promise.all([
@@ -95,6 +105,87 @@ function EquipmentPage() {
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [user]);
+
+  useEffect(() => {
+    if (!selectedDetail) {
+      setStats(null);
+      return;
+    }
+
+    const fetchStats = async () => {
+      setStats({
+        loading: true,
+        totalScheduledHours: 0,
+        totalLostMinutes: 0,
+        uniquePlates: [],
+        correctiveCount: 0,
+        uniqueOperators: [],
+        uniqueLocals: []
+      });
+
+      try {
+        const [usinaRes, portoRes] = await Promise.all([
+          supabase.from("usina_daily_schedules").select("id, plate, operator, local, scheduled_date").eq("equipment", selectedDetail.identifier),
+          supabase.from("porto_daily_schedules").select("id, plate, operator, local, scheduled_date").eq("equipment", selectedDetail.identifier)
+        ]);
+
+        const usinaSchedules = usinaRes.data || [];
+        const portoSchedules = portoRes.data || [];
+        const allSchedules = [...usinaSchedules, ...portoSchedules];
+        const totalScheduledHours = allSchedules.length * 12;
+
+        const uniquePlatesSet = new Set<string>();
+        const uniqueOperatorsSet = new Set<string>();
+        const uniqueLocalsSet = new Set<string>();
+        const scheduleIds = allSchedules.map(s => s.id);
+
+        allSchedules.forEach(s => {
+          if (s.plate) uniquePlatesSet.add(s.plate);
+          if (s.operator) uniqueOperatorsSet.add(s.operator);
+          if (s.local) uniqueLocalsSet.add(s.local);
+        });
+
+        let totalLostMinutes = 0;
+        let correctiveCount = 0;
+
+        if (scheduleIds.length > 0) {
+          const [usinaLogsRes, portoLogsRes] = await Promise.all([
+            supabase.from("usina_corrective_logs").select("stop_start, stop_end").in("schedule_id", scheduleIds),
+            supabase.from("porto_corrective_logs").select("stop_start, stop_end").in("schedule_id", scheduleIds)
+          ]);
+
+          const logs = [...(usinaLogsRes.data || []), ...(portoLogsRes.data || [])];
+          correctiveCount = logs.length;
+
+          logs.forEach(l => {
+            if (l.stop_start) {
+              const start = new Date(l.stop_start).getTime();
+              const end = l.stop_end ? new Date(l.stop_end).getTime() : Date.now();
+              const diffMin = Math.floor((end - start) / 60000);
+              if (diffMin > 0) {
+                totalLostMinutes += diffMin;
+              }
+            }
+          });
+        }
+
+        setStats({
+          loading: false,
+          totalScheduledHours,
+          totalLostMinutes,
+          uniquePlates: Array.from(uniquePlatesSet),
+          correctiveCount,
+          uniqueOperators: Array.from(uniqueOperatorsSet),
+          uniqueLocals: Array.from(uniqueLocalsSet)
+        });
+      } catch (err) {
+        console.error("Error fetching equipment stats", err);
+        setStats(prev => prev ? { ...prev, loading: false } : null);
+      }
+    };
+
+    fetchStats();
+  }, [selectedDetail]);
 
   if (authLoading) {
     return <div className="p-8 text-center text-muted-foreground font-bold">Carregando dados de autenticação...</div>;
@@ -226,6 +317,61 @@ function EquipmentPage() {
                   </span>
                 </div>
               </div>
+              
+              {/* Painel de Indicadores Históricos de Escalas */}
+              <div className="bg-slate-900 text-slate-100 rounded-xl p-4 border border-slate-800 space-y-3 mt-4">
+                <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+                  📊 Indicadores e Verificação de Demanda (Geral)
+                </h4>
+                {stats?.loading ? (
+                  <p className="text-xs text-slate-400 font-bold italic animate-pulse">Carregando estatísticas de utilização...</p>
+                ) : stats ? (
+                  <div className="space-y-2.5 text-xs text-slate-200">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                        <span className="text-[8px] font-black text-slate-400 uppercase block">Horas Planejadas</span>
+                        <span className="text-sm font-mono font-black text-indigo-300 mt-0.5 block">{stats.totalScheduledHours}h</span>
+                      </div>
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                        <span className="text-[8px] font-black text-slate-400 uppercase block">Horas Perdidas (Corretiva)</span>
+                        <span className={`text-sm font-mono font-black mt-0.5 block ${stats.totalLostMinutes > 0 ? "text-rose-400" : "text-emerald-400"}`}>
+                          {Math.floor(stats.totalLostMinutes / 60)}h {stats.totalLostMinutes % 60}m
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                        <span className="text-[8px] font-black text-slate-400 uppercase block">Paradas Corretivas</span>
+                        <span className="text-sm font-mono font-black text-amber-400 mt-0.5 block">{stats.correctiveCount} ocorrências</span>
+                      </div>
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800">
+                        <span className="text-[8px] font-black text-slate-400 uppercase block">Últimas Placas Atreladas</span>
+                        <span className="text-[10px] font-mono font-bold text-slate-350 mt-0.5 block truncate">
+                          {stats.uniquePlates.join(", ") || "Nenhuma"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-1">
+                      <span className="text-[8px] font-black text-slate-400 uppercase block">Frentes de Trabalho / Locais</span>
+                      <p className="text-[9.5px] font-bold text-slate-350 line-clamp-2 uppercase">
+                        {stats.uniqueLocals.join(" • ") || "Nenhum local registrado"}
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-950 p-2.5 rounded border border-slate-800 space-y-1">
+                      <span className="text-[8px] font-black text-slate-400 uppercase block">Histórico de Operadores</span>
+                      <p className="text-[9.5px] font-bold text-slate-350 line-clamp-2 uppercase font-mono">
+                        {stats.uniqueOperators.join(", ") || "Nenhum operador registrado"}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 italic">Sem estatísticas disponíveis.</p>
+                )}
+              </div>
+
               {selectedDetail.description && (
                 <div className="bg-slate-50 border rounded-lg p-3">
                   <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Descrição / Observações</p>
