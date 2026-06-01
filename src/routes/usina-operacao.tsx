@@ -1681,41 +1681,6 @@ function UsinaOperacaoPage() {
         </div>
       </div>
  
-      {/* KPI Cards (Compact Row) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-        <Card className="bg-slate-950 text-white border-none shadow-sm">
-          <CardContent className="p-2 px-3 flex items-center justify-between">
-            <div>
-              <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Aderência Geral de Tempo</p>
-              <h3 className="text-base font-black mt-0.5 text-indigo-400">{analytics.overallAdherence}%</h3>
-              <p className="text-[7.5px] font-bold text-slate-400">Calculado minuto a minuto</p>
-            </div>
-            <Activity className="h-5 w-5 text-indigo-500 opacity-30" />
-          </CardContent>
-        </Card>
- 
-        <Card className="bg-white border border-slate-200 shadow-sm">
-          <CardContent className="p-2 px-3 flex items-center justify-between">
-            <div>
-              <p className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Aderência de Equipamentos</p>
-              <h3 className="text-base font-black mt-0.5 text-slate-900">{analytics.activeCount} / {analytics.totalScheduledCount} Ativos</h3>
-              <p className="text-[7.5px] font-bold text-red-650 text-red-650">{analytics.unattendedCount} em corretiva ({analytics.equipmentAdherence}% operacional)</p>
-            </div>
-            <CheckCircle2 className="h-5 w-5 text-emerald-500 opacity-30" />
-          </CardContent>
-        </Card>
- 
-        <Card className="bg-red-50 border border-red-200 shadow-sm">
-          <CardContent className="p-2 px-3 flex items-center justify-between">
-            <div>
-              <p className="text-[8px] font-black uppercase text-red-600 tracking-wider">Previsto vs. Perdido (Tempo Real)</p>
-              <h3 className="text-base font-black mt-0.5 text-red-700">{analytics.totalPlannedHours}h / {analytics.totalBreakdownHours}h</h3>
-              <p className="text-[7.5px] font-bold text-red-600">Perdido minuto a minuto</p>
-            </div>
-            <Clock className="h-5 w-5 text-red-400 opacity-35" />
-          </CardContent>
-        </Card>
-      </div>
 
       <TabsContent value="operacao" className="space-y-3 mt-0">
           {/* Shift Filter Bar */}
