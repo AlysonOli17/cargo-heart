@@ -707,29 +707,6 @@ function PessoasPage() {
                   ))}
                 </datalist>
               </div>
-              <div className="col-span-2">
-                <Label className="text-[10px] font-black uppercase text-slate-600">Período de Férias</Label>
-                <div className="flex gap-2 mt-1">
-                  <div className="flex-1">
-                    <Label className="text-[9px] text-slate-400">Início</Label>
-                    <Input
-                      type="date"
-                      value={pessoaForm.vacation_start}
-                      onChange={e => setPessoaForm(f => ({ ...f, vacation_start: e.target.value }))}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <Label className="text-[9px] text-slate-400">Fim</Label>
-                    <Input
-                      type="date"
-                      value={pessoaForm.vacation_end}
-                      onChange={e => setPessoaForm(f => ({ ...f, vacation_end: e.target.value }))}
-                      className="h-8 text-xs"
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
           <DialogFooter>
