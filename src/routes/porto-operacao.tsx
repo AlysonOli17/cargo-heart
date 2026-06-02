@@ -37,8 +37,8 @@ import {
   Download
 } from "lucide-react";
 import * as XLSX from "xlsx";
-import { jsPDF } from "jspdf";
-import "jspdf-autotable";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS } from "@/lib/equipment";
 import {
@@ -127,6 +127,90 @@ const sanitizeSchedules = (scheds: any[]): any[] => {
     }
     return s;
   });
+};
+
+const SearchableSelect = ({
+  options,
+  value,
+  onChange,
+  placeholder,
+  className
+}: {
+  options: { value: string; label: string; subLabel?: string }[];
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  className?: string;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredOptions = useMemo(() => {
+    if (!search) return options;
+    const lower = search.toLowerCase();
+    return options.filter(opt =>
+      opt.label.toLowerCase().includes(lower) ||
+      (opt.subLabel && opt.subLabel.toLowerCase().includes(lower))
+    );
+  }, [options, search]);
+
+  const selectedOption = options.find(o => o.value === value);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSearch("");
+    }
+  }, [isOpen]);
+
+  return (
+    <div className="relative">
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${className}`}
+      >
+        <span className={selectedOption ? "text-slate-800" : "text-slate-400 font-normal"}>
+          {selectedOption ? selectedOption.label : (placeholder || "Selecione...")}
+        </span>
+        <span className="text-slate-400 select-none">▼</span>
+      </div>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div className="absolute left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md border border-slate-200 bg-white p-1 shadow-lg z-50">
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Digite para filtrar..."
+              className="mb-1 flex h-8 w-full rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              autoFocus
+              onClick={e => e.stopPropagation()}
+            />
+            {filteredOptions.length === 0 ? (
+              <div className="py-2 px-2 text-xs text-slate-400 text-center font-bold">Nenhum resultado encontrado</div>
+            ) : (
+              filteredOptions.map(opt => (
+                <div
+                  key={opt.value}
+                  onClick={() => {
+                    onChange(opt.value);
+                    setIsOpen(false);
+                  }}
+                  className={`cursor-pointer rounded px-2 py-1.5 text-xs font-bold hover:bg-indigo-50 hover:text-indigo-600 flex justify-between ${
+                    opt.value === value ? "bg-indigo-50 text-indigo-600" : "text-slate-800"
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                  {opt.subLabel && <span className="text-[10px] text-slate-400 font-normal">{opt.subLabel}</span>}
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
 };
 
 export const Route = createFileRoute("/porto-operacao")({
@@ -450,6 +534,7 @@ function PortoOperacaoPage() {
   const [editPlate, setEditPlate] = useState("");
   const [editModel, setEditModel] = useState("");
   const [editOperator, setEditOperator] = useState("");
+  const [editOperatorSelectMode, setEditOperatorSelectMode] = useState<"registered" | "custom">("registered");
   const [editValleyStart, setEditValleyStart] = useState("");
   const [editValleyEnd, setEditValleyEnd] = useState("");
   const [editCostCenter, setEditCostCenter] = useState("");
@@ -540,6 +625,11 @@ function PortoOperacaoPage() {
 
   const isPessoaDisponivel = (pessoa: any, dateStr: string): { ok: boolean; motivo: string } => {
     if (pessoa.ativo === false) return { ok: false, motivo: "Inativo" };
+    if ((pessoa.shift || "Dia") === "Adm" && dateStr) {
+      const dateObj = new Date(dateStr + "T12:00:00");
+      const day = dateObj.getDay(); // 0 = Sunday, 6 = Saturday
+      if (day === 0 || day === 6) return { ok: false, motivo: "Fim de Semana" };
+    }
     if (pessoa.vacation_start && pessoa.vacation_end &&
         dateStr >= pessoa.vacation_start && dateStr <= pessoa.vacation_end) {
       return { ok: false, motivo: `Férias até ${new Date(pessoa.vacation_end + "T12:00:00").toLocaleDateString("pt-BR")}` };
@@ -1403,6 +1493,18 @@ function PortoOperacaoPage() {
     return schedules.filter(s => {
       const isDPlus1 = s.scheduled_date === dateDPlus1;
       if (!isDPlus1) return false;
+
+      // Apply shift filter
+      const startMin = timeToMinutes(s.valley_start);
+      if (shiftFilter !== "todos") {
+        if (startMin < 0) return shiftFilter === "dia"; // no start time → treat as day
+        const isDia = startMin >= 6 * 60 && startMin <= 18 * 60;
+        const isNoite = startMin > 18 * 60 && startMin <= 23 * 60 + 59;
+        const isMadrugada = startMin >= 0 && startMin < 6 * 60;
+        if (shiftFilter === "dia" && !isDia) return false;
+        if (shiftFilter === "noite" && !isNoite) return false;
+        if (shiftFilter === "madrugada" && !isMadrugada) return false;
+      }
       
       const term = search.toLowerCase();
       const cleanTerm = term.replace(/[^a-zA-Z0-9]/g, "");
@@ -1435,7 +1537,7 @@ function PortoOperacaoPage() {
 
       return matchSearch;
     }).sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
-  }, [schedules, search, selectedDate]);
+  }, [schedules, search, selectedDate, shiftFilter]);
 
   // Analytics: Adherence & Downtime math
   const analytics = useMemo(() => {
@@ -1874,10 +1976,45 @@ function PortoOperacaoPage() {
       return;
     }
 
-    const doc = new jsPDF();
-    doc.text(`Programação Vale - ${format(getSafeDate(selectedDate), "dd/MM/yyyy")}`, 14, 15);
-    
-    const tableColumn = ["Equipamento", "Local", "Atividade", "Operador", "OS"];
+    const doc = new jsPDF({ orientation: "landscape", format: "a4" });
+    const formattedDate = format(getSafeDate(selectedDate), "dd/MM/yyyy");
+
+    // Header - LOGO BUSATO (Text version stylized)
+    doc.setTextColor(80, 90, 100);
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.text("BUSATO", 14, 18);
+
+    // Header - Title on the right side
+    doc.setTextColor(29, 112, 184); // steel blue
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text(`MEDIÇÃO / PROGRAMAÇÃO VALE — ${formattedDate}`, 283, 18, { align: "right" });
+
+    // Steel blue divider line below header
+    doc.setDrawColor(29, 112, 184);
+    doc.setLineWidth(0.8);
+    doc.line(14, 24, 283, 24);
+
+    // Metadata details card
+    doc.setFillColor(248, 250, 252); // light slate background
+    doc.rect(14, 28, 269, 18, "F");
+    doc.setDrawColor(226, 232, 240); // slate-200 border
+    doc.setLineWidth(0.3);
+    doc.rect(14, 28, 269, 18, "D");
+
+    doc.setTextColor(100, 110, 120);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("Período de Medição / Data:", 18, 35);
+    doc.text("Total de Equipamentos:", 18, 41);
+
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.setFont("helvetica", "normal");
+    doc.text(formattedDate, 70, 35);
+    doc.text(`${targets.length} equipamento(s) programado(s)`, 70, 41);
+
+    const tableColumn = ["Equipamento", "Local", "Atividade", "Operador / Motorista", "OS"];
     const tableRows = targets.map(s => [
       s.equipment || "—",
       s.local || "—",
@@ -1886,12 +2023,36 @@ function PortoOperacaoPage() {
       s.os_number || "—"
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
-      startY: 22,
-      theme: "striped",
-      headStyles: { fillColor: [79, 70, 229] }, // indigo style
+      startY: 52,
+      theme: "grid",
+      headStyles: { 
+        fillColor: [29, 112, 184], // steel blue header
+        textColor: [255, 255, 255], 
+        fontStyle: "bold",
+        fontSize: 10,
+        halign: "left"
+      },
+      styles: { 
+        fontSize: 9, 
+        cellPadding: 4, 
+        valign: "middle" 
+      },
+      columnStyles: {
+        0: { cellWidth: 50 },
+        1: { cellWidth: 50 },
+        2: { cellWidth: 65 },
+        3: { cellWidth: 65 },
+        4: { cellWidth: 39 }
+      },
+      didDrawPage: (data) => {
+        // Simple page number footer
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Página ${data.pageNumber}`, 280, 202, { align: "right" });
+      }
     });
 
     doc.save(`programacao_vale_${selectedDate}.pdf`);
@@ -2020,97 +2181,98 @@ function PortoOperacaoPage() {
           </div>
         )}
       </div>
- 
+
+      {(activeTab === "operacao" || activeTab === "habituais" || activeTab === "vale") && (
+        <div className="flex items-center gap-2 flex-wrap mb-4 bg-slate-50 p-2 border border-slate-200 rounded-xl">
+          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Filtrar Turno:</span>
+          <div className="flex rounded-lg overflow-hidden border border-slate-200 shadow-sm bg-white">
+            <button
+              id="shift-filter-todos"
+              onClick={() => setShiftFilter("todos")}
+              className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
+                shiftFilter === "todos"
+                  ? "bg-slate-800 text-white"
+                  : "bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              Todos
+              <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                shiftFilter === "todos" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+              }`}>
+                {schedules.filter(s => s.scheduled_date === selectedDate).length}
+              </span>
+            </button>
+            <button
+              id="shift-filter-dia"
+              onClick={() => setShiftFilter("dia")}
+              className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
+                shiftFilter === "dia"
+                  ? "bg-amber-500 text-white"
+                  : "bg-white text-amber-700 hover:bg-amber-50"
+              }`}
+            >
+              ☀️ Dia
+              <span className="ml-1 text-[9px] opacity-80">06:00 – 18:00</span>
+              <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                shiftFilter === "dia" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"
+              }`}>
+                {schedules.filter(s => {
+                  if (s.scheduled_date !== selectedDate) return false;
+                  if (!s.valley_start) return true;
+                  const startMin = timeToMinutes(s.valley_start);
+                  return startMin >= 6 * 60 && startMin <= 18 * 60;
+                }).length}
+              </span>
+            </button>
+            <button
+              id="shift-filter-noite"
+              onClick={() => setShiftFilter("noite")}
+              className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
+                shiftFilter === "noite"
+                  ? "bg-indigo-700 text-white"
+                  : "bg-white text-indigo-700 hover:bg-indigo-50"
+              }`}
+            >
+              🌙 Noite
+              <span className="ml-1 text-[9px] opacity-80">18:01 – 23:59</span>
+              <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                shiftFilter === "noite" ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700"
+              }`}>
+                {schedules.filter(s => {
+                  if (s.scheduled_date !== selectedDate) return false;
+                  if (!s.valley_start) return false;
+                  const startMin = timeToMinutes(s.valley_start);
+                  return startMin > 18 * 60 && startMin < 24 * 60;
+                }).length}
+              </span>
+            </button>
+            <button
+              id="shift-filter-madrugada"
+              onClick={() => setShiftFilter("madrugada")}
+              className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
+                shiftFilter === "madrugada"
+                  ? "bg-purple-600 text-white"
+                  : "bg-white text-purple-700 hover:bg-purple-50"
+              }`}
+            >
+              ✨ Madrugada
+              <span className="ml-1 text-[9px] opacity-80">00:00 – 05:59</span>
+              <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                shiftFilter === "madrugada" ? "bg-white/20 text-white" : "bg-purple-100 text-purple-700"
+              }`}>
+                {schedules.filter(s => {
+                  if (s.scheduled_date !== selectedDate) return false;
+                  if (!s.valley_start) return false;
+                  const startMin = timeToMinutes(s.valley_start);
+                  return startMin >= 0 && startMin < 6 * 60;
+                }).length}
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
 
       <TabsContent value="operacao" className="space-y-3 mt-0">
-          {/* Shift Filter Bar */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Filtrar Turno:</span>
-            <div className="flex rounded-lg overflow-hidden border border-slate-200 shadow-sm">
-              <button
-                id="shift-filter-todos"
-                onClick={() => setShiftFilter("todos")}
-                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all ${
-                  shiftFilter === "todos"
-                    ? "bg-slate-800 text-white"
-                    : "bg-white text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                Todos
-                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
-                  shiftFilter === "todos" ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
-                }`}>
-                  {schedules.filter(s => s.scheduled_date === selectedDate).length}
-                </span>
-              </button>
-              <button
-                id="shift-filter-dia"
-                onClick={() => setShiftFilter("dia")}
-                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
-                  shiftFilter === "dia"
-                    ? "bg-amber-500 text-white"
-                    : "bg-white text-amber-700 hover:bg-amber-50"
-                }`}
-              >
-                ☀️ Dia
-                <span className="ml-1 text-[9px] opacity-80">06:00 – 18:00</span>
-                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
-                  shiftFilter === "dia" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"
-                }`}>
-                  {schedules.filter(s => {
-                    if (s.scheduled_date !== selectedDate) return false;
-                    if (!s.valley_start) return true;
-                    const startMin = timeToMinutes(s.valley_start);
-                    return startMin >= 6 * 60 && startMin <= 18 * 60;
-                  }).length}
-                </span>
-              </button>
-              <button
-                id="shift-filter-noite"
-                onClick={() => setShiftFilter("noite")}
-                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
-                  shiftFilter === "noite"
-                    ? "bg-indigo-700 text-white"
-                    : "bg-white text-indigo-700 hover:bg-indigo-50"
-                }`}
-              >
-                🌙 Noite
-                <span className="ml-1 text-[9px] opacity-80">18:01 – 23:59</span>
-                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
-                  shiftFilter === "noite" ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700"
-                }`}>
-                  {schedules.filter(s => {
-                    if (s.scheduled_date !== selectedDate) return false;
-                    if (!s.valley_start) return false;
-                    const startMin = timeToMinutes(s.valley_start);
-                    return startMin > 18 * 60 && startMin < 24 * 60;
-                  }).length}
-                </span>
-              </button>
-              <button
-                id="shift-filter-madrugada"
-                onClick={() => setShiftFilter("madrugada")}
-                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
-                  shiftFilter === "madrugada"
-                    ? "bg-purple-600 text-white"
-                    : "bg-white text-purple-700 hover:bg-purple-50"
-                }`}
-              >
-                ✨ Madrugada
-                <span className="ml-1 text-[9px] opacity-80">00:00 – 05:59</span>
-                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
-                  shiftFilter === "madrugada" ? "bg-white/20 text-white" : "bg-purple-100 text-purple-700"
-                }`}>
-                  {schedules.filter(s => {
-                    if (s.scheduled_date !== selectedDate) return false;
-                    if (!s.valley_start) return false;
-                    const startMin = timeToMinutes(s.valley_start);
-                    return startMin >= 0 && startMin < 6 * 60;
-                  }).length}
-                </span>
-              </button>
-            </div>
-          </div>
 
           {/* Active Grid Table view */}
           {conflictedSchedules.length > 0 && (
@@ -2359,6 +2521,12 @@ function PortoOperacaoPage() {
                                   setEditPlate(s.plate || "");
                                   setEditModel(s.model || "");
                                   setEditOperator(s.operator || "");
+                                  const hasMatchingPerson = people.some(p => p.name === s.operator);
+                                  if (!s.operator || hasMatchingPerson) {
+                                    setEditOperatorSelectMode("registered");
+                                  } else {
+                                    setEditOperatorSelectMode("custom");
+                                  }
                                   setEditValleyStart(s.valley_start || "");
                                   setEditValleyEnd(s.valley_end || "");
                                   setEditCostCenter(s.cost_center || "");
@@ -2808,6 +2976,12 @@ function PortoOperacaoPage() {
                                   setEditPlate(s.plate || "");
                                   setEditModel(s.model || "");
                                   setEditOperator(s.operator || "");
+                                  const hasMatchingPerson = people.some(p => p.name === s.operator);
+                                  if (!s.operator || hasMatchingPerson) {
+                                    setEditOperatorSelectMode("registered");
+                                  } else {
+                                    setEditOperatorSelectMode("custom");
+                                  }
                                   setEditValleyStart(s.valley_start || "");
                                   setEditValleyEnd(s.valley_end || "");
                                   setEditCostCenter(s.cost_center || "");
@@ -3914,33 +4088,35 @@ function PortoOperacaoPage() {
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase">Dia da Semana (Programação)</Label>
-              <select 
-                value={editScheduledDate} 
-                onChange={e => setEditScheduledDate(e.target.value)}
-                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 capitalize"
-              >
-                <option value="2000-01-02">Domingo</option>
-                <option value="2000-01-03">Segunda-feira</option>
-                <option value="2000-01-04">Terça-feira</option>
-                <option value="2000-01-05">Quarta-feira</option>
-                <option value="2000-01-06">Quinta-feira</option>
-                <option value="2000-01-07">Sexta-feira</option>
-                <option value="2000-01-08">Sábado</option>
-                {/* Allow editing actual dates for non-template schedules if needed, but display nicely */}
-                {editScheduledDate && !["2000-01-02", "2000-01-03", "2000-01-04", "2000-01-05", "2000-01-06", "2000-01-07", "2000-01-08"].includes(editScheduledDate) && (
-                  <option value={editScheduledDate}>
-                    {format(getSafeDate(editScheduledDate), "dd/MM/yyyy (EEEE)", { locale: ptBR })}
-                  </option>
-                )}
-              </select>
+              <div className="flex h-10 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500 items-center capitalize">
+                {editScheduledDate ? (
+                  ["2000-01-02", "2000-01-03", "2000-01-04", "2000-01-05", "2000-01-06", "2000-01-07", "2000-01-08"].includes(editScheduledDate) ? (
+                    editScheduledDate === "2000-01-02" ? "Domingo" :
+                    editScheduledDate === "2000-01-03" ? "Segunda-feira" :
+                    editScheduledDate === "2000-01-04" ? "Terça-feira" :
+                    editScheduledDate === "2000-01-05" ? "Quarta-feira" :
+                    editScheduledDate === "2000-01-06" ? "Quinta-feira" :
+                    editScheduledDate === "2000-01-07" ? "Sexta-feira" : "Sábado"
+                  ) : (
+                    format(getSafeDate(editScheduledDate), "dd/MM/yyyy (EEEE)", { locale: ptBR })
+                  )
+                ) : ""}
+              </div>
             </div>
 
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase">Equipamento Cadastrado</Label>
-              <select 
-                value={editEquipmentId} 
-                onChange={e => {
-                  const val = e.target.value;
+              <SearchableSelect
+                options={[
+                  { value: "custom", label: "-- Digitar Equipamento Avulso --" },
+                  ...equipments.map(eq => ({
+                    value: eq.id,
+                    label: eq.identifier + (eq.plate ? ` (${eq.plate})` : ""),
+                    subLabel: eq.model || ""
+                  }))
+                ]}
+                value={editEquipmentId}
+                onChange={val => {
                   setEditEquipmentId(val);
                   if (val !== "custom") {
                     const eq = equipments.find(item => item.id === val);
@@ -3951,15 +4127,8 @@ function PortoOperacaoPage() {
                     }
                   }
                 }}
-                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="custom">-- Digitar Equipamento Avulso --</option>
-                {equipments.map(eq => (
-                  <option key={eq.id} value={eq.id}>
-                    {eq.identifier} {eq.plate ? `(${eq.plate})` : ""}
-                  </option>
-                ))}
-              </select>
+                placeholder="Pesquisar Equipamento..."
+              />
               {(() => {
                 const warn = getEquipmentWarning(editEquipmentName, editPlate);
                 if (warn) {
@@ -4067,11 +4236,61 @@ function PortoOperacaoPage() {
 
             <div className="space-y-1">
               <Label className="text-[10px] font-black uppercase">Operador / Motorista</Label>
-              <Input 
-                value={editOperator} 
-                onChange={e => setEditOperator(e.target.value)} 
-                className="font-bold text-xs"
-              />
+              {editOperatorSelectMode === "registered" ? (
+                <div className="space-y-1">
+                  <SearchableSelect
+                    options={[
+                      { value: "", label: "-- Limpar / Sem Operador --" },
+                      { value: "custom", label: "-- Digitar Operador Avulso --" },
+                      ...people.map(p => {
+                        const onVacation = p.vacation_start && p.vacation_end && editScheduledDate >= p.vacation_start && editScheduledDate <= p.vacation_end;
+                        const isUnavail = (p.unavailability || []).includes(editScheduledDate);
+                        let sub = "";
+                        if (onVacation) sub = "Férias";
+                        else if (isUnavail) sub = "Indisp.";
+                        return {
+                          value: p.name,
+                          label: p.name,
+                          subLabel: sub
+                        };
+                      })
+                    ]}
+                    value={editOperator}
+                    onChange={val => {
+                      if (val === "custom") {
+                        setEditOperatorSelectMode("custom");
+                        setEditOperator("");
+                      } else {
+                        setEditOperator(val);
+                      }
+                    }}
+                    placeholder="Pesquisar Operador..."
+                  />
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="flex gap-2">
+                    <Input 
+                      value={editOperator} 
+                      onChange={e => setEditOperator(e.target.value)} 
+                      className="font-bold text-xs flex-1"
+                      placeholder="Ex: Alyson Oliveira"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditOperatorSelectMode("registered");
+                        setEditOperator("");
+                      }}
+                      className="text-[10px] font-bold shrink-0 h-10 px-2"
+                    >
+                      Selecionar da Lista
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>
