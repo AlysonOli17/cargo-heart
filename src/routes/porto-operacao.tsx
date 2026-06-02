@@ -37,6 +37,8 @@ import {
   Download
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import "jspdf-autotable";
 import { useAuth } from "@/hooks/use-auth";
 import { STATUS_LABELS } from "@/lib/equipment";
 import {
@@ -364,6 +366,7 @@ function PortoOperacaoPage() {
   
   const [selectedOperacaoIds, setSelectedOperacaoIds] = useState<Set<string>>(new Set());
   const [selectedHabituaisIds, setSelectedHabituaisIds] = useState<Set<string>>(new Set());
+  const [selectedValeIds, setSelectedValeIds] = useState<Set<string>>(new Set());
 
   // Estado para Relatório Executivo
   const [execDialogOpen, setExecDialogOpen] = useState(false);
@@ -1837,6 +1840,64 @@ function PortoOperacaoPage() {
     };
   }, [schedules, correctiveLogs, reportDateMode, reportSingleDate, reportStartDate, reportEndDate, reportMonth, reportYear, timeTick]);
 
+  const handleSelectTpmRows = () => {
+    const tpmIds = new Set<string>();
+    habitualSchedules.forEach(s => {
+      const textToSearch = [
+        s.equipment,
+        s.local,
+        s.activity,
+        s.operator,
+        s.os_number
+      ].map(v => (v || "").toLowerCase()).join(" ");
+
+      if (textToSearch.includes("tpm")) {
+        tpmIds.add(s.id);
+      }
+    });
+    
+    setSelectedValeIds(tpmIds);
+    if (tpmIds.size > 0) {
+      toast.success(`${tpmIds.size} linha(s) com 'TPM' selecionada(s).`);
+    } else {
+      toast.info("Nenhuma linha contendo 'TPM' foi encontrada.");
+    }
+  };
+
+  const handleExportValePdf = () => {
+    const targets = selectedValeIds.size > 0 
+      ? habitualSchedules.filter(s => selectedValeIds.has(s.id))
+      : habitualSchedules;
+
+    if (targets.length === 0) {
+      toast.error("Nenhuma programação para exportar.");
+      return;
+    }
+
+    const doc = new jsPDF();
+    doc.text(`Programação Vale - ${format(getSafeDate(selectedDate), "dd/MM/yyyy")}`, 14, 15);
+    
+    const tableColumn = ["Equipamento", "Local", "Atividade", "Operador", "OS"];
+    const tableRows = targets.map(s => [
+      s.equipment || "—",
+      s.local || "—",
+      s.activity || "—",
+      s.operator || "—",
+      s.os_number || "—"
+    ]);
+
+    (doc as any).autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      startY: 22,
+      theme: "striped",
+      headStyles: { fillColor: [79, 70, 229] }, // indigo style
+    });
+
+    doc.save(`programacao_vale_${selectedDate}.pdf`);
+    toast.success("PDF exportado com sucesso!");
+  };
+
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
       {/* Tabs and Date picker row at the very top of the page */}
@@ -2810,8 +2871,8 @@ function PortoOperacaoPage() {
                 <h2 className="font-black text-slate-800 text-xs uppercase tracking-wider">Programação Vale</h2>
                 <p className="text-[9px] text-muted-foreground uppercase font-bold mt-0.5">Visualização simplificada das colunas da Vale</p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="relative w-full max-w-xs">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative w-full max-w-xs sm:w-auto">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                   <Input 
                     placeholder="Buscar..." 
@@ -2820,6 +2881,23 @@ function PortoOperacaoPage() {
                     className="pl-8 h-8 text-xs font-medium w-48"
                   />
                 </div>
+
+                <Button
+                  variant="outline"
+                  onClick={handleSelectTpmRows}
+                  className="h-8 border-rose-200 text-rose-700 hover:bg-rose-50 font-bold text-xs uppercase px-3"
+                  title="Selecionar todas as linhas que contenham a palavra TPM"
+                >
+                  Selecionar TPM
+                </Button>
+
+                <Button
+                  onClick={handleExportValePdf}
+                  className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase px-3"
+                  title="Exportar registros selecionados ou todos em PDF"
+                >
+                  Exportar PDF ({selectedValeIds.size > 0 ? selectedValeIds.size : "Todos"})
+                </Button>
               </div>
             </div>
 
@@ -2827,6 +2905,21 @@ function PortoOperacaoPage() {
               <Table className="min-w-[600px] w-full text-[10.5px] [&_td]:py-2 [&_td]:px-3 [&_th]:py-2 [&_th]:px-3">
                 <TableHeader className="bg-slate-100/50">
                   <TableRow className="text-[10px] uppercase font-black tracking-wider text-slate-600">
+                    <TableHead className="w-8">
+                      <input
+                        type="checkbox"
+                        className="accent-indigo-600 w-3.5 h-3.5 cursor-pointer"
+                        checked={habitualSchedules.length > 0 && habitualSchedules.every(s => selectedValeIds.has(s.id))}
+                        onChange={e => {
+                          if (e.target.checked) {
+                            setSelectedValeIds(new Set(habitualSchedules.map(s => s.id)));
+                          } else {
+                            setSelectedValeIds(new Set());
+                          }
+                        }}
+                        title="Selecionar todos"
+                      />
+                    </TableHead>
                     <TableHead>Equipamento</TableHead>
                     <TableHead>Local</TableHead>
                     <TableHead>Atividade</TableHead>
@@ -2837,18 +2930,41 @@ function PortoOperacaoPage() {
                 <TableBody className="divide-y divide-slate-100 text-[10.5px] font-bold text-slate-900">
                   {habitualSchedules.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-slate-400 italic font-black">Nenhuma programação importada para este dia.</TableCell>
+                      <TableCell colSpan={6} className="text-center py-8 text-slate-400 italic font-black">Nenhuma programação importada para este dia.</TableCell>
                     </TableRow>
                   ) : (
-                    habitualSchedules.map(s => (
-                      <TableRow key={s.id} className="hover:bg-slate-50/50">
-                        <TableCell className="font-mono text-slate-700">{s.equipment || "—"}</TableCell>
-                        <TableCell className="text-indigo-800 uppercase">{s.local || "—"}</TableCell>
-                        <TableCell className="text-slate-500 font-medium">{s.activity || "—"}</TableCell>
-                        <TableCell className="text-slate-800 uppercase">{s.operator || "—"}</TableCell>
-                        <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
-                      </TableRow>
-                    ))
+                    habitualSchedules.map(s => {
+                      const isChecked = selectedValeIds.has(s.id);
+                      return (
+                        <TableRow 
+                          key={s.id} 
+                          className={`hover:bg-slate-50/50 cursor-pointer ${isChecked ? "bg-indigo-50/30" : ""}`}
+                          onClick={() => {
+                            const next = new Set(selectedValeIds);
+                            if (isChecked) next.delete(s.id); else next.add(s.id);
+                            setSelectedValeIds(next);
+                          }}
+                        >
+                          <TableCell className="w-8" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className="accent-indigo-600 w-3.5 h-3.5 cursor-pointer"
+                              checked={isChecked}
+                              onChange={e => {
+                                const next = new Set(selectedValeIds);
+                                if (e.target.checked) next.add(s.id); else next.delete(s.id);
+                                setSelectedValeIds(next);
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell className="font-mono text-slate-700">{s.equipment || "—"}</TableCell>
+                          <TableCell className="text-indigo-800 uppercase">{s.local || "—"}</TableCell>
+                          <TableCell className="text-slate-500 font-medium">{s.activity || "—"}</TableCell>
+                          <TableCell className="text-slate-800 uppercase">{s.operator || "—"}</TableCell>
+                          <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
+                        </TableRow>
+                      );
+                    })
                   )}
                 </TableBody>
               </Table>
