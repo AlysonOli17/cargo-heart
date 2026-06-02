@@ -4,7 +4,7 @@ import { useRole } from "@/hooks/use-role";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Globe, Calendar, HardDrive, Wrench, FileText, CalendarDays, Clock, Shield, LogOut, Menu, ChevronLeft, ChevronRight, Truck, CheckCircle2 } from "lucide-react";
+import { Globe, Calendar, HardDrive, Wrench, FileText, CalendarDays, Clock, Shield, LogOut, Menu, ChevronLeft, ChevronRight, Truck, CheckCircle2, User } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { MaintenanceGovernanceAlert } from "./MaintenanceGovernanceAlert";
@@ -20,6 +20,7 @@ const baseNav = [
   { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
   { to: "/manutencao", label: "CCM Manutenção", icon: FileText },
   { to: "/fidelizacao", label: "Fidelização", icon: CalendarDays },
+  { to: "/pessoas", label: "Pessoas", icon: User },
   { to: "/historico", label: "Histórico", icon: Clock },
 ];
 

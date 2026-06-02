@@ -106,6 +106,16 @@ const tzOffset = () => {
   return `${dif}${pad(tzo / 60)}:${pad(tzo % 60)}`;
 };
 
+const getSafeDate = (dateStr: string | null | undefined, fallback: Date = new Date()): Date => {
+  if (!dateStr) return fallback;
+  const cleanStr = dateStr.includes("T") ? dateStr : `${dateStr}T12:00:00`;
+  const parsed = new Date(cleanStr);
+  if (isNaN(parsed.getTime())) {
+    return fallback;
+  }
+  return parsed;
+};
+
 export const Route = createFileRoute("/usina-operacao")({
   head: () => ({ meta: [{ title: "Operação Usina — Frota Busato" }] }),
   component: () => <AppLayout><UsinaOperacaoPage /></AppLayout>,
@@ -176,7 +186,7 @@ const getRowTargetDate = (row: any, baseSelectedDate: string) => {
     }
 
     // Check if it's a numeric day-of-month matching the selected week
-    const sundayDate = startOfWeek(new Date(baseSelectedDate + "T12:00:00"), { weekStartsOn: 0 });
+    const sundayDate = startOfWeek(getSafeDate(baseSelectedDate), { weekStartsOn: 0 });
     const digits = searchStr.match(/\d+/g);
     if (digits && digits.length >= 1) {
       const dayVal = parseInt(digits[0], 10);
@@ -190,7 +200,7 @@ const getRowTargetDate = (row: any, baseSelectedDate: string) => {
   }
 
   // No day column found — use the selectedDate's day of week as the template date
-  const selectedDayOfWeek = new Date(baseSelectedDate + "T12:00:00").getDay();
+  const selectedDayOfWeek = getSafeDate(baseSelectedDate).getDay();
   return format(addDays(templateBaseDate, selectedDayOfWeek), "yyyy-MM-dd");
 };
 
@@ -247,9 +257,10 @@ function UsinaOperacaoPage() {
   const [programming, setProgramming] = useState<any[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; identifier: string; plate?: string | null; model?: string | null; status?: string | null }[]>([]);
   const [search, setSearch] = useState("");
-  const [shiftFilter, setShiftFilter] = useState<"todos" | "dia" | "noite">("todos");
+  const [shiftFilter, setShiftFilter] = useState<"todos" | "dia" | "noite" | "madrugada">("todos");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [activeTab, setActiveTab] = useState("operacao");
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -358,7 +369,7 @@ function UsinaOperacaoPage() {
     }
 
     // 2. Check for scheduling conflicts (planned stops/maintenance scheduled for today)
-    const weekdayName = format(new Date(selectedDate + "T12:00:00"), "EEEE", { locale: ptBR });
+    const weekdayName = format(getSafeDate(selectedDate), "EEEE", { locale: ptBR });
     const weekdayClean = weekdayName.split("-")[0].trim().toLowerCase();
 
     const stopRecord = programming.find(p => {
@@ -425,7 +436,7 @@ function UsinaOperacaoPage() {
 
     // 2. Carrega as escalas e corretivas da Usina
     try {
-      let schedsQuery = supabase.from("usina_daily_schedules").select("*");
+      let schedsQuery = (supabase as any).from("usina_daily_schedules").select("*");
       if (dateFilterMode === "single") {
         schedsQuery = schedsQuery.or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
       } else if (dateFilterMode === "range") {
@@ -440,25 +451,25 @@ function UsinaOperacaoPage() {
       let { data: scheds, error: e1 } = await schedsQuery;
       if (e1) throw e1;
       
-      const { data: logs, error: e2 } = await supabase.from("usina_corrective_logs").select("*");
+      const { data: logs, error: e2 } = await (supabase as any).from("usina_corrective_logs").select("*");
       if (e2) throw e2;
 
-      const { data: progs, error: eProg } = await supabase.from("programming").select("*").eq("is_completed", false);
+      const { data: progs, error: eProg } = await (supabase as any).from("programming").select("*").eq("is_completed", false);
       if (eProg) throw eProg;
       setProgramming(progs ?? []);
       localStorage.setItem("local_programming", JSON.stringify(progs ?? []));
 
       // Check if we have daily schedules for selectedDate
-      const dayScheds = (scheds ?? []).filter(s => s.scheduled_date === selectedDate);
+      const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
       if (dayScheds.length === 0 && dateFilterMode === "single") {
         // Find templates for this weekday
-        const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
+        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
         const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
-        const templatesForDay = (scheds ?? []).filter(s => s.scheduled_date === templateDateStr);
+        const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
 
         if (templatesForDay.length > 0) {
           // Clone templates to selectedDate
-          const clones = templatesForDay.map(t => ({
+          const clones = templatesForDay.map((t: any) => ({
             scheduled_date: selectedDate,
             equipment: t.equipment,
             plate: t.plate,
@@ -478,7 +489,7 @@ function UsinaOperacaoPage() {
             owner_id: user?.id
           }));
 
-          const { data: inserted, error: eInsert } = await supabase
+          const { data: inserted, error: eInsert } = await (supabase as any)
             .from("usina_daily_schedules")
             .insert(clones)
             .select();
@@ -492,10 +503,9 @@ function UsinaOperacaoPage() {
       setSchedules((scheds ?? []) as UsinaSchedule[]);
       setCorrectiveLogs((logs ?? []) as CorrectiveLog[]);
 
-      // Update local storage cache for the selected date, keeping other dates intact
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
-      const otherDatesScheds = localScheds.filter((s: any) => s.scheduled_date !== selectedDate);
-      const merged = [...otherDatesScheds, ...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate)];
+      const nonMatchingScheds = localScheds.filter((s: any) => !matchesDateFilter(s.scheduled_date));
+      const merged = [...nonMatchingScheds, ...(scheds ?? [])];
       localStorage.setItem("local_usina_schedules", JSON.stringify(merged));
     } catch (err) {
       // Fallback localStorage para escalas e corretivas
@@ -509,7 +519,7 @@ function UsinaOperacaoPage() {
       let mergedScheds = [...localScheds];
 
       if (dayScheds.length === 0 && dateFilterMode === "single") {
-        const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
+        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
         const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
         const templatesForDay = localScheds.filter((s: any) => s.scheduled_date === templateDateStr);
 
@@ -829,7 +839,7 @@ function UsinaOperacaoPage() {
 
       // Check if we need to split the night shift (contains / in OS and is night shift)
       if (isNightShift && rawOS.includes("/")) {
-        const osParts = rawOS.split("/").map(o => o.trim());
+        const osParts = rawOS.split("/").map((o: string) => o.trim());
         const os1 = osParts[0];
         const os2 = osParts[1] || osParts[0];
         const nextDayDate = format(addDays(rowDateObj, 1), "yyyy-MM-dd");
@@ -905,7 +915,7 @@ function UsinaOperacaoPage() {
 
     for (const payload of finalPayloads) {
       try {
-        const { error } = await supabase.from("usina_daily_schedules").insert(payload);
+        const { error } = await supabase.from("usina_daily_schedules" as any).insert(payload);
         if (error) throw error;
         count++;
       } catch (err) {
@@ -947,7 +957,7 @@ function UsinaOperacaoPage() {
     };
 
     try {
-      const { error } = await supabase.from("usina_corrective_logs").insert(payload);
+      const { error } = await supabase.from("usina_corrective_logs" as any).insert(payload);
       if (error) throw error;
       toast.success("Parada corretiva registrada!");
     } catch (err) {
@@ -969,7 +979,7 @@ function UsinaOperacaoPage() {
     const stop_end = `${todayStr}T${endTime}:00${tzOffset()}`;
 
     try {
-      const { error } = await supabase.from("usina_corrective_logs").update({ stop_end }).eq("id", logId);
+      const { error } = await supabase.from("usina_corrective_logs" as any).update({ stop_end }).eq("id", logId);
       if (error) throw error;
       toast.success("Parada finalizada.");
       loadData();
@@ -1013,7 +1023,7 @@ function UsinaOperacaoPage() {
     };
 
     try {
-      const { error } = await supabase.from("usina_corrective_logs").update(payload).eq("id", editingStopLog.id);
+      const { error } = await supabase.from("usina_corrective_logs" as any).update(payload).eq("id", editingStopLog.id);
       if (error) throw error;
       toast.success("Parada corretiva atualizada!");
       loadData();
@@ -1031,7 +1041,7 @@ function UsinaOperacaoPage() {
 
   const handleDeleteStop = async (logId: string) => {
     try {
-      const { error } = await supabase.from("usina_corrective_logs").delete().eq("id", logId);
+      const { error } = await supabase.from("usina_corrective_logs" as any).delete().eq("id", logId);
       if (error) throw error;
       toast.success("Parada corretiva excluída!");
       loadData();
@@ -1045,18 +1055,19 @@ function UsinaOperacaoPage() {
   };
 
   const handleDeleteSchedule = async (id: string) => {
+    const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
+    const filtered = localScheds.filter((s: any) => s.id !== id);
+    localStorage.setItem("local_usina_schedules", JSON.stringify(filtered));
+
     try {
-      const { error } = await supabase.from("usina_daily_schedules").delete().eq("id", id);
+      const { error } = await supabase.from("usina_daily_schedules" as any).delete().eq("id", id);
       if (error) throw error;
       toast.success("Escala deletada");
-      loadData();
     } catch (err) {
-      const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
-      const filtered = localScheds.filter((s: any) => s.id !== id);
-      localStorage.setItem("local_usina_schedules", JSON.stringify(filtered));
+      console.warn("Supabase delete failed, local only:", err);
       toast.success("Deletado localmente");
-      loadData();
     }
+    loadData();
   };
 
   const handleBulkDelete = async (ids: Set<string>, clearFn: () => void) => {
@@ -1065,16 +1076,16 @@ function UsinaOperacaoPage() {
     if (!confirmed) return;
 
     const idsArr = Array.from(ids);
-    let deletedCount = 0;
+    const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
+    const filtered = localScheds.filter((s: any) => !ids.has(s.id));
+    localStorage.setItem("local_usina_schedules", JSON.stringify(filtered));
+    const deletedCount = idsArr.length;
+
     try {
-      const { error } = await supabase.from("usina_daily_schedules").delete().in("id", idsArr);
+      const { error } = await supabase.from("usina_daily_schedules" as any).delete().in("id", idsArr);
       if (error) throw error;
-      deletedCount = idsArr.length;
     } catch (err) {
-      const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
-      const filtered = localScheds.filter((s: any) => !ids.has(s.id));
-      localStorage.setItem("local_usina_schedules", JSON.stringify(filtered));
-      deletedCount = idsArr.length;
+      console.warn("Supabase bulk delete failed, local only:", err);
     }
     toast.success(`${deletedCount} registro(s) apagado(s).`);
     clearFn();
@@ -1101,7 +1112,7 @@ function UsinaOperacaoPage() {
     };
 
     try {
-      const { error } = await supabase.from("usina_daily_schedules").update(payload).eq("id", editingSchedule.id);
+      const { error } = await supabase.from("usina_daily_schedules" as any).update(payload).eq("id", editingSchedule.id);
       if (error) throw error;
       toast.success("Programação atualizada com sucesso!");
     } catch (err) {
@@ -1133,6 +1144,14 @@ function UsinaOperacaoPage() {
       const schedDateParsed = new Date(s.scheduled_date + "T12:00:00");
       const weekdayStr = format(schedDateParsed, "EEEE", { locale: ptBR }).toLowerCase();
 
+      // Check if any associated corrective stop matches search term
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      const matchCorretiva = stops.some(st => 
+        (st.reason || "").toLowerCase().includes(term) || 
+        (st.notes || "").toLowerCase().includes(term) ||
+        parseCorrectiveReason(st.reason).type.toLowerCase().includes(term)
+      );
+
       const matchSearch = 
         (s.equipment || "").toLowerCase().includes(term) ||
         (cleanTerm && (s.equipment || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase().includes(cleanTerm)) ||
@@ -1146,18 +1165,21 @@ function UsinaOperacaoPage() {
         (s.activity || "").toLowerCase().includes(term) ||
         (s.operator || "").toLowerCase().includes(term) ||
         (s.os_number || "").toLowerCase().includes(term) ||
+        matchCorretiva ||
         weekdayStr.includes(term);
 
       if (!matchSearch) return false;
 
-      // Shift filter: Dia = 06:00–18:00, Noite = 18:01–05:59
+      // Shift filter: Dia = 06:00–18:00, Noite = 18:01–23:59, Madrugada = 00:00–05:59
       if (shiftFilter !== "todos") {
         const startMin = timeToMinutes(s.valley_start);
         if (startMin < 0) return shiftFilter === "dia"; // no start time → treat as day
-        const isDia = startMin >= 6 * 60 && startMin < 18 * 60;   // 06:00 ≤ t < 18:00
-        const isNoite = startMin >= 18 * 60 || startMin < 6 * 60;  // 18:00+ or 00:00-05:59
+        const isDia = startMin >= 6 * 60 && startMin <= 18 * 60;
+        const isNoite = startMin > 18 * 60 && startMin < 24 * 60;
+        const isMadrugada = startMin >= 0 && startMin < 6 * 60;
         if (shiftFilter === "dia" && !isDia) return false;
         if (shiftFilter === "noite" && !isNoite) return false;
+        if (shiftFilter === "madrugada" && !isMadrugada) return false;
       }
 
       return true;
@@ -1188,7 +1210,7 @@ function UsinaOperacaoPage() {
     }
 
     return result;
-  }, [schedules, selectedDate, dateFilterMode, startDate, endDate, selectedMonth, selectedYear, search, shiftFilter, sortColumn, sortDirection]);
+  }, [schedules, selectedDate, dateFilterMode, startDate, endDate, selectedMonth, selectedYear, search, shiftFilter, sortColumn, sortDirection, correctiveLogs]);
 
   // Find all schedules with active conflicts for the warning banner
   const conflictedSchedules = useMemo(() => {
@@ -1209,6 +1231,14 @@ function UsinaOperacaoPage() {
       const schedDateParsed = new Date(s.scheduled_date + "T12:00:00");
       const weekdayStr = format(schedDateParsed, "EEEE", { locale: ptBR }).toLowerCase();
 
+      // Check if any associated corrective stop matches search term
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      const matchCorretiva = stops.some(st => 
+        (st.reason || "").toLowerCase().includes(term) || 
+        (st.notes || "").toLowerCase().includes(term) ||
+        parseCorrectiveReason(st.reason).type.toLowerCase().includes(term)
+      );
+
       const matchSearch = 
         (s.equipment || "").toLowerCase().includes(term) ||
         (cleanTerm && (s.equipment || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase().includes(cleanTerm)) ||
@@ -1222,11 +1252,12 @@ function UsinaOperacaoPage() {
         (s.activity || "").toLowerCase().includes(term) ||
         (s.operator || "").toLowerCase().includes(term) ||
         (s.os_number || "").toLowerCase().includes(term) ||
+        matchCorretiva ||
         weekdayStr.includes(term);
 
       return matchSearch;
     }).sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
-  }, [schedules, search]);
+  }, [schedules, search, correctiveLogs]);
 
   // Analytics: Adherence & Downtime math
   const analytics = useMemo(() => {
@@ -1564,121 +1595,128 @@ function UsinaOperacaoPage() {
   }, [schedules, correctiveLogs, reportDateMode, reportSingleDate, reportStartDate, reportEndDate, reportMonth, reportYear, timeTick]);
 
   return (
-    <Tabs defaultValue="operacao" className="w-full space-y-4">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
       {/* Tabs and Date picker row at the very top of the page */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
         <div className="flex justify-start">
-          <TabsList className="bg-slate-100 p-1 rounded-xl">
-            <TabsTrigger value="operacao" className="font-bold text-xs uppercase px-4 py-2">
-              <Activity className="h-4 w-4 mr-2 text-indigo-600" />
-              Operação Diária
-            </TabsTrigger>
-            <TabsTrigger value="habituais" className="font-bold text-xs uppercase px-4 py-2">
-              <Clock className="h-4 w-4 mr-2 text-indigo-600" />
-              Demandas Habituais
-            </TabsTrigger>
-            <TabsTrigger value="aderencia" className="font-bold text-xs uppercase px-4 py-2">
-              <Activity className="h-4 w-4 mr-2 text-indigo-600" />
+          <TabsList className="bg-slate-100 p-1 rounded-xl flex flex-wrap gap-1 items-center">
+            <div className="flex bg-slate-200/50 p-0.5 rounded-lg border border-slate-300/30 gap-0.5">
+              <TabsTrigger value="operacao" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+                <Activity className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+                Operação Diária
+              </TabsTrigger>
+              <TabsTrigger value="habituais" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+                <Clock className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+                Demanda D+1
+              </TabsTrigger>
+              <TabsTrigger value="corretivas" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+                <Wrench className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+                Corretivas
+              </TabsTrigger>
+            </div>
+            
+            <div className="w-[1px] h-5 bg-slate-300 mx-0.5 hidden sm:block" />
+
+            <TabsTrigger value="aderencia" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+              <Activity className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
               Aderência & Indicadores
-            </TabsTrigger>
-            <TabsTrigger value="corretivas" className="font-bold text-xs uppercase px-4 py-2">
-              <Wrench className="h-4 w-4 mr-2 text-indigo-600" />
-              Corretivas
             </TabsTrigger>
           </TabsList>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Filtrar Data:</span>
-          
-          <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 shadow-sm">
-            <button
-              onClick={() => setDateFilterMode("single")}
-              className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
-                dateFilterMode === "single" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Dia
-            </button>
-            <button
-              onClick={() => setDateFilterMode("range")}
-              className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
-                dateFilterMode === "range" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Período
-            </button>
-            <button
-              onClick={() => setDateFilterMode("month")}
-              className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
-                dateFilterMode === "month" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              Mês/Ano
-            </button>
+        {(activeTab === "operacao" || activeTab === "habituais" || activeTab === "corretivas") && (
+          <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Filtrar Data:</span>
+            
+            <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 shadow-sm">
+              <button
+                onClick={() => setDateFilterMode("single")}
+                className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                  dateFilterMode === "single" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Dia
+              </button>
+              <button
+                onClick={() => setDateFilterMode("range")}
+                className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                  dateFilterMode === "range" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Período
+              </button>
+              <button
+                onClick={() => setDateFilterMode("month")}
+                className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                  dateFilterMode === "month" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Mês/Ano
+              </button>
+            </div>
+
+            {dateFilterMode === "single" && (
+              <Input 
+                type="date" 
+                value={selectedDate} 
+                onChange={(e) => setSelectedDate(e.target.value)} 
+                className="w-36 h-8 text-xs font-bold bg-white" 
+              />
+            )}
+
+            {dateFilterMode === "range" && (
+              <div className="flex items-center gap-1">
+                <Input 
+                  type="date" 
+                  value={startDate} 
+                  onChange={(e) => setStartDate(e.target.value)} 
+                  className="w-32 h-8 text-xs font-bold bg-white" 
+                />
+                <span className="text-[9px] font-bold text-slate-400">a</span>
+                <Input 
+                  type="date" 
+                  value={endDate} 
+                  onChange={(e) => setEndDate(e.target.value)} 
+                  className="w-32 h-8 text-xs font-bold bg-white" 
+                />
+              </div>
+            )}
+
+            {dateFilterMode === "month" && (
+              <div className="flex items-center gap-1">
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold px-2 py-1 text-slate-800"
+                >
+                  <option value="01">Janeiro</option>
+                  <option value="02">Fevereiro</option>
+                  <option value="03">Março</option>
+                  <option value="04">Abril</option>
+                  <option value="05">Maio</option>
+                  <option value="06">Junho</option>
+                  <option value="07">Julho</option>
+                  <option value="08">Agosto</option>
+                  <option value="09">Setembro</option>
+                  <option value="10">Outubro</option>
+                  <option value="11">Novembro</option>
+                  <option value="12">Dezembro</option>
+                </select>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold px-2 py-1 text-slate-800"
+                >
+                  <option value="2024">2024</option>
+                  <option value="2025">2025</option>
+                  <option value="2026">2026</option>
+                  <option value="2027">2027</option>
+                  <option value="2028">2028</option>
+                </select>
+              </div>
+            )}
           </div>
-
-          {dateFilterMode === "single" && (
-            <Input 
-              type="date" 
-              value={selectedDate} 
-              onChange={(e) => setSelectedDate(e.target.value)} 
-              className="w-36 h-8 text-xs font-bold bg-white" 
-            />
-          )}
-
-          {dateFilterMode === "range" && (
-            <div className="flex items-center gap-1">
-              <Input 
-                type="date" 
-                value={startDate} 
-                onChange={(e) => setStartDate(e.target.value)} 
-                className="w-32 h-8 text-xs font-bold bg-white" 
-              />
-              <span className="text-[9px] font-bold text-slate-400">a</span>
-              <Input 
-                type="date" 
-                value={endDate} 
-                onChange={(e) => setEndDate(e.target.value)} 
-                className="w-32 h-8 text-xs font-bold bg-white" 
-              />
-            </div>
-          )}
-
-          {dateFilterMode === "month" && (
-            <div className="flex items-center gap-1">
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold px-2 py-1 text-slate-800"
-              >
-                <option value="01">Janeiro</option>
-                <option value="02">Fevereiro</option>
-                <option value="03">Março</option>
-                <option value="04">Abril</option>
-                <option value="05">Maio</option>
-                <option value="06">Junho</option>
-                <option value="07">Julho</option>
-                <option value="08">Agosto</option>
-                <option value="09">Setembro</option>
-                <option value="10">Outubro</option>
-                <option value="11">Novembro</option>
-                <option value="12">Dezembro</option>
-              </select>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className="h-8 rounded-lg border border-slate-200 bg-white text-xs font-bold px-2 py-1 text-slate-800"
-              >
-                <option value="2024">2024</option>
-                <option value="2025">2025</option>
-                <option value="2026">2026</option>
-                <option value="2027">2027</option>
-                <option value="2028">2028</option>
-              </select>
-            </div>
-          )}
-        </div>
+        )}
       </div>
  
 
@@ -1720,8 +1758,8 @@ function UsinaOperacaoPage() {
                   {schedules.filter(s => {
                     if (!matchesDateFilter(s.scheduled_date)) return false;
                     if (!s.valley_start) return true;
-                    const [h] = s.valley_start.split(":").map(Number);
-                    return h >= 6 && h < 18;
+                    const startMin = timeToMinutes(s.valley_start);
+                    return startMin >= 6 * 60 && startMin <= 18 * 60;
                   }).length}
                 </span>
               </button>
@@ -1735,15 +1773,37 @@ function UsinaOperacaoPage() {
                 }`}
               >
                 🌙 Noite
-                <span className="ml-1 text-[9px] opacity-80">18:01 – 05:59</span>
+                <span className="ml-1 text-[9px] opacity-80">18:01 – 23:59</span>
                 <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
                   shiftFilter === "noite" ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700"
                 }`}>
                   {schedules.filter(s => {
                     if (!matchesDateFilter(s.scheduled_date)) return false;
                     if (!s.valley_start) return false;
-                    const [h] = s.valley_start.split(":").map(Number);
-                    return h >= 18 || h < 6;
+                    const startMin = timeToMinutes(s.valley_start);
+                    return startMin > 18 * 60 && startMin < 24 * 60;
+                  }).length}
+                </span>
+              </button>
+              <button
+                id="shift-filter-madrugada"
+                onClick={() => setShiftFilter("madrugada")}
+                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
+                  shiftFilter === "madrugada"
+                    ? "bg-purple-600 text-white"
+                    : "bg-white text-purple-700 hover:bg-purple-50"
+                }`}
+              >
+                ✨ Madrugada
+                <span className="ml-1 text-[9px] opacity-80">00:00 – 05:59</span>
+                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                  shiftFilter === "madrugada" ? "bg-white/20 text-white" : "bg-purple-100 text-purple-700"
+                }`}>
+                  {schedules.filter(s => {
+                    if (!matchesDateFilter(s.scheduled_date)) return false;
+                    if (!s.valley_start) return false;
+                    const startMin = timeToMinutes(s.valley_start);
+                    return startMin >= 0 && startMin < 6 * 60;
                   }).length}
                 </span>
               </button>
@@ -1806,7 +1866,7 @@ function UsinaOperacaoPage() {
               <div className="relative w-full max-w-xs">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <Input 
-                  placeholder="Buscar por placa, operador, local..." 
+                  placeholder="Buscar por placa, equipamento, operador, corretiva, local, modelo..." 
                   value={search} 
                   onChange={e => setSearch(e.target.value)} 
                   className="pl-8 h-8 text-xs font-medium"
@@ -2080,7 +2140,7 @@ function UsinaOperacaoPage() {
                 <div className="relative w-full max-w-xs">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                   <Input 
-                    placeholder="Buscar por placa, operador, local..." 
+                    placeholder="Buscar por placa, equipamento, operador, corretiva, local, modelo..." 
                     value={search} 
                     onChange={e => setSearch(e.target.value)} 
                     className="pl-8 h-8 text-xs font-medium w-48"
@@ -2667,7 +2727,7 @@ function UsinaOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={26}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2696,7 +2756,7 @@ function UsinaOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
                           </Line>
                         </LineChart>
                       </ResponsiveContainer>
@@ -2733,7 +2793,7 @@ function UsinaOperacaoPage() {
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                              <LabelList dataKey="minutes" position="top" formatter={(v) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                             </Bar>
                           </BarChart>
                         </ResponsiveContainer>
@@ -2800,7 +2860,7 @@ function UsinaOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2829,7 +2889,7 @@ function UsinaOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2929,7 +2989,7 @@ function UsinaOperacaoPage() {
                                                 <TableCell className="py-1.5 uppercase">{s.operator || "—"}</TableCell>
                                                 <TableCell className="py-1.5 font-mono">{s.os_number || "—"}</TableCell>
                                                 <TableCell className={`py-1.5 font-mono ${breakdownMinutes > 0 ? "text-red-600" : "text-slate-400"}`}>
-                                                  {(breakdownMinutes / 60).toFixed(1)} hrs
+                                                   {Math.floor(breakdownMinutes / 60)}:{(breakdownMinutes % 60).toString().padStart(2, "0")}h
                                                 </TableCell>
                                                 <TableCell className="py-1.5 text-right">
                                                   <span className={`px-1.5 py-0.5 rounded font-black ${adherenceScore >= 90 ? "bg-emerald-100 text-emerald-700" : adherenceScore >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
@@ -3032,7 +3092,7 @@ function UsinaOperacaoPage() {
                           </TableCell>
                           <TableCell className="text-indigo-800 uppercase">{s.local || "—"}</TableCell>
                           <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
-                          <TableCell className="font-mono text-red-600">{(breakdownMinutes / 60).toFixed(1)} hrs</TableCell>
+                          <TableCell className="font-mono text-red-600">{Math.floor(breakdownMinutes / 60)}:{(breakdownMinutes % 60).toString().padStart(2, "0")}h</TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex flex-col gap-1.5">
                               {stops.map(l => (
@@ -3189,7 +3249,7 @@ function UsinaOperacaoPage() {
                 {/* Allow editing actual dates for non-template schedules if needed, but display nicely */}
                 {editScheduledDate && !["2000-01-02", "2000-01-03", "2000-01-04", "2000-01-05", "2000-01-06", "2000-01-07", "2000-01-08"].includes(editScheduledDate) && (
                   <option value={editScheduledDate}>
-                    {format(new Date(editScheduledDate + "T12:00:00"), "dd/MM/yyyy (EEEE)", { locale: ptBR })}
+                    {format(getSafeDate(editScheduledDate), "dd/MM/yyyy (EEEE)", { locale: ptBR })}
                   </option>
                 )}
               </select>
@@ -3594,7 +3654,7 @@ function UsinaOperacaoPage() {
               {/* Chart Column */}
               <div className="lg:col-span-7 bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col h-[380px]">
                 <span className="text-[10px] font-black uppercase text-center tracking-wider text-zinc-500 mb-4 block">Visualização Gráfica</span>
-                <div className="flex-1 min-h-0">
+                <div className="flex-1 min-h-0 relative">
                   <ResponsiveContainer width="100%" height="100%">
                     {(() => {
                       if (expandedChart === "equipment") {
@@ -3610,7 +3670,7 @@ function UsinaOperacaoPage() {
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                              <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
                             </Bar>
                           </BarChart>
                         );
@@ -3628,7 +3688,7 @@ function UsinaOperacaoPage() {
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                              <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
                             </Bar>
                           </BarChart>
                         );
@@ -3646,7 +3706,7 @@ function UsinaOperacaoPage() {
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                              <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
                             </Bar>
                           </BarChart>
                         );
@@ -3662,7 +3722,7 @@ function UsinaOperacaoPage() {
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                              <LabelList dataKey="minutes" position="top" formatter={(v) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                             </Bar>
                           </BarChart>
                         );
@@ -3702,7 +3762,7 @@ function UsinaOperacaoPage() {
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
-                              <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
                             </Line>
                           </LineChart>
                         );
@@ -3710,6 +3770,23 @@ function UsinaOperacaoPage() {
                       return <div className="text-zinc-500 text-xs">Sem visualização gráfica disponível.</div>;
                     })()}
                   </ResponsiveContainer>
+                  {/* Percentage overlay for adherence gauge */}
+                  {expandedChart === "adherence" && (
+                    <div className="absolute inset-0 flex items-end justify-center pb-10 pointer-events-none">
+                      <div className="flex flex-col items-center">
+                        <span className="text-4xl font-black text-white leading-none">
+                          {analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%
+                        </span>
+                        <span className={`text-[10px] font-black uppercase tracking-wider mt-1 ${
+                          analyticsReport.overallAdherence >= 95 ? "text-emerald-400" :
+                          analyticsReport.overallAdherence >= 75 ? "text-amber-400" : "text-rose-400"
+                        }`}>
+                          {analyticsReport.overallAdherence >= 95 ? "✓ Dentro da Meta" :
+                           analyticsReport.overallAdherence >= 75 ? "⚠ Atenção" : "✗ Crítico"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

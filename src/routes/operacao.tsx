@@ -64,7 +64,7 @@ function OperationPlanningPage() {
 
   const load = async () => {
     const [{ data: p }, { data: e }] = await Promise.all([
-      supabase.from("programming").select("*, equipment:equipment_id(identifier, type)").eq("is_completed", false),
+      (supabase as any).from("programming").select("*, equipment:equipment_id(identifier, type)").eq("is_completed", false),
       supabase.from("equipment").select("*").order("identifier")
     ]);
     setProgramming((p ?? []) as any[]);
@@ -82,12 +82,12 @@ function OperationPlanningPage() {
   }, [user]);
 
   const confirmRealized = async (p: Programming) => {
-    const { error } = await supabase.from("programming").update({ is_completed: true }).eq("id", p.id);
+    const { error } = await (supabase as any).from("programming").update({ is_completed: true }).eq("id", p.id);
     if (!error) {
       toast.success("Serviço concluído!");
       
       // Grava no histórico geral que foi realizado com data e hora exata
-      await supabase.from("history").insert({
+      await (supabase as any).from("history").insert({
         equipment_id: p.equipment_id,
         status_to: "Realizado",
         notes: `CONCLUÍDO: O serviço de ${p.stop_type} foi realizado com sucesso em ${format(new Date(), 'dd/MM/yyyy HH:mm')}.`
@@ -116,10 +116,10 @@ function OperationPlanningPage() {
 
     // Se for falha, deleta o atual e grava no histórico geral da máquina
     if (rescheduleData.mode === "fail") {
-      await supabase.from("programming").delete().eq("id", rescheduleData.id);
+      await (supabase as any).from("programming").delete().eq("id", rescheduleData.id);
       
       // REGISTRO NO HISTÓRICO GERAL (Aba Histórico)
-      await supabase.from("history").insert({
+      await (supabase as any).from("history").insert({
         equipment_id: rescheduleData.eqId,
         status_to: "Reagendado",
         notes: `Agendamento de ${rescheduleData.type} não realizado. Motivo: ${rescheduleReason}. Reagendado para ${formatDate(rescheduleDate)}`
@@ -127,7 +127,7 @@ function OperationPlanningPage() {
     }
 
     // Insere o novo agendamento
-    const { error } = await supabase.from("programming").insert({
+    const { error } = await (supabase as any).from("programming").insert({
       equipment_id: rescheduleData.eqId,
       scheduled_date: rescheduleDate,
       day_of_week: "Calendário",
@@ -145,7 +145,7 @@ function OperationPlanningPage() {
   };
 
   const deleteSchedule = async (id: string) => {
-    const { error } = await supabase.from("programming").delete().eq("id", id);
+    const { error } = await (supabase as any).from("programming").delete().eq("id", id);
     if (!error) { toast.success("Agendamento removido"); load(); }
   };
 

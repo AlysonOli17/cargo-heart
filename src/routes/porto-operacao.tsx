@@ -27,7 +27,13 @@ import {
   AlertCircle,
   CheckCircle2,
   Pencil,
-  ArrowUpDown
+  ArrowUpDown,
+  Users,
+  UserCheck,
+  UserX,
+  CalendarDays,
+  Settings2,
+  Plus
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useAuth } from "@/hooks/use-auth";
@@ -58,11 +64,66 @@ const tzOffset = () => {
   return `${dif}${pad(tzo / 60)}:${pad(tzo % 60)}`;
 };
 
+const calcPlannedMinutes = (valleyStart: string | null | undefined, valleyEnd: string | null | undefined): number => {
+  if (!valleyStart || !valleyEnd) return 720;
+  const parse = (t: string) => {
+    const parts = t.split(':').map(Number);
+    return parts.length >= 2 ? parts[0] * 60 + parts[1] : null;
+  };
+  const s = parse(valleyStart);
+  const e = parse(valleyEnd);
+  if (s === null || e === null) return 720;
+  const diff = e >= s ? e - s : (1440 - s) + e; // handle overnight
+  return diff > 0 ? diff : 720;
+};
+
 const formatMinutesToHHMMSS = (totalMinutes: number) => {
   const h = Math.floor(totalMinutes / 60);
   const m = Math.floor(totalMinutes % 60);
   const s = 0;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+};
+
+const getSafeDate = (dateStr: string | null | undefined, fallback: Date = new Date()): Date => {
+  if (!dateStr) return fallback;
+  const cleanStr = dateStr.includes("T") ? dateStr : `${dateStr}T12:00:00`;
+  const parsed = new Date(cleanStr);
+  if (isNaN(parsed.getTime())) {
+    return fallback;
+  }
+  return parsed;
+};
+
+const sanitizeSchedules = (scheds: any[]): any[] => {
+  return scheds.map(s => {
+    const cleanTime = (val: string | null) => {
+      if (!val) return val;
+      const parts = val.split(':');
+      const hours = parseInt(parts[0], 10);
+      if (!isNaN(hours) && hours > 24) {
+        const totalMinutes = hours * 60 + parseInt(parts[1] || '0', 10);
+        const serial = totalMinutes / (24 * 60);
+        const fraction = serial % 1;
+        const correctTotalMinutes = Math.round(fraction * 24 * 60);
+        const correctHours = Math.floor(correctTotalMinutes / 60);
+        const correctMinutes = correctTotalMinutes % 60;
+        return `${String(correctHours).padStart(2, '0')}:${String(correctMinutes).padStart(2, '0')}`;
+      }
+      return val;
+    };
+
+    const newStart = cleanTime(s.valley_start);
+    const newEnd = cleanTime(s.valley_end);
+    if (newStart !== s.valley_start || newEnd !== s.valley_end) {
+      return {
+        ...s,
+        valley_start: newStart,
+        valley_end: newEnd,
+        valley_time: newStart && newEnd ? `${newStart} - ${newEnd}` : (newStart || s.valley_time)
+      };
+    }
+    return s;
+  });
 };
 
 export const Route = createFileRoute("/porto-operacao")({
@@ -129,7 +190,7 @@ const normalizePortoHeader = (cleanKey: string): string => {
   let normKey = cleanKey.replace(/[^a-z0-9]/g, "");
   if (cleanKey.includes("dia") && cleanKey.includes("semana")) {
     return "diadasemana";
-  } else if (cleanKey.includes("dono")) {
+  } else if (cleanKey.includes("dono") || cleanKey.includes("responsavel")) {
     return "cliente";
   } else if (cleanKey.includes("tipoequipamento") || cleanKey.includes("equipamento") || cleanKey.includes("equip")) {
     return "modelo";
@@ -139,7 +200,7 @@ const normalizePortoHeader = (cleanKey: string): string => {
     return "modelo";
   } else if (cleanKey.includes("descricaoatividade") || cleanKey.includes("atividade")) {
     return "atividade";
-  } else if (cleanKey.includes("responsavel") || cleanKey.includes("operador") || cleanKey.includes("motorista")) {
+  } else if (cleanKey.includes("operador") || cleanKey.includes("motorista")) {
     return "operador";
   } else if (cleanKey.includes("telefone")) {
     return "telefone";
@@ -237,7 +298,7 @@ const getRowTargetDate = (row: any, baseSelectedDate: string) => {
     }
 
     // Check if it's a numeric day-of-month matching the selected week
-    const sundayDate = startOfWeek(new Date(baseSelectedDate + "T12:00:00"), { weekStartsOn: 0 });
+    const sundayDate = startOfWeek(getSafeDate(baseSelectedDate), { weekStartsOn: 0 });
     const digits = searchStr.match(/\d+/g);
     if (digits && digits.length >= 1) {
       const dayVal = parseInt(digits[0], 10);
@@ -251,7 +312,7 @@ const getRowTargetDate = (row: any, baseSelectedDate: string) => {
   }
 
   // No day column found — use the selectedDate's day of week as the template date
-  const selectedDayOfWeek = new Date(baseSelectedDate + "T12:00:00").getDay();
+  const selectedDayOfWeek = getSafeDate(baseSelectedDate).getDay();
   return format(addDays(templateBaseDate, selectedDayOfWeek), "yyyy-MM-dd");
 };
 
@@ -286,9 +347,10 @@ function PortoOperacaoPage() {
   const [programming, setProgramming] = useState<any[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; identifier: string; plate?: string | null; model?: string | null; status?: string | null }[]>([]);
   const [search, setSearch] = useState("");
-  const [shiftFilter, setShiftFilter] = useState<"todos" | "dia" | "noite">("todos");
+  const [shiftFilter, setShiftFilter] = useState<"todos" | "dia" | "noite" | "madrugada">("todos");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [activeTab, setActiveTab] = useState("operacao");
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -317,11 +379,56 @@ function PortoOperacaoPage() {
   const [expandedLocal, setExpandedLocal] = useState<string | null>(null);
   const [adherenceViewMode, setAdherenceViewMode] = useState<"charts" | "table">("charts");
 
+  // ── Report-only date filter (independent from the operational date filter) ──
+  const [reportDateMode, setReportDateMode] = useState<"single" | "range" | "month">("single");
+  const [reportSingleDate, setReportSingleDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [reportStartDate, setReportStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [reportEndDate, setReportEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [reportMonth, setReportMonth] = useState(format(new Date(), "MM"));
+  const [reportYear, setReportYear] = useState(format(new Date(), "yyyy"));
+
+  const matchesReportDateFilter = (schedDate: string) => {
+    if (reportDateMode === "single") return schedDate === reportSingleDate;
+    if (reportDateMode === "range") {
+      const s = reportStartDate || "2000-01-01";
+      const e = reportEndDate   || "2999-12-31";
+      return schedDate >= s && schedDate <= e;
+    }
+    if (reportDateMode === "month") {
+      const [y, m] = schedDate.split("-");
+      return y === reportYear && m === reportMonth;
+    }
+    return true;
+  };
+
   // Excel File State
   const [file, setFile] = useState<File | null>(null);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
+  const [people, setPeople] = useState<any[]>([]);
+
+  // Pessoas Tab State
+  const [pessoaDialogOpen, setPessoaDialogOpen] = useState(false);
+  const [editingPessoa, setEditingPessoa] = useState<any>(null);
+  const [pessoaSearch, setPessoaSearch] = useState("");
+  const [indispDialogOpen, setIndispDialogOpen] = useState(false);
+  const [selectedPessoaForIndisp, setSelectedPessoaForIndisp] = useState<any>(null);
+  const [pessoaIndisps, setPessoaIndisps] = useState<any[]>([]);
+  const [pessoaForm, setPessoaForm] = useState({
+    name: "", matricula: "", shift: "Dia", letra: "A",
+    plate_tag: "", vacation_start: "", vacation_end: "", ativo: true
+  });
+  const [indispForm, setIndispForm] = useState({
+    tipo: "Atestado", data_inicio: "", data_fim: "", motivo: ""
+  });
+  // 2x2 rotation config (stored in localStorage)
+  const [rotacaoRef, setRotacaoRef] = useState<string>(() =>
+    localStorage.getItem("porto_rotacao_ref") || new Date().toISOString().split("T")[0]
+  );
+  const [rotacaoLetraRef, setRotacaoLetraRef] = useState<"A" | "B">(() =>
+    (localStorage.getItem("porto_rotacao_letra_ref") as "A" | "B") || "A"
+  );
 
   // Corrective Stop Dialog State
   const [stopOpen, setStopOpen] = useState(false);
@@ -400,7 +507,7 @@ function PortoOperacaoPage() {
     }
 
     // 2. Check for scheduling conflicts (planned stops/maintenance scheduled for today)
-    const weekdayName = format(new Date(selectedDate + "T12:00:00"), "EEEE", { locale: ptBR });
+    const weekdayName = format(getSafeDate(selectedDate), "EEEE", { locale: ptBR });
     const weekdayClean = weekdayName.split("-")[0].trim().toLowerCase();
 
     const stopRecord = programming.find(p => {
@@ -429,6 +536,123 @@ function PortoOperacaoPage() {
     }
 
     return null;
+  };
+
+  // ---- 2x2 Rotation Logic ----
+  const getLetraAtiva = (dateStr: string): "A" | "B" => {
+    const ref = new Date(rotacaoRef + "T12:00:00");
+    const target = new Date(dateStr + "T12:00:00");
+    const diffDays = Math.floor((target.getTime() - ref.getTime()) / (1000 * 60 * 60 * 24));
+    const cycle = (((Math.floor(diffDays / 2)) % 2) + 2) % 2;
+    return cycle === 0 ? rotacaoLetraRef : (rotacaoLetraRef === "A" ? "B" : "A");
+  };
+
+  const isPessoaDisponivel = (pessoa: any, dateStr: string): { ok: boolean; motivo: string } => {
+    if (pessoa.ativo === false) return { ok: false, motivo: "Inativo" };
+    if (pessoa.vacation_start && pessoa.vacation_end &&
+        dateStr >= pessoa.vacation_start && dateStr <= pessoa.vacation_end) {
+      return { ok: false, motivo: `Férias até ${new Date(pessoa.vacation_end + "T12:00:00").toLocaleDateString("pt-BR")}` };
+    }
+    const unavArr = pessoa.unavailability || [];
+    if (unavArr.includes(dateStr)) return { ok: false, motivo: "Indisponível" };
+    // Check pessoaIndisps
+    const indisp = pessoaIndisps.find((i: any) =>
+      i.pessoa_id === pessoa.id &&
+      dateStr >= i.data_inicio && dateStr <= i.data_fim
+    );
+    if (indisp) return { ok: false, motivo: `${indisp.tipo}${indisp.motivo ? ": " + indisp.motivo : ""}` };
+    return { ok: true, motivo: "" };
+  };
+
+  const getPessoaByPlaca = (placa: string, dateStr: string, turno: string): any | null => {
+    if (!placa || !dateStr) return null;
+    const letraAtiva = getLetraAtiva(dateStr);
+    const turnoNorm = turno.toUpperCase().includes("NOITE") ? "Noite" : "Dia";
+    return people.find(p =>
+      p.plate_tag && p.plate_tag.toString().trim().toUpperCase() === placa.trim().toUpperCase() &&
+      p.letra === letraAtiva &&
+      (p.shift || "Dia") === turnoNorm
+    ) || null;
+  };
+
+  // CRUD
+  const loadPessoas = async () => {
+    try {
+      const { data, error } = await supabase.from("people" as any).select("*").order("name");
+      if (!error && data) {
+        setPeople(data as any[]);
+        localStorage.setItem("local_people", JSON.stringify(data));
+      }
+    } catch {}
+  };
+
+  const loadPessoaIndisps = async () => {
+    try {
+      const { data, error } = await supabase.from("porto_pessoas_indisponibilidades" as any).select("*");
+      if (!error && data) setPessoaIndisps(data as any[]);
+    } catch {}
+  };
+
+  const savePessoa = async () => {
+    try {
+      const payload: any = {
+        name: pessoaForm.name.trim(),
+        matricula: pessoaForm.matricula.trim() || null,
+        shift: pessoaForm.shift,
+        letra: pessoaForm.letra,
+        plate_tag: pessoaForm.plate_tag.trim() || null,
+        vacation_start: pessoaForm.vacation_start || null,
+        vacation_end: pessoaForm.vacation_end || null,
+      };
+      if (!payload.name) { toast.error("Nome é obrigatório."); return; }
+      if (editingPessoa) {
+        const { error } = await supabase.from("people" as any).update(payload).eq("id", editingPessoa.id);
+        if (error) throw error;
+        toast.success("Pessoa atualizada!");
+      } else {
+        const { error } = await supabase.from("people" as any).insert({ ...payload, owner_id: user?.id });
+        if (error) throw error;
+        toast.success("Pessoa cadastrada!");
+      }
+      setPessoaDialogOpen(false);
+      setEditingPessoa(null);
+      await loadPessoas();
+    } catch (err: any) {
+      toast.error("Erro ao salvar: " + (err?.message || "Tente novamente."));
+    }
+  };
+
+  const deletePessoa = async (id: string) => {
+    if (!confirm("Remover esta pessoa?")) return;
+    try {
+      await supabase.from("people" as any).delete().eq("id", id);
+      toast.success("Pessoa removida.");
+      await loadPessoas();
+    } catch { toast.error("Erro ao remover."); }
+  };
+
+  const saveIndisp = async () => {
+    if (!selectedPessoaForIndisp) return;
+    if (!indispForm.data_inicio || !indispForm.data_fim) { toast.error("Informe as datas."); return; }
+    try {
+      await supabase.from("porto_pessoas_indisponibilidades" as any).insert({
+        pessoa_id: selectedPessoaForIndisp.id,
+        owner_id: user?.id,
+        tipo: indispForm.tipo,
+        data_inicio: indispForm.data_inicio,
+        data_fim: indispForm.data_fim,
+        motivo: indispForm.motivo || null,
+      });
+      toast.success("Indisponibilidade registrada.");
+      setIndispForm({ tipo: "Atestado", data_inicio: "", data_fim: "", motivo: "" });
+      await loadPessoaIndisps();
+    } catch { toast.error("Erro ao registrar indisponibilidade."); }
+  };
+
+  const deleteIndisp = async (id: string) => {
+    await supabase.from("porto_pessoas_indisponibilidades" as any).delete().eq("id", id);
+    await loadPessoaIndisps();
+    toast.success("Indisponibilidade removida.");
   };
 
   const loadData = async () => {
@@ -467,31 +691,32 @@ function PortoOperacaoPage() {
 
     // 2. Carrega as escalas e corretivas da Porto
     try {
-      let { data: scheds, error: e1 } = await supabase
+      const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
+      let { data: scheds, error: e1 } = await (supabase as any)
         .from("porto_daily_schedules")
         .select("*")
-        .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+        .or(`scheduled_date.eq.${selectedDate},scheduled_date.eq.${dateDPlus1},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
       if (e1) throw e1;
       
-      const { data: logs, error: e2 } = await supabase.from("porto_corrective_logs").select("*");
+      const { data: logs, error: e2 } = await (supabase as any).from("porto_corrective_logs").select("*");
       if (e2) throw e2;
 
-      const { data: progs, error: eProg } = await supabase.from("programming").select("*").eq("is_completed", false);
+      const { data: progs, error: eProg } = await (supabase as any).from("programming").select("*").eq("is_completed", false);
       if (eProg) throw eProg;
       setProgramming(progs ?? []);
       localStorage.setItem("local_programming", JSON.stringify(progs ?? []));
 
       // Check if we have daily schedules for selectedDate
-      const dayScheds = (scheds ?? []).filter(s => s.scheduled_date === selectedDate);
+      const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
       if (dayScheds.length === 0) {
         // Find templates for this weekday
-        const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
+        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
         const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
-        const templatesForDay = (scheds ?? []).filter(s => s.scheduled_date === templateDateStr);
+        const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
 
         if (templatesForDay.length > 0) {
           // Clone templates to selectedDate
-          const clones = templatesForDay.map(t => ({
+          const clones = templatesForDay.map((t: any) => ({
             scheduled_date: selectedDate,
             equipment: t.equipment,
             plate: t.plate,
@@ -511,7 +736,7 @@ function PortoOperacaoPage() {
             owner_id: user?.id
           }));
 
-          const { data: inserted, error: eInsert } = await supabase
+          const { data: inserted, error: eInsert } = await (supabase as any)
             .from("porto_daily_schedules")
             .insert(clones)
             .select();
@@ -525,24 +750,38 @@ function PortoOperacaoPage() {
       setSchedules((scheds ?? []) as PortoSchedule[]);
       setCorrectiveLogs((logs ?? []) as CorrectiveLog[]);
 
+      // Carregar Pessoas
+      try {
+        const { data: ppl, error: ePpl } = await supabase.from("people" as any).select("*");
+        if (!ePpl && ppl) {
+          setPeople(ppl);
+          localStorage.setItem("local_people", JSON.stringify(ppl));
+        }
+      } catch (e) {
+        // Ignorar erro silenciosamente, localstorage será tratado no catch externo se tudo falhar
+      }
+
       // Update local storage cache for the selected date, keeping other dates intact
-      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
-      const otherDatesScheds = localScheds.filter((s: any) => s.scheduled_date !== selectedDate);
-      const merged = [...otherDatesScheds, ...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate)];
+      const localScheds = sanitizeSchedules(JSON.parse(localStorage.getItem("local_porto_schedules") || "[]"));
+      const nonMatchingScheds = localScheds.filter((s: any) => !matchesDateFilter(s.scheduled_date));
+      const merged = [...nonMatchingScheds, ...(scheds ?? [])];
       localStorage.setItem("local_porto_schedules", JSON.stringify(merged));
     } catch (err) {
       // Fallback localStorage para escalas e corretivas
-      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
+      const localScheds = sanitizeSchedules(JSON.parse(localStorage.getItem("local_porto_schedules") || "[]"));
+      localStorage.setItem("local_porto_schedules", JSON.stringify(localScheds));
       const localLogs = JSON.parse(localStorage.getItem("local_porto_corrective_logs") || "[]");
       const localProgs = JSON.parse(localStorage.getItem("local_programming") || "[]");
+      const localPpl = JSON.parse(localStorage.getItem("local_people") || "[]");
 
       setProgramming(localProgs);
+      setPeople(localPpl);
 
       const dayScheds = localScheds.filter((s: any) => s.scheduled_date === selectedDate);
       let mergedScheds = [...localScheds];
 
       if (dayScheds.length === 0) {
-        const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
+        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
         const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
         const templatesForDay = localScheds.filter((s: any) => s.scheduled_date === templateDateStr);
 
@@ -559,8 +798,10 @@ function PortoOperacaoPage() {
         }
       }
 
+      const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
       setSchedules(mergedScheds.filter((s: any) => 
         s.scheduled_date === selectedDate || 
+        s.scheduled_date === dateDPlus1 ||
         (s.scheduled_date >= "2000-01-02" && s.scheduled_date <= "2000-01-08")
       ));
       setCorrectiveLogs(localLogs);
@@ -570,6 +811,7 @@ function PortoOperacaoPage() {
   useEffect(() => {
     if (!user) return;
     loadData();
+    loadPessoaIndisps();
     const chSched = supabase.channel("porto-sched-rt").on("postgres_changes", { event: "*", schema: "public", table: "porto_daily_schedules" }, loadData).subscribe();
     const chLogs = supabase.channel("porto-logs-rt").on("postgres_changes", { event: "*", schema: "public", table: "porto_corrective_logs" }, loadData).subscribe();
     const chProg = supabase.channel("porto-prog-rt").on("postgres_changes", { event: "*", schema: "public", table: "programming" }, loadData).subscribe();
@@ -722,25 +964,49 @@ function PortoOperacaoPage() {
             newRow[normKey] = row[index];
           });
 
-          // Split merged equipment & plate values if present
-          let plateVal = newRow.placa ? newRow.placa.toString().trim() : "";
-          let equipVal = newRow.equipamento ? newRow.equipamento.toString().trim() : "";
+          // Usa a TAG (mapeada para newRow.placa) como a identificação principal do equipamento
+          if (newRow.placa) {
+            newRow.equipamento = newRow.placa.toString().trim();
+          }
 
-          if (plateVal && plateVal.includes("-") && plateVal.length > 10) {
-            const lastIndex = plateVal.lastIndexOf("-");
-            const left = plateVal.substring(0, lastIndex).trim();
-            const right = plateVal.substring(lastIndex + 1).trim();
-            if (left && right) {
-              newRow.equipamento = left;
-              newRow.placa = right;
+          // Cruza operador a partir do cadastro de pessoas
+          const rowDateStr = parsePortoDate(newRow.dataprogramada, selectedDate);
+          const rowShift = (newRow.turno || "DIA").toUpperCase().trim();
+          const rowEquip = newRow.modelo || newRow.equipamento || "";
+
+          if (newRow.operador) {
+            const opName = newRow.operador.toString().trim().toLowerCase();
+            const personMatch = people.find(p => p.name.toLowerCase().trim() === opName);
+            if (personMatch) {
+              newRow.operador = personMatch.name;
+              if (!newRow.placa) {
+                newRow.placa = personMatch.plate_tag;
+              }
             }
-          } else if (equipVal && equipVal.includes("-") && equipVal.length > 10 && !plateVal) {
-            const lastIndex = equipVal.lastIndexOf("-");
-            const left = equipVal.substring(0, lastIndex).trim();
-            const right = equipVal.substring(lastIndex + 1).trim();
-            if (left && right) {
-              newRow.equipamento = left;
-              newRow.placa = right;
+          } else {
+            const cleanEquip = rowEquip.toLowerCase().trim();
+            const matchedPerson = people.find(p => {
+              const onVacation = p.vacation_start && p.vacation_end && rowDateStr >= p.vacation_start && rowDateStr <= p.vacation_end;
+              const isUnavail = (p.unavailability || []).includes(rowDateStr);
+              if (onVacation || isUnavail) return false;
+
+              const operates = (p.equipment_types || []).some((t: string) => {
+                const tClean = t.toLowerCase().trim();
+                return cleanEquip.includes(tClean) || tClean.includes(cleanEquip);
+              });
+              if (!operates) return false;
+
+              const pShift = (p.shift || "DIA").toUpperCase().trim();
+              if (pShift !== rowShift && !(pShift.includes(rowShift) || rowShift.includes(pShift))) return false;
+
+              return true;
+            });
+
+            if (matchedPerson) {
+              newRow.operador = matchedPerson.name;
+              if (!newRow.placa) {
+                newRow.placa = matchedPerson.plate_tag;
+              }
             }
           }
 
@@ -753,7 +1019,8 @@ function PortoOperacaoPage() {
           console.log("[Import Debug] Valores linha 1:", normalized[0]);
         }
 
-        setPreviewData(normalized);
+        const validRows = normalized.filter((row: any) => row.placa || row.equipment || row.equipamento || row.modelo || row.operador || row.os);
+        setPreviewData(validRows);
       } catch (err) {
         toast.error("Erro ao processar planilha.");
       }
@@ -769,7 +1036,8 @@ function PortoOperacaoPage() {
     const normalizeTime = (t: any): string => {
       if (!t) return "";
       if (typeof t === "number") {
-        const totalMinutes = Math.round(t * 24 * 60);
+        const timeFraction = t > 1 ? (t % 1) : t;
+        const totalMinutes = Math.round(timeFraction * 24 * 60);
         const hours = Math.floor(totalMinutes / 60);
         const minutes = totalMinutes % 60;
         return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
@@ -779,7 +1047,8 @@ function PortoOperacaoPage() {
       // If it's a decimal number represented as string, handle as Excel fraction
       if (!isNaN(Number(str)) && str.includes(".")) {
         const val = Number(str);
-        const totalMinutes = Math.round(val * 24 * 60);
+        const timeFraction = val > 1 ? (val % 1) : val;
+        const totalMinutes = Math.round(timeFraction * 24 * 60);
         const hours = Math.floor(totalMinutes / 60);
         const minutes = totalMinutes % 60;
         return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
@@ -812,10 +1081,7 @@ function PortoOperacaoPage() {
       }
 
       const rowDateStr = parsePortoDate(row.dataprogramada, selectedDate);
-      let rowDateObj = new Date(rowDateStr + "T12:00:00");
-      if (isNaN(rowDateObj.getTime())) {
-        rowDateObj = new Date(selectedDate + "T12:00:00");
-      }
+      let rowDateObj = getSafeDate(rowDateStr, getSafeDate(selectedDate));
 
       const resolvedLocal = row.local || null;
       if (resolvedLocal) {
@@ -823,7 +1089,7 @@ function PortoOperacaoPage() {
       }
 
       if (isNightShift && rawOS.includes("/")) {
-        const osParts = rawOS.split("/").map(o => o.trim());
+        const osParts = rawOS.split("/").map((o: string) => o.trim());
         const os1 = osParts[0];
         const os2 = osParts[1] || osParts[0];
         const nextDayDate = format(addDays(rowDateObj, 1), "yyyy-MM-dd");
@@ -895,17 +1161,17 @@ function PortoOperacaoPage() {
       }
     }
 
-    for (const payload of finalPayloads) {
+    if (finalPayloads.length > 0) {
       try {
-        const { error } = await supabase.from("porto_daily_schedules").insert(payload);
+        const { error } = await (supabase as any).from("porto_daily_schedules").insert(finalPayloads);
         if (error) throw error;
-        count++;
+        count = finalPayloads.length;
       } catch (err) {
-        // Localstorage fallback
+        console.warn("Falha no bulk insert do Supabase, usando fallback local:", err);
         const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
-        localScheds.push({ ...payload, id: Math.random().toString(36).substring(2) });
-        localStorage.setItem("local_porto_schedules", JSON.stringify(localScheds));
-        count++;
+        const clonedPayloads = finalPayloads.map(p => ({ ...p, id: Math.random().toString(36).substring(2) }));
+        localStorage.setItem("local_porto_schedules", JSON.stringify([...localScheds, ...clonedPayloads]));
+        count = finalPayloads.length;
       }
     }
 
@@ -939,7 +1205,7 @@ function PortoOperacaoPage() {
     };
 
     try {
-      const { error } = await supabase.from("porto_corrective_logs").insert(payload);
+      const { error } = await (supabase as any).from("porto_corrective_logs").insert(payload);
       if (error) throw error;
       toast.success("Parada corretiva registrada!");
     } catch (err) {
@@ -961,7 +1227,7 @@ function PortoOperacaoPage() {
     const stop_end = `${todayStr}T${endTime}:00${tzOffset()}`;
 
     try {
-      const { error } = await supabase.from("porto_corrective_logs").update({ stop_end }).eq("id", logId);
+      const { error } = await (supabase as any).from("porto_corrective_logs").update({ stop_end }).eq("id", logId);
       if (error) throw error;
       toast.success("Parada finalizada.");
       loadData();
@@ -1005,7 +1271,7 @@ function PortoOperacaoPage() {
     };
 
     try {
-      const { error } = await supabase.from("porto_corrective_logs").update(payload).eq("id", editingStopLog.id);
+      const { error } = await (supabase as any).from("porto_corrective_logs").update(payload).eq("id", editingStopLog.id);
       if (error) throw error;
       toast.success("Parada corretiva atualizada!");
       loadData();
@@ -1023,7 +1289,7 @@ function PortoOperacaoPage() {
 
   const handleDeleteStop = async (logId: string) => {
     try {
-      const { error } = await supabase.from("porto_corrective_logs").delete().eq("id", logId);
+      const { error } = await (supabase as any).from("porto_corrective_logs").delete().eq("id", logId);
       if (error) throw error;
       toast.success("Parada corretiva excluída!");
       loadData();
@@ -1037,18 +1303,19 @@ function PortoOperacaoPage() {
   };
 
   const handleDeleteSchedule = async (id: string) => {
+    const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
+    const filtered = localScheds.filter((s: any) => s.id !== id);
+    localStorage.setItem("local_porto_schedules", JSON.stringify(filtered));
+
     try {
-      const { error } = await supabase.from("porto_daily_schedules").delete().eq("id", id);
+      const { error } = await (supabase as any).from("porto_daily_schedules").delete().eq("id", id);
       if (error) throw error;
       toast.success("Escala deletada");
-      loadData();
     } catch (err) {
-      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
-      const filtered = localScheds.filter((s: any) => s.id !== id);
-      localStorage.setItem("local_porto_schedules", JSON.stringify(filtered));
+      console.warn("Supabase delete failed, local only:", err);
       toast.success("Deletado localmente");
-      loadData();
     }
+    loadData();
   };
 
   const handleBulkDelete = async (ids: Set<string>, clearFn: () => void) => {
@@ -1057,16 +1324,16 @@ function PortoOperacaoPage() {
     if (!confirmed) return;
 
     const idsArr = Array.from(ids);
-    let deletedCount = 0;
+    const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
+    const filtered = localScheds.filter((s: any) => !ids.has(s.id));
+    localStorage.setItem("local_porto_schedules", JSON.stringify(filtered));
+    const deletedCount = idsArr.length;
+
     try {
-      const { error } = await supabase.from("porto_daily_schedules").delete().in("id", idsArr);
+      const { error } = await (supabase as any).from("porto_daily_schedules").delete().in("id", idsArr);
       if (error) throw error;
-      deletedCount = idsArr.length;
     } catch (err) {
-      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
-      const filtered = localScheds.filter((s: any) => !ids.has(s.id));
-      localStorage.setItem("local_porto_schedules", JSON.stringify(filtered));
-      deletedCount = idsArr.length;
+      console.warn("Supabase bulk delete failed, local only:", err);
     }
     toast.success(`${deletedCount} registro(s) apagado(s).`);
     clearFn();
@@ -1093,7 +1360,7 @@ function PortoOperacaoPage() {
     };
 
     try {
-      const { error } = await supabase.from("porto_daily_schedules").update(payload).eq("id", editingSchedule.id);
+      const { error } = await (supabase as any).from("porto_daily_schedules").update(payload).eq("id", editingSchedule.id);
       if (error) throw error;
       toast.success("Programação atualizada com sucesso!");
     } catch (err) {
@@ -1122,8 +1389,16 @@ function PortoOperacaoPage() {
       
       const term = search.toLowerCase();
       const cleanTerm = term.replace(/[^a-zA-Z0-9]/g, "");
-      const schedDateParsed = new Date(s.scheduled_date + "T12:00:00");
+      const schedDateParsed = getSafeDate(s.scheduled_date);
       const weekdayStr = format(schedDateParsed, "EEEE", { locale: ptBR }).toLowerCase();
+
+      // Check if any associated corrective stop matches search term
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      const matchCorretiva = stops.some(st => 
+        (st.reason || "").toLowerCase().includes(term) || 
+        (st.notes || "").toLowerCase().includes(term) ||
+        parseCorrectiveReason(st.reason).type.toLowerCase().includes(term)
+      );
 
       const matchSearch = 
         (s.equipment || "").toLowerCase().includes(term) ||
@@ -1138,18 +1413,21 @@ function PortoOperacaoPage() {
         (s.activity || "").toLowerCase().includes(term) ||
         (s.operator || "").toLowerCase().includes(term) ||
         (s.os_number || "").toLowerCase().includes(term) ||
+        matchCorretiva ||
         weekdayStr.includes(term);
 
       if (!matchSearch) return false;
 
-      // Shift filter: Dia = 06:00–18:00, Noite = 18:01–05:59
+      // Shift filter: Dia = 06:00–18:00, Noite = 18:01–23:59, Madrugada = 00:00–05:59
       if (shiftFilter !== "todos") {
         const startMin = timeToMinutes(s.valley_start);
         if (startMin < 0) return shiftFilter === "dia"; // no start time → treat as day
-        const isDia = startMin >= 6 * 60 && startMin < 18 * 60;   // 06:00 ≤ t < 18:00
-        const isNoite = startMin >= 18 * 60 || startMin < 6 * 60;  // 18:00+ or 00:00-05:59
+        const isDia = startMin >= 6 * 60 && startMin <= 18 * 60;
+        const isNoite = startMin > 18 * 60 && startMin < 24 * 60;
+        const isMadrugada = startMin >= 0 && startMin < 6 * 60;
         if (shiftFilter === "dia" && !isDia) return false;
         if (shiftFilter === "noite" && !isNoite) return false;
+        if (shiftFilter === "madrugada" && !isMadrugada) return false;
       }
 
       return true;
@@ -1180,7 +1458,7 @@ function PortoOperacaoPage() {
     }
 
     return result;
-  }, [schedules, selectedDate, search, shiftFilter, sortColumn, sortDirection]);
+  }, [schedules, selectedDate, search, shiftFilter, sortColumn, sortDirection, correctiveLogs]);
 
   // Find all schedules with active conflicts for the warning banner
   const conflictedSchedules = useMemo(() => {
@@ -1190,16 +1468,25 @@ function PortoOperacaoPage() {
     }).filter(item => item.warning !== null && (item.warning.type === "unavailable" || item.warning.type === "programming_conflict"));
   }, [filteredSchedules, programming, equipments]);
 
-  // Filter habitual schedules (the template week 2000-01-02 to 2000-01-08)
+  // Filter D+1 schedules (schedules matching selectedDate + 1 day)
   const habitualSchedules = useMemo(() => {
+    const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
     return schedules.filter(s => {
-      const isTemplate = s.scheduled_date >= "2000-01-02" && s.scheduled_date <= "2000-01-08";
-      if (!isTemplate) return false;
+      const isDPlus1 = s.scheduled_date === dateDPlus1;
+      if (!isDPlus1) return false;
       
       const term = search.toLowerCase();
       const cleanTerm = term.replace(/[^a-zA-Z0-9]/g, "");
-      const schedDateParsed = new Date(s.scheduled_date + "T12:00:00");
-      const weekdayStr = format(schedDateParsed, "EEEE", { locale: ptBR }).toLowerCase();
+      const schedDateParsed = getSafeDate(s.scheduled_date);
+      const displayDateStr = format(schedDateParsed, "dd/MM/yyyy");
+
+      // Check if any associated corrective stop matches search term
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      const matchCorretiva = stops.some(st => 
+        (st.reason || "").toLowerCase().includes(term) || 
+        (st.notes || "").toLowerCase().includes(term) ||
+        parseCorrectiveReason(st.reason).type.toLowerCase().includes(term)
+      );
 
       const matchSearch = 
         (s.equipment || "").toLowerCase().includes(term) ||
@@ -1214,31 +1501,33 @@ function PortoOperacaoPage() {
         (s.activity || "").toLowerCase().includes(term) ||
         (s.operator || "").toLowerCase().includes(term) ||
         (s.os_number || "").toLowerCase().includes(term) ||
-        weekdayStr.includes(term);
+        matchCorretiva ||
+        displayDateStr.includes(term);
 
       return matchSearch;
     }).sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
-  }, [schedules, search]);
+  }, [schedules, search, selectedDate]);
 
   // Analytics: Adherence & Downtime math
   const analytics = useMemo(() => {
-    // 12h = 720m shift as a baseline for each scheduled equipment
-    const baselineShiftMinutes = 720;
-    
     // Grouped by Local / Frente de Atendimento
-    const adherenceByLocal: Record<string, { totalScheduled: number, totalBreakdowns: number, breakdownMinutes: number }> = {};
+    const adherenceByLocal: Record<string, { totalScheduled: number, totalBreakdowns: number, breakdownMinutes: number, plannedMinutes: number }> = {};
     const daySchedules = schedules.filter(s => s.scheduled_date === selectedDate);
     let totalScheduledCount = daySchedules.length;
     let totalBreakdownMinutes = 0;
+    let totalPlannedMinutes = 0;
     let unattendedCount = 0;
 
     daySchedules.forEach(s => {
       const localKey = s.local || "OUTROS";
       if (!adherenceByLocal[localKey]) {
-        adherenceByLocal[localKey] = { totalScheduled: 0, totalBreakdowns: 0, breakdownMinutes: 0 };
+        adherenceByLocal[localKey] = { totalScheduled: 0, totalBreakdowns: 0, breakdownMinutes: 0, plannedMinutes: 0 };
       }
       
+      const linePlanned = calcPlannedMinutes(s.valley_start, s.valley_end);
       adherenceByLocal[localKey].totalScheduled++;
+      adherenceByLocal[localKey].plannedMinutes += linePlanned;
+      totalPlannedMinutes += linePlanned;
 
       // Sum breakdown time for this schedule
       const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
@@ -1265,9 +1554,8 @@ function PortoOperacaoPage() {
 
     const localList = Object.keys(adherenceByLocal).map(k => {
       const group = adherenceByLocal[k];
-      const scheduledMinutes = group.totalScheduled * baselineShiftMinutes;
-      const uptime = Math.max(0, scheduledMinutes - group.breakdownMinutes);
-      const adherenceScore = scheduledMinutes > 0 ? Math.round((uptime / scheduledMinutes) * 100) : 100;
+      const uptime = Math.max(0, group.plannedMinutes - group.breakdownMinutes);
+      const adherenceScore = group.plannedMinutes > 0 ? Math.round((uptime / group.plannedMinutes) * 100) : 100;
       return {
         local: k,
         totalScheduled: group.totalScheduled,
@@ -1277,13 +1565,12 @@ function PortoOperacaoPage() {
       };
     });
 
-    const totalScheduledMinutes = totalScheduledCount * baselineShiftMinutes;
-    const overallUptime = Math.max(0, totalScheduledMinutes - totalBreakdownMinutes);
-    const overallAdherence = totalScheduledMinutes > 0 ? Math.round((overallUptime / totalScheduledMinutes) * 100) : 100;
+    const overallUptime = Math.max(0, totalPlannedMinutes - totalBreakdownMinutes);
+    const overallAdherence = totalPlannedMinutes > 0 ? Math.round((overallUptime / totalPlannedMinutes) * 100) : 100;
 
     const activeCount = Math.max(0, totalScheduledCount - unattendedCount);
     const equipmentAdherence = totalScheduledCount > 0 ? Math.round((activeCount / totalScheduledCount) * 100) : 100;
-    const totalPlannedHours = totalScheduledCount * 12;
+    const totalPlannedHours = totalPlannedMinutes / 60;
 
     const totalBreakdowns = localList.reduce((acc, l) => acc + l.totalBreakdowns, 0);
     const mttrMinutes = totalBreakdowns > 0 ? Math.round(totalBreakdownMinutes / totalBreakdowns) : 0;
@@ -1291,7 +1578,6 @@ function PortoOperacaoPage() {
     const mttrM = mttrMinutes % 60;
     const mttr = `${String(mttrH).padStart(2, '0')}:${String(mttrM).padStart(2, '0')}h`;
 
-    const totalPlannedMinutes = totalPlannedHours * 60;
     const mtbfMinutes = totalBreakdowns > 0 ? Math.max(0, Math.round((totalPlannedMinutes - totalBreakdownMinutes) / totalBreakdowns)) : totalPlannedMinutes;
     const mtbfH = Math.floor(mtbfMinutes / 60);
     const mtbfM = mtbfMinutes % 60;
@@ -1502,77 +1788,254 @@ function PortoOperacaoPage() {
     };
   }, [schedules, correctiveLogs, selectedDate, timeTick]);
 
+  // ── Analytics exclusively for the Relatório Gerencial charts (uses its own date filter) ──
+  const analyticsReport = useMemo(() => {
+    const adherenceByLocal: Record<string, {
+      totalScheduled: number;
+      totalBreakdowns: number;
+      breakdownMinutes: number;
+      plannedMinutes: number;
+    }> = {};
+    const reportSchedules = schedules.filter(s => matchesReportDateFilter(s.scheduled_date));
+    let totalScheduledCount = reportSchedules.length;
+    let totalBreakdownMinutes = 0;
+    let totalPlannedMinutes = 0;
+    let unattendedCount = 0;
+
+    reportSchedules.forEach(s => {
+      const localKey = s.local || "OUTROS";
+      if (!adherenceByLocal[localKey]) {
+        adherenceByLocal[localKey] = { totalScheduled: 0, totalBreakdowns: 0, breakdownMinutes: 0, plannedMinutes: 0 };
+      }
+      const linePlanned = calcPlannedMinutes(s.valley_start, s.valley_end);
+      adherenceByLocal[localKey].totalScheduled++;
+      adherenceByLocal[localKey].plannedMinutes += linePlanned;
+      totalPlannedMinutes += linePlanned;
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
+      if (hasActiveStop) unattendedCount++;
+      stops.forEach(st => {
+        adherenceByLocal[localKey].totalBreakdowns++;
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diffMin = Math.floor((end - start) / 60000);
+          if (diffMin > 0) {
+            adherenceByLocal[localKey].breakdownMinutes += diffMin;
+            totalBreakdownMinutes += diffMin;
+          }
+        }
+      });
+    });
+
+    const localList = Object.keys(adherenceByLocal).map(k => {
+      const group = adherenceByLocal[k];
+      const uptime = Math.max(0, group.plannedMinutes - group.breakdownMinutes);
+      const adherenceScore = group.plannedMinutes > 0 ? Math.round((uptime / group.plannedMinutes) * 100) : 100;
+      return { local: k, totalScheduled: group.totalScheduled, totalBreakdowns: group.totalBreakdowns, breakdownHours: (group.breakdownMinutes / 60).toFixed(1), adherence: adherenceScore };
+    });
+
+    const totalUptimeMinutes = Math.max(0, totalPlannedMinutes - totalBreakdownMinutes);
+    const overallAdherence = totalPlannedMinutes > 0
+      ? parseFloat(((totalUptimeMinutes / totalPlannedMinutes) * 100).toFixed(2))
+      : 100;
+    const activeCount = Math.max(0, totalScheduledCount - unattendedCount);
+    const equipmentAdherence = totalScheduledCount > 0 ? Math.round((activeCount / totalScheduledCount) * 100) : 100;
+    const totalPlannedHours = totalPlannedMinutes / 60;
+
+    // --- Chart Datasets ---
+    const equipmentMap: Record<string, number> = {};
+    const operatorMap: Record<string, number> = {};
+    const plateMap: Record<string, number> = {};
+    const typesMap: Record<string, number> = {};
+
+    reportSchedules.forEach(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      let mins = 0;
+      stops.forEach(st => {
+        if (st.stop_start) {
+          const start = new Date(st.stop_start).getTime();
+          const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+          const diff = Math.floor((end - start) / 60000);
+          if (diff > 0) {
+            mins += diff;
+            const parsed = parseCorrectiveReason(st.reason);
+            typesMap[parsed.type] = (typesMap[parsed.type] || 0) + diff;
+          }
+        }
+      });
+      if (mins > 0 && s.equipment) equipmentMap[s.equipment] = (equipmentMap[s.equipment] || 0) + mins;
+      if (mins > 0 && s.operator)  operatorMap[s.operator]   = (operatorMap[s.operator]   || 0) + mins;
+      if (mins > 0 && s.plate)     plateMap[s.plate]         = (plateMap[s.plate]         || 0) + mins;
+    });
+
+    const chartDataEquipment = Object.entries(equipmentMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes).slice(0, 5);
+    const chartDataOperator  = Object.entries(operatorMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes).slice(0, 5);
+    const chartDataPlates    = Object.entries(plateMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes).slice(0, 5);
+    const chartDataTypes     = Object.entries(typesMap).map(([name, val]) => ({ name, minutes: val }));
+
+    const fullChartDataEquipment = Object.entries(equipmentMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes);
+    const fullChartDataPlates    = Object.entries(plateMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes);
+    const fullChartDataOperator  = Object.entries(operatorMap).map(([name, val]) => ({ name, minutes: val })).sort((a, b) => b.minutes - a.minutes);
+
+    // DATE chart: if single-day mode → show just that day; otherwise → last 30 dates with data
+    const datesWithData = reportDateMode === "single"
+      ? [reportSingleDate]
+      : Array.from(new Set(schedules.map(s => s.scheduled_date))).sort().slice(-30);
+    const datesInRange = datesWithData.filter(d => matchesReportDateFilter(d));
+    const chartDataDates = datesInRange.map(dateStr => {
+      const dayScheds = schedules.filter(s => s.scheduled_date === dateStr);
+      let totalMins = 0;
+      dayScheds.forEach(s => {
+        correctiveLogs.filter(l => l.schedule_id === s.id).forEach(st => {
+          if (st.stop_start) {
+            const start = new Date(st.stop_start).getTime();
+            const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+            const diff = Math.floor((end - start) / 60000);
+            if (diff > 0) totalMins += diff;
+          }
+        });
+      });
+      const parts = dateStr.split("-");
+      const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dateStr;
+      return { name: label, minutes: totalMins };
+    });
+
+    return {
+      localList, overallAdherence, totalScheduledCount,
+      totalBreakdownMinutes, totalPlannedMinutes, totalUptimeMinutes,
+      totalBreakdownHours: (totalBreakdownMinutes / 60),
+      unattendedCount, activeCount, equipmentAdherence, totalPlannedHours,
+      chartDataEquipment, chartDataDates, chartDataTypes, chartDataOperator, chartDataPlates,
+      fullChartDataEquipment, fullChartDataPlates, fullChartDataOperator
+    };
+  }, [schedules, correctiveLogs, reportDateMode, reportSingleDate, reportStartDate, reportEndDate, reportMonth, reportYear, timeTick]);
+
   return (
-    <Tabs defaultValue="operacao" className="w-full space-y-4">
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-4">
       {/* Tabs and Date picker row at the very top of the page */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
         <div className="flex justify-start">
-          <TabsList className="bg-slate-100 p-1 rounded-xl">
-            <TabsTrigger value="operacao" className="font-bold text-xs uppercase px-4 py-2">
-              <Activity className="h-4 w-4 mr-2 text-indigo-600" />
-              Operação Diária
-            </TabsTrigger>
-            <TabsTrigger value="habituais" className="font-bold text-xs uppercase px-4 py-2">
-              <Clock className="h-4 w-4 mr-2 text-indigo-600" />
-              Demandas Habituais
-            </TabsTrigger>
-            <TabsTrigger value="aderencia" className="font-bold text-xs uppercase px-4 py-2">
-              <Activity className="h-4 w-4 mr-2 text-indigo-600" />
+          <TabsList className="bg-slate-100 p-1 rounded-xl flex flex-wrap gap-1 items-center">
+            <div className="flex bg-slate-200/50 p-0.5 rounded-lg border border-slate-300/30 gap-0.5">
+              <TabsTrigger value="operacao" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+                <Activity className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+                Operação Diária
+              </TabsTrigger>
+              <TabsTrigger value="habituais" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+                <Clock className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+                Demanda D+1
+              </TabsTrigger>
+              <TabsTrigger value="corretivas" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+                <Wrench className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+                Corretivas
+              </TabsTrigger>
+            </div>
+            
+            <div className="w-[1px] h-5 bg-slate-300 mx-0.5 hidden sm:block" />
+
+            <TabsTrigger value="aderencia" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+              <Activity className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
               Aderência & Indicadores
             </TabsTrigger>
-            <TabsTrigger value="corretivas" className="font-bold text-xs uppercase px-4 py-2">
-              <Wrench className="h-4 w-4 mr-2 text-indigo-600" />
-              Corretivas
+            <div className="w-[1px] h-5 bg-slate-300 mx-0.5 hidden sm:block" />
+            <TabsTrigger value="pessoas" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+              <Users className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+              Pessoas
             </TabsTrigger>
           </TabsList>
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-center">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Data da Operação:</span>
-          <Input 
-            type="date" 
-            value={selectedDate} 
-            onChange={(e) => setSelectedDate(e.target.value)} 
-            className="w-36 h-8 text-xs font-bold bg-white" 
-          />
-        </div>
+        {(activeTab === "operacao" || activeTab === "habituais" || activeTab === "corretivas") && (
+          <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Filtrar Data:</span>
+            
+            <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 shadow-sm">
+              <button
+                onClick={() => setDateFilterMode("single")}
+                className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                  dateFilterMode === "single" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Dia
+              </button>
+              <button
+                onClick={() => setDateFilterMode("range")}
+                className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                  dateFilterMode === "range" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Período
+              </button>
+              <button
+                onClick={() => setDateFilterMode("month")}
+                className={`px-2 py-1 text-[9px] font-black uppercase rounded-md transition-all ${
+                  dateFilterMode === "month" ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Mês/Ano
+              </button>
+            </div>
+
+            {dateFilterMode === "single" && (
+              <Input 
+                type="date" 
+                value={selectedDate} 
+                onChange={(e) => setSelectedDate(e.target.value)} 
+                className="w-36 h-8 text-xs font-bold bg-white" 
+              />
+            )}
+
+            {dateFilterMode === "range" && (
+              <div className="flex items-center gap-1">
+                <Input 
+                  type="date" 
+                  value={startDate} 
+                  onChange={(e) => setStartDate(e.target.value)} 
+                  className="w-32 h-8 text-[10px] font-bold bg-white" 
+                />
+                <span className="text-[9px] font-bold text-slate-400">até</span>
+                <Input 
+                  type="date" 
+                  value={endDate} 
+                  onChange={(e) => setEndDate(e.target.value)} 
+                  className="w-32 h-8 text-[10px] font-bold bg-white" 
+                />
+              </div>
+            )}
+
+            {dateFilterMode === "month" && (
+              <div className="flex items-center gap-1">
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="h-8 border border-slate-200 rounded px-2 text-xs font-bold bg-white text-slate-800"
+                >
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const mVal = String(i + 1).padStart(2, "0");
+                    return (
+                      <option key={i} value={mVal}>
+                        {format(new Date(2000, i, 1), "MMMM", { locale: ptBR })}
+                      </option>
+                    );
+                  })}
+                </select>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  className="h-8 border border-slate-200 rounded px-2 text-xs font-bold bg-white text-slate-800"
+                >
+                  {Array.from({ length: 5 }, (_, i) => {
+                    const y = String(new Date().getFullYear() - 2 + i);
+                    return <option key={y} value={y}>{y}</option>;
+                  })}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
       </div>
  
-      {/* KPI Cards (Compact Row) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-        <Card className="bg-slate-950 text-white border-none shadow-sm">
-          <CardContent className="p-2 px-3 flex items-center justify-between">
-            <div>
-              <p className="text-[8px] font-black uppercase text-slate-400 tracking-wider">Aderência Geral de Tempo</p>
-              <h3 className="text-base font-black mt-0.5 text-indigo-400">{analytics.overallAdherence}%</h3>
-              <p className="text-[7.5px] font-bold text-slate-400">Calculado minuto a minuto</p>
-            </div>
-            <Activity className="h-5 w-5 text-indigo-500 opacity-30" />
-          </CardContent>
-        </Card>
- 
-        <Card className="bg-white border border-slate-200 shadow-sm">
-          <CardContent className="p-2 px-3 flex items-center justify-between">
-            <div>
-              <p className="text-[8px] font-black uppercase text-slate-500 tracking-wider">Aderência de Equipamentos</p>
-              <h3 className="text-base font-black mt-0.5 text-slate-900">{analytics.activeCount} / {analytics.totalScheduledCount} Ativos</h3>
-              <p className="text-[7.5px] font-bold text-red-650 text-red-650">{analytics.unattendedCount} em corretiva ({analytics.equipmentAdherence}% operacional)</p>
-            </div>
-            <CheckCircle2 className="h-5 w-5 text-emerald-500 opacity-30" />
-          </CardContent>
-        </Card>
- 
-        <Card className="bg-red-50 border border-red-200 shadow-sm">
-          <CardContent className="p-2 px-3 flex items-center justify-between">
-            <div>
-              <p className="text-[8px] font-black uppercase text-red-600 tracking-wider">Previsto vs. Perdido (Tempo Real)</p>
-              <h3 className="text-base font-black mt-0.5 text-red-700">{analytics.totalPlannedHours}h / {analytics.totalBreakdownHours}h</h3>
-              <p className="text-[7.5px] font-bold text-red-600">Perdido minuto a minuto</p>
-            </div>
-            <Clock className="h-5 w-5 text-red-400 opacity-35" />
-          </CardContent>
-        </Card>
-      </div>
 
       <TabsContent value="operacao" className="space-y-3 mt-0">
           {/* Shift Filter Bar */}
@@ -1612,8 +2075,8 @@ function PortoOperacaoPage() {
                   {schedules.filter(s => {
                     if (s.scheduled_date !== selectedDate) return false;
                     if (!s.valley_start) return true;
-                    const [h] = s.valley_start.split(":").map(Number);
-                    return h >= 6 && h < 18;
+                    const startMin = timeToMinutes(s.valley_start);
+                    return startMin >= 6 * 60 && startMin <= 18 * 60;
                   }).length}
                 </span>
               </button>
@@ -1627,15 +2090,37 @@ function PortoOperacaoPage() {
                 }`}
               >
                 🌙 Noite
-                <span className="ml-1 text-[9px] opacity-80">18:01 – 05:59</span>
+                <span className="ml-1 text-[9px] opacity-80">18:01 – 23:59</span>
                 <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
                   shiftFilter === "noite" ? "bg-white/20 text-white" : "bg-indigo-100 text-indigo-700"
                 }`}>
                   {schedules.filter(s => {
                     if (s.scheduled_date !== selectedDate) return false;
                     if (!s.valley_start) return false;
-                    const [h] = s.valley_start.split(":").map(Number);
-                    return h >= 18 || h < 6;
+                    const startMin = timeToMinutes(s.valley_start);
+                    return startMin > 18 * 60 && startMin < 24 * 60;
+                  }).length}
+                </span>
+              </button>
+              <button
+                id="shift-filter-madrugada"
+                onClick={() => setShiftFilter("madrugada")}
+                className={`px-4 py-1.5 text-[10px] font-black uppercase tracking-wider border-l border-slate-200 transition-all ${
+                  shiftFilter === "madrugada"
+                    ? "bg-purple-600 text-white"
+                    : "bg-white text-purple-700 hover:bg-purple-50"
+                }`}
+              >
+                ✨ Madrugada
+                <span className="ml-1 text-[9px] opacity-80">00:00 – 05:59</span>
+                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] ${
+                  shiftFilter === "madrugada" ? "bg-white/20 text-white" : "bg-purple-100 text-purple-700"
+                }`}>
+                  {schedules.filter(s => {
+                    if (s.scheduled_date !== selectedDate) return false;
+                    if (!s.valley_start) return false;
+                    const startMin = timeToMinutes(s.valley_start);
+                    return startMin >= 0 && startMin < 6 * 60;
                   }).length}
                 </span>
               </button>
@@ -1698,7 +2183,7 @@ function PortoOperacaoPage() {
               <div className="relative w-full max-w-xs">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <Input 
-                  placeholder="Buscar por placa, operador, local..." 
+                  placeholder="Buscar por placa, equipamento, operador, corretiva, local, modelo..." 
                   value={search} 
                   onChange={e => setSearch(e.target.value)} 
                   className="pl-8 h-8 text-xs font-medium"
@@ -1961,7 +2446,7 @@ function PortoOperacaoPage() {
           <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
             <div className="bg-slate-50 border-b p-3 flex justify-between items-center flex-wrap gap-2">
               <div>
-                <h2 className="font-black text-slate-800 text-xs uppercase tracking-wider">Demandas Habituais</h2>
+                <h2 className="font-black text-slate-800 text-xs uppercase tracking-wider">Demanda D+1</h2>
                 <p className="text-[9px] text-muted-foreground uppercase font-bold mt-0.5">Programação semanal recorrente — define o padrão para todos os dias da semana</p>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
@@ -1979,7 +2464,7 @@ function PortoOperacaoPage() {
                 <div className="relative w-full max-w-xs">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                   <Input 
-                    placeholder="Buscar por placa, operador, local..." 
+                    placeholder="Buscar por placa, equipamento, operador, corretiva, local, modelo..." 
                     value={search} 
                     onChange={e => setSearch(e.target.value)} 
                     className="pl-8 h-8 text-xs font-medium w-48"
@@ -2021,7 +2506,7 @@ function PortoOperacaoPage() {
                             <Table>
                               <TableHeader className="bg-slate-50 sticky top-0">
                                 <TableRow className="text-[9px] uppercase font-black">
-                                  <TableHead className="py-1">Dia da Semana</TableHead>
+                                  <TableHead className="py-1">Data</TableHead>
                                   <TableHead className="py-1">Equipamento</TableHead>
                                   <TableHead className="py-1">Placa</TableHead>
                                   <TableHead className="py-1">Turno/Horário</TableHead>
@@ -2040,7 +2525,6 @@ function PortoOperacaoPage() {
                                   if (!rawPlaca && equipName) {
                                     rawPlaca = equipName.toString().trim().toUpperCase();
                                   }
-                                  const warn = getEquipmentWarning(equipName, rawPlaca);
 
                                   // Determine valley start and end times for preview
                                   // Matches HH or HH:MM on both sides
@@ -2071,30 +2555,116 @@ function PortoOperacaoPage() {
                                   }
 
                                   const rawOS = (row.os || row.ordemdeservico || row.osnumber || "").toString().trim();
-                                  const rowDateStr = getRowTargetDate(row, selectedDate);
-                                  const rowDateObj = new Date(rowDateStr + "T12:00:00");
+                                  const rowDateStr = parsePortoDate(row.dataprogramada, selectedDate);
+                                  const rowDateObj = getSafeDate(rowDateStr);
                                   
-                                  // Compute the weekday display string
-                                  let displayWeekday = format(rowDateObj, "EEEE", { locale: ptBR }).toUpperCase();
+                                  // Compute the date display string
+                                  let displayDate = format(rowDateObj, "dd/MM/yyyy");
                                   
                                   if (isNightShift && rawOS.includes("/")) {
                                     const nextDayDateObj = addDays(rowDateObj, 1);
-                                    displayWeekday = `${format(rowDateObj, "EEE", { locale: ptBR }).toUpperCase()} & ${format(nextDayDateObj, "EEE", { locale: ptBR }).toUpperCase()}`;
+                                    displayDate = `${format(rowDateObj, "dd/MM")} & ${format(nextDayDateObj, "dd/MM")}`;
                                   } else if (valley_start) {
                                     const parts = valley_start.split(":");
                                     const startHour = parseInt(parts[0], 10);
                                     if (!isNaN(startHour) && startHour >= 0 && startHour < 7) {
-                                      displayWeekday = format(addDays(rowDateObj, 1), "EEEE", { locale: ptBR }).toUpperCase();
+                                      displayDate = format(addDays(rowDateObj, 1), "dd/MM/yyyy");
                                     }
                                   }
 
+                                  const getRowValidation = (eName: string | null, plc: string | null, op: string | null, dStr: string) => {
+                                    const eqWarn = getEquipmentWarning(eName, plc);
+                                    if (eqWarn) return eqWarn;
+
+                                    if (op) {
+                                      const person = people.find(p => p.name.toLowerCase().trim() === op.toLowerCase().trim());
+                                      if (person) {
+                                        const onVacation = person.vacation_start && person.vacation_end && dStr >= person.vacation_start && dStr <= person.vacation_end;
+                                        if (onVacation) {
+                                          return {
+                                            type: "operator_vacation",
+                                            message: "Op. de Férias",
+                                            color: "bg-amber-100 text-amber-800 border-amber-300"
+                                          };
+                                        }
+                                        const isUnavail = (person.unavailability || []).includes(dStr);
+                                        if (isUnavail) {
+                                          return {
+                                            type: "operator_unavail",
+                                            message: "Op. Indisponível",
+                                            color: "bg-amber-100 text-amber-800 border-amber-300"
+                                          };
+                                        }
+                                      } else {
+                                        return {
+                                          type: "operator_not_found",
+                                          message: "Op. não Cadastrado",
+                                          color: "bg-slate-100 text-slate-700 border-slate-300"
+                                        };
+                                      }
+                                    }
+                                    return null;
+                                  };
+
+                                  const warn = getRowValidation(equipName, rawPlaca, row.operador, rowDateStr);
+
                                   return (
                                     <TableRow key={idx} className={warn?.type === "unavailable" ? "bg-rose-50/50" : ""}>
-                                      <TableCell className="py-1 font-mono text-[10px] text-indigo-700 capitalize">{displayWeekday}</TableCell>
+                                      <TableCell className="py-1 font-mono text-[10px] text-indigo-700 capitalize">{displayDate}</TableCell>
                                       <TableCell className="py-1 font-mono">{equipName || "—"}</TableCell>
-                                      <TableCell className="py-1 font-mono">{rawPlaca || "—"}</TableCell>
+                                      <TableCell className="py-1 font-mono">
+                                        <input 
+                                          className="h-6 py-0.5 px-1.5 text-[10px] font-mono w-24 bg-white border border-slate-200 rounded" 
+                                          value={row.placa || ""} 
+                                          onChange={(e) => {
+                                            const copy = [...previewData];
+                                            copy[idx].placa = e.target.value;
+                                            // Auto-fill operator from pessoa fidelizada
+                                            if (e.target.value) {
+                                              const rowDate = parsePortoDate(copy[idx].dataprogramada, selectedDate);
+                                              const rowTurno = copy[idx].turno || "DIA";
+                                              const pessoaLink = getPessoaByPlaca(e.target.value, rowDate, rowTurno);
+                                              if (pessoaLink) {
+                                                const dispCheck = isPessoaDisponivel(pessoaLink, rowDate);
+                                                if (dispCheck.ok) {
+                                                  copy[idx].operador = pessoaLink.name;
+                                                } else {
+                                                  copy[idx]._operatorAlert = dispCheck.motivo;
+                                                }
+                                              }
+                                            }
+                                            setPreviewData(copy);
+                                          }} 
+                                        />
+                                      </TableCell>
                                       <TableCell className="py-1">{row.turno || row.shift || "DIA"} ({row.horariovale || row.valley_time || "—"})</TableCell>
-                                      <TableCell className="py-1 uppercase text-[10px]">{row.operador || row.motorista || "—"}</TableCell>
+                                      <TableCell className="py-1 uppercase text-[10px]">
+                                        <select 
+                                          className="h-6 py-0.5 px-1.5 text-[10px] bg-white border border-slate-200 rounded w-44" 
+                                          value={row.operador || ""} 
+                                          onChange={(e) => {
+                                            const copy = [...previewData];
+                                            copy[idx].operador = e.target.value;
+                                            const match = people.find(p => p.name === e.target.value);
+                                            if (match && match.plate_tag) {
+                                              copy[idx].placa = match.plate_tag;
+                                            }
+                                            setPreviewData(copy);
+                                          }}
+                                        >
+                                          <option value="">Selecione...</option>
+                                          {people.map(p => {
+                                            const onVacation = p.vacation_start && p.vacation_end && rowDateStr >= p.vacation_start && rowDateStr <= p.vacation_end;
+                                            const isUnavail = (p.unavailability || []).includes(rowDateStr);
+                                            let label = p.name;
+                                            if (onVacation) label += " (Férias)";
+                                            else if (isUnavail) label += " (Indisp.)";
+                                            return (
+                                              <option key={p.id} value={p.name}>{label}</option>
+                                            );
+                                          })}
+                                        </select>
+                                      </TableCell>
                                       <TableCell className="py-1">
                                         {warn ? (
                                           <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase border ${warn.color}`}>
@@ -2143,7 +2713,7 @@ function PortoOperacaoPage() {
                         title="Selecionar todos"
                       />
                     </TableHead>
-                    <TableHead className="py-2.5">Dia da Semana</TableHead>
+                    <TableHead className="py-2.5">Data</TableHead>
                     <TableHead className="py-2.5">Equipamento</TableHead>
                     <TableHead className="py-2.5">Placa</TableHead>
                     <TableHead className="py-2.5">Modelo</TableHead>
@@ -2161,14 +2731,14 @@ function PortoOperacaoPage() {
                 <TableBody className="divide-y divide-slate-100 text-[10.5px] font-bold text-slate-900">
                   {habitualSchedules.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={14} className="text-center py-8 text-slate-400 italic font-black">Nenhuma demanda habitual importada ainda. Use o botão "Importar Programação" acima.</TableCell>
+                      <TableCell colSpan={14} className="text-center py-8 text-slate-400 italic font-black">Nenhuma demanda D+1 importada ainda. Use o botão "Importar Programação" acima.</TableCell>
                     </TableRow>
                   ) : (
                     habitualSchedules.map(s => {
                       const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id);
                       const isCurrentlyBroken = activeStops.some(l => !l.stop_end);
-                      const schedDateParsed = new Date(s.scheduled_date + "T12:00:00");
-                      const displayDateStr = format(schedDateParsed, "EEEE", { locale: ptBR });
+                      const schedDateParsed = getSafeDate(s.scheduled_date);
+                      const displayDateStr = format(schedDateParsed, "dd/MM/yyyy");
                       const isCheckedH = selectedHabituaisIds.has(s.id);
                       
                       return (
@@ -2323,33 +2893,28 @@ function PortoOperacaoPage() {
               <h2 className="font-black text-sm uppercase tracking-wider text-indigo-400">📊 Painel Gerencial de Aderência</h2>
               <p className="text-[10px] text-slate-400 uppercase font-black mt-0.5">Indicadores Operacionais e Gerenciamento de Custos</p>
             </div>
-            <Button onClick={() => setExecDialogOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase text-xs">
-              📊 Relatório Executivo p/ Diretores
-            </Button>
-          </div>
-
-          {/* View Mode Toggle Buttons */}
-          <div className="flex justify-end gap-2 bg-slate-100 p-1.5 rounded-lg w-fit ml-auto border border-slate-200">
-            <button
-              onClick={() => setAdherenceViewMode("charts")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
-                adherenceViewMode === "charts"
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "text-slate-650 hover:bg-slate-200 text-slate-600"
-              }`}
-            >
-              📊 Relatório Gerencial
-            </button>
-            <button
-              onClick={() => setAdherenceViewMode("table")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
-                adherenceViewMode === "table"
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : "text-slate-650 hover:bg-slate-200 text-slate-600"
-              }`}
-            >
-              📋 Tabela de Localidades
-            </button>
+            <div className="flex justify-end gap-2 bg-[#242424] p-1 rounded-lg border border-zinc-800">
+              <button
+                onClick={() => setAdherenceViewMode("charts")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
+                  adherenceViewMode === "charts"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:bg-zinc-800 text-zinc-305"
+                }`}
+              >
+                📊 Relatório Gerencial
+              </button>
+              <button
+                onClick={() => setAdherenceViewMode("table")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-200 flex items-center gap-1.5 ${
+                  adherenceViewMode === "table"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-zinc-400 hover:bg-zinc-800 text-zinc-305"
+                }`}
+              >
+                📋 Tabela de Localidades
+              </button>
+            </div>
           </div>
 
           {adherenceViewMode === "charts" ? (
@@ -2372,18 +2937,181 @@ function PortoOperacaoPage() {
                 </defs>
               </svg>
 
-              <div className="flex justify-between items-center border-b border-[#2b2b2b] pb-4">
-                <div>
-                  <h3 className="text-sm font-black uppercase tracking-wider text-slate-100">📊 Relatório Executivo Gerencial</h3>
-                  <p className="text-[10px] text-zinc-400 font-bold uppercase mt-1">Indicadores e Distribuição de Paradas Corretivas</p>
+              <div className="flex flex-col gap-3 border-b border-[#2b2b2b] pb-4">
+                {/* Row 1: title + adherence badge */}
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-100">📊 Relatório Executivo Gerencial</h3>
+                    <p className="text-[10px] text-zinc-400 font-bold uppercase mt-1">Indicadores e Distribuição de Paradas Corretivas</p>
+                  </div>
+                  <div className="bg-[#242424] border border-[#3e3e3e] rounded-lg px-3 py-1.5 text-center">
+                    <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 block">Aderência Geral</span>
+                    <span className={`text-sm font-black ${analyticsReport.overallAdherence >= 90 ? "text-emerald-400" : analyticsReport.overallAdherence >= 75 ? "text-amber-400" : "text-red-400"}`}>
+                      {analyticsReport.overallAdherence}%
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-[#242424] border border-[#3e3e3e] rounded-lg px-3 py-1.5 text-center">
-                  <span className="text-[8px] font-black uppercase tracking-wider text-zinc-500 block">Aderência Geral</span>
-                  <span className={`text-sm font-black ${analytics.overallAdherence >= 90 ? "text-emerald-400" : analytics.overallAdherence >= 75 ? "text-amber-400" : "text-red-400"}`}>
-                    {analytics.overallAdherence}%
-                  </span>
+
+                {/* Row 2: date filter for this report */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">Filtrar Dados:</span>
+
+                  {/* Mode selector */}
+                  <div className="flex items-center bg-[#1a1a1a] border border-[#3e3e3e] rounded-lg p-0.5 gap-0.5">
+                    {(["single", "range", "month"] as const).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setReportDateMode(mode)}
+                        className={`px-2.5 py-1 rounded-md text-[9px] font-black uppercase tracking-wider transition-all ${
+                          reportDateMode === mode
+                            ? "bg-indigo-600 text-white shadow"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {mode === "single" ? "Dia" : mode === "range" ? "Período" : "Mês/Ano"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Single date */}
+                  {reportDateMode === "single" && (
+                    <input
+                      type="date"
+                      value={reportSingleDate}
+                      onChange={e => setReportSingleDate(e.target.value)}
+                      className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  )}
+
+                  {/* Date range */}
+                  {reportDateMode === "range" && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="date"
+                        value={reportStartDate}
+                        onChange={e => setReportStartDate(e.target.value)}
+                        className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <span className="text-[9px] text-zinc-500 font-bold">até</span>
+                      <input
+                        type="date"
+                        value={reportEndDate}
+                        onChange={e => setReportEndDate(e.target.value)}
+                        className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  )}
+
+                  {/* Month / Year */}
+                  {reportDateMode === "month" && (
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={reportMonth}
+                        onChange={e => setReportMonth(e.target.value)}
+                        className="h-7 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="01">Janeiro</option>
+                        <option value="02">Fevereiro</option>
+                        <option value="03">Março</option>
+                        <option value="04">Abril</option>
+                        <option value="05">Maio</option>
+                        <option value="06">Junho</option>
+                        <option value="07">Julho</option>
+                        <option value="08">Agosto</option>
+                        <option value="09">Setembro</option>
+                        <option value="10">Outubro</option>
+                        <option value="11">Novembro</option>
+                        <option value="12">Dezembro</option>
+                      </select>
+                      <input
+                        type="number"
+                        value={reportYear}
+                        onChange={e => setReportYear(e.target.value)}
+                        min="2020"
+                        max="2099"
+                        className="h-7 w-20 rounded-lg border border-[#3e3e3e] bg-[#1a1a1a] text-[10px] font-bold text-zinc-200 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* ─── Summary Panel ─── */}
+              {(() => {
+                const fmtMin = (m: number) => {
+                  const hh = Math.floor(m / 60);
+                  const mm = Math.floor(m % 60);
+                  const ss = 0;
+                  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+                };
+                const avgPerEquip = analyticsReport.totalScheduledCount > 0
+                  ? analyticsReport.totalPlannedMinutes / analyticsReport.totalScheduledCount
+                  : 0;
+                const periodLabel = reportDateMode === "single"
+                  ? reportSingleDate.split("-").reverse().join("/")
+                  : reportDateMode === "range"
+                  ? `${reportStartDate.split("-").reverse().join("/")} → ${reportEndDate.split("-").reverse().join("/")}`
+                  : `${reportMonth}/${reportYear}`;
+
+                return (
+                  <div className="w-full border border-[#3e3e3e] rounded-xl overflow-hidden text-[11px] font-bold uppercase tracking-wider">
+                    {/* Header row */}
+                    <div className="grid grid-cols-2">
+                      {/* Left: period + non-attendance + attendance */}
+                      <div className="bg-[#1e3a5f] border-r border-[#3e3e3e]">
+                        <div className="flex items-center gap-3 px-4 py-2 border-b border-[#2b4a70]">
+                          <span className="text-[9px] text-blue-300 tracking-widest">PERÍODO:</span>
+                          <span className="text-white font-black">{periodLabel}</span>
+                        </div>
+                        <div className="grid grid-cols-2 divide-x divide-[#2b4a70]">
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">NÃO ATENDIMENTO</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(analyticsReport.totalBreakdownMinutes)}</div>
+                          </div>
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">ATENDIMENTO</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(analyticsReport.totalUptimeMinutes)}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: derived metrics */}
+                      <div className="bg-[#1a2a40]">
+                        <div className="grid grid-cols-2 divide-x divide-[#2b3a50] border-b border-[#2b3a50]">
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">TOTAL HORAS PERDIDAS</div>
+                            <div className="text-red-400 font-mono font-black text-sm">{fmtMin(analyticsReport.totalBreakdownMinutes)}</div>
+                          </div>
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">TOTAL DE HORAS</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(analyticsReport.totalPlannedMinutes)}</div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 divide-x divide-[#2b3a50]">
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">HORA POR EQUIPAMENTO</div>
+                            <div className="text-white font-mono font-black text-sm">{fmtMin(avgPerEquip)}</div>
+                          </div>
+                          <div className="px-4 py-2.5">
+                            <div className="text-[8px] text-blue-300 mb-1">TOTAL DE EQUIPAMENTOS</div>
+                            <div className="text-white font-mono font-black text-sm">{analyticsReport.totalScheduledCount}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Aderência footer */}
+                    <div className={`flex items-center justify-between px-6 py-3 ${
+                      analyticsReport.overallAdherence > 95 ? "bg-indigo-700" : analyticsReport.overallAdherence >= 95 ? "bg-amber-600" : "bg-red-700"
+                    }`}>
+                      <span className="text-white text-xs tracking-widest">ADERÊNCIA:</span>
+                      <span className="text-white font-black text-2xl font-mono tracking-tight">
+                        {analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
@@ -2391,12 +3119,15 @@ function PortoOperacaoPage() {
                 <div className="lg:col-span-5 flex flex-col gap-6">
                   
                   {/* 1. EQUIPAMENTO (Horizontal Bar) */}
-                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px]">
+                  <div 
+                    onClick={() => setExpandedChart("equipment")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
                     <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">EQUIPAMENTO</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          data={analytics.chartDataEquipment}
+                          data={analyticsReport.chartDataEquipment}
                           layout="vertical"
                           margin={{ top: 10, right: 75, left: 10, bottom: 5 }}
                         >
@@ -2410,7 +3141,7 @@ function PortoOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={26}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2418,12 +3149,15 @@ function PortoOperacaoPage() {
                   </div>
 
                   {/* 4. MANUTENÇÃO (Line Chart) */}
-                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px]">
+                  <div 
+                    onClick={() => setExpandedChart("maintenance")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
                     <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">MANUTENÇÃO</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
-                          data={analytics.chartDataTypes.length > 0 ? analytics.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]}
+                          data={analyticsReport.chartDataTypes.length > 0 ? analyticsReport.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]}
                           margin={{ top: 15, right: 20, left: 10, bottom: 10 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" />
@@ -2436,7 +3170,7 @@ function PortoOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
                           </Line>
                         </LineChart>
                       </ResponsiveContainer>
@@ -2452,12 +3186,15 @@ function PortoOperacaoPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     
                     {/* 2. DATA (Vertical Bar) */}
-                    <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px]">
+                    <div 
+                      onClick={() => setExpandedChart("date")}
+                      className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    >
                       <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">DATA</h4>
                       <div className="flex-1 min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
-                            data={analytics.chartDataDates}
+                            data={analyticsReport.chartDataDates}
                             margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
                           >
                             <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
@@ -2478,16 +3215,19 @@ function PortoOperacaoPage() {
                     </div>
 
                     {/* 3. ADERÊNCIA (Gauge) */}
-                    <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px]">
+                    <div 
+                      onClick={() => setExpandedChart("adherence")}
+                      className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    >
                       <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">ADERÊNCIA</h4>
                       <div className="flex-1 flex flex-col items-center justify-center relative min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
                               data={[
-                                { value: Math.min(95, analytics.overallAdherence), color: "#ef4444" }, // Red zone
-                                { value: Math.max(0, Math.min(5, analytics.overallAdherence - 95)), color: "#10b981" }, // Green zone
-                                { value: Math.max(0, 100 - analytics.overallAdherence), color: "#1f2937" } // Gap
+                                { value: Math.min(95, analyticsReport.overallAdherence), color: "#ef4444" }, // Red zone
+                                { value: Math.max(0, Math.min(5, analyticsReport.overallAdherence - 95)), color: "#10b981" }, // Green zone
+                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#1f2937" } // Gap
                               ]}
                               dataKey="value"
                               innerRadius="65%"
@@ -2504,7 +3244,7 @@ function PortoOperacaoPage() {
                           </PieChart>
                         </ResponsiveContainer>
                         <div className="absolute top-[60%] flex flex-col items-center">
-                          <span className="text-3xl font-black text-white">{analytics.overallAdherence.toFixed(2).replace('.', ',')}%</span>
+                          <span className="text-3xl font-black text-white">{analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%</span>
                         </div>
                       </div>
                     </div>
@@ -2512,12 +3252,15 @@ function PortoOperacaoPage() {
                   </div>
 
                   {/* 5. MOTORISTA/OPERADOR (Horizontal Bar) */}
-                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px]">
+                  <div 
+                    onClick={() => setExpandedChart("operator")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
                     <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">MOTORISTA/OPERADOR</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          data={analytics.chartDataOperator}
+                          data={analyticsReport.chartDataOperator}
                           layout="vertical"
                           margin={{ top: 5, right: 75, left: 10, bottom: 5 }}
                         >
@@ -2531,7 +3274,7 @@ function PortoOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2539,12 +3282,15 @@ function PortoOperacaoPage() {
                   </div>
 
                   {/* 6. PLACA (Vertical Bar) */}
-                  <div className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px]">
+                  <div 
+                    onClick={() => setExpandedChart("plates")}
+                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                  >
                     <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">PLACA</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
-                          data={analytics.chartDataPlates}
+                          data={analyticsReport.chartDataPlates}
                           margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
@@ -2570,213 +3316,179 @@ function PortoOperacaoPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Left 2 Columns: Adherence table */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-                <div className="bg-slate-50 border-b p-3">
-                  <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider">Aderência por Localidade de Atendimento</h3>
-                </div>
-                <Table>
-                  <TableHeader className="bg-slate-100/50">
-                    <TableRow className="text-[10px] font-black uppercase text-slate-600">
-                      <TableHead>Local / Frente</TableHead>
-                      <TableHead>Máquinas Escaladas</TableHead>
-                      <TableHead>Intercorrências Corretivas</TableHead>
-                      <TableHead>Horas Corretiva</TableHead>
-                      <TableHead className="text-right">Aderência</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="text-xs font-bold text-slate-800">
-                    {analytics.localList.map(g => {
-                      const isExpanded = expandedLocal === g.local;
-                      return (
-                        <Fragment key={g.local}>
-                          <TableRow 
-                            className="hover:bg-slate-50/50 cursor-pointer transition-colors"
-                            onClick={() => setExpandedLocal(isExpanded ? null : g.local)}
-                          >
-                            <TableCell className="uppercase flex items-center gap-1.5 py-3">
-                              <ChevronRight className={`h-4 w-4 text-slate-405 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`} />
-                              <span className="font-bold text-slate-900">{g.local}</span>
-                            </TableCell>
-                            <TableCell>{g.totalScheduled}</TableCell>
-                            <TableCell>{g.totalBreakdowns} paradas</TableCell>
-                            <TableCell className="font-mono text-red-600">{g.breakdownHours} hrs</TableCell>
-                            <TableCell className="text-right">
-                              <span className={`px-2 py-0.5 rounded font-black ${g.adherence >= 90 ? "bg-emerald-100 text-emerald-700" : g.adherence >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                                {g.adherence}%
-                              </span>
-                            </TableCell>
-                          </TableRow>
-                          {isExpanded && (
-                            <TableRow className="bg-slate-50/30 hover:bg-slate-50/30">
-                              <TableCell colSpan={5} className="p-3 border-t border-b">
-                                <div className="bg-white border rounded-lg p-3 shadow-inner space-y-2">
-                                  <h4 className="text-[10px] font-black uppercase text-indigo-900 tracking-wider flex items-center gap-1">
-                                    📋 Equipamentos Vinculados a {g.local}
-                                  </h4>
-                                  <Table className="text-[10px] w-full min-w-full">
-                                    <TableHeader className="bg-slate-50 text-[9px] font-black uppercase">
-                                      <TableRow>
-                                        <TableHead className="py-1">Equipamento</TableHead>
-                                        <TableHead className="py-1">Placa</TableHead>
-                                        <TableHead className="py-1">Operador</TableHead>
-                                        <TableHead className="py-1">OS</TableHead>
-                                        <TableHead className="py-1">Tempo Parado</TableHead>
-                                        <TableHead className="py-1 text-right">Aderência</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody className="text-[10px] font-bold text-slate-800">
-                                      {(() => {
-                                        const localSchedules = schedules.filter(s => s.scheduled_date === selectedDate && (s.local || "OUTROS") === g.local);
-                                        const grouped: Record<string, {
-                                          equipment: string;
-                                          plate: string;
-                                          operators: string[];
-                                          osNumbers: string[];
-                                          totalMinutes: number;
-                                          breakdownMinutes: number;
-                                          hasActiveStop: boolean;
-                                        }> = {};
-
-                                        localSchedules.forEach(s => {
-                                          const key = s.equipment || s.id;
-                                          if (!grouped[key]) {
-                                            grouped[key] = {
-                                              equipment: s.equipment || "—",
-                                              plate: s.plate || "—",
-                                              operators: [],
-                                              osNumbers: [],
-                                              totalMinutes: 0,
-                                              breakdownMinutes: 0,
-                                              hasActiveStop: false
-                                            };
-                                          }
-                                          grouped[key].totalMinutes += 720;
-                                          if (s.operator && !grouped[key].operators.includes(s.operator)) {
-                                            grouped[key].operators.push(s.operator);
-                                          }
-                                          if (s.os_number && !grouped[key].osNumbers.includes(s.os_number)) {
-                                            grouped[key].osNumbers.push(s.os_number);
-                                          }
-
-                                          const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
-                                          stops.forEach(st => {
-                                            if (st.stop_start) {
-                                              const start = new Date(st.stop_start).getTime();
-                                              const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
-                                              const diff = Math.floor((end - start) / 60000);
-                                              if (diff > 0) grouped[key].breakdownMinutes += diff;
-                                            }
-                                            if (st.stop_start && !st.stop_end) {
-                                              grouped[key].hasActiveStop = true;
-                                            }
-                                          });
-                                        });
-
-                                        return Object.values(grouped).map(eqGroup => {
-                                          const uptime = Math.max(0, eqGroup.totalMinutes - eqGroup.breakdownMinutes);
-                                          const adherenceScore = Math.round((uptime / eqGroup.totalMinutes) * 100);
-
-                                          return (
-                                            <TableRow key={eqGroup.equipment} className={eqGroup.hasActiveStop ? "bg-red-50/20 animate-pulse-slow" : ""}>
-                                              <TableCell className="py-1.5">{eqGroup.equipment}</TableCell>
-                                              <TableCell className="py-1.5">
-                                                <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] ${eqGroup.hasActiveStop ? "bg-red-100 text-red-700 border border-red-200" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
-                                                  {eqGroup.plate}
-                                                </span>
-                                              </TableCell>
-                                              <TableCell className="py-1.5 uppercase text-[10px]">{eqGroup.operators.join(" / ") || "—"}</TableCell>
-                                              <TableCell className="py-1.5 font-mono text-[10px]">{eqGroup.osNumbers.join(" / ") || "—"}</TableCell>
-                                              <TableCell className={`py-1.5 font-mono text-[10px] ${eqGroup.breakdownMinutes > 0 ? "text-red-650" : "text-slate-450"}`}>
-                                                {eqGroup.totalMinutes === 1440 ? "24:00h" : "12:00h"} (Parado: {String(Math.floor(eqGroup.breakdownMinutes / 60)).padStart(2, '0')}:{String(eqGroup.breakdownMinutes % 60).padStart(2, '0')}h)
-                                              </TableCell>
-                                              <TableCell className="py-1.5 text-right">
-                                                <span className={`px-1.5 py-0.5 rounded font-black ${adherenceScore >= 90 ? "bg-emerald-100 text-emerald-700" : adherenceScore >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
-                                                  {adherenceScore}%
-                                                </span>
-                                              </TableCell>
-                                            </TableRow>
-                                          );
-                                        });
-                                      })()}
-                                    </TableBody>
-                                  </Table>
-                                </div>
+              
+              {/* Left 2 Columns: Adherence table */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-slate-50 border-b p-3">
+                    <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider">Aderência por Localidade de Atendimento</h3>
+                  </div>
+                  <Table>
+                    <TableHeader className="bg-slate-100/50">
+                      <TableRow className="text-[10px] font-black uppercase text-slate-600">
+                        <TableHead>Local / Frente</TableHead>
+                        <TableHead>Máquinas Escaladas</TableHead>
+                        <TableHead>Intercorrências Corretivas</TableHead>
+                        <TableHead>Horas Corretiva</TableHead>
+                        <TableHead className="text-right">Aderência</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="text-xs font-bold text-slate-800">
+                      {analytics.localList.map(g => {
+                        const isExpanded = expandedLocal === g.local;
+                        return (
+                          <Fragment key={g.local}>
+                            <TableRow 
+                              className="hover:bg-slate-50/50 cursor-pointer transition-colors"
+                              onClick={() => setExpandedLocal(isExpanded ? null : g.local)}
+                            >
+                              <TableCell className="uppercase flex items-center gap-1.5 py-3">
+                                <ChevronRight className={`h-4 w-4 text-slate-400 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`} />
+                                <span className="font-bold text-slate-900">{g.local}</span>
+                              </TableCell>
+                              <TableCell>{g.totalScheduled}</TableCell>
+                              <TableCell>{g.totalBreakdowns} paradas</TableCell>
+                              <TableCell className="font-mono text-red-600">{g.breakdownHours} hrs</TableCell>
+                              <TableCell className="text-right">
+                                <span className={`px-2 py-0.5 rounded font-black ${g.adherence >= 90 ? "bg-emerald-100 text-emerald-700" : g.adherence >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                                  {g.adherence}%
+                                </span>
                               </TableCell>
                             </TableRow>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                    {analytics.localList.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={5} className="text-center py-6 text-slate-400 italic font-bold">Sem dados de aderência para hoje.</TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-
-            {/* Right Column: Pareto Offenders & Info */}
-            <div className="space-y-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 text-white space-y-3">
-                <h3 className="text-xs font-black uppercase text-indigo-400 flex items-center gap-1.5">
-                  ⚠️ Análise de Pareto — Maiores Ofensores
-                </h3>
-                <p className="text-[10px] text-slate-400 font-bold uppercase leading-tight">
-                  Equipamentos com maior impacto de inatividade corretiva hoje
-                </p>
-                <div className="space-y-2 mt-2">
-                  {analytics.topOffenders.map((off, idx) => (
-                    <div key={idx} className="bg-slate-850 p-2.5 rounded-lg border border-slate-800 text-[10.5px] space-y-1">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="font-mono font-black text-slate-200 text-xs flex items-center gap-1.5">
-                            {off.identifier}
-                            {off.plate && off.plate !== "—" && (
-                              <span className="text-[9px] text-indigo-300 font-bold bg-indigo-900/50 px-1.5 py-0.2 rounded border border-indigo-800 font-mono">
-                                Tag: {off.plate}
-                              </span>
+                            {isExpanded && (
+                              <TableRow className="bg-slate-50/30 hover:bg-slate-50/30">
+                                <TableCell colSpan={5} className="p-3 border-t border-b">
+                                  <div className="bg-white border rounded-lg p-3 shadow-inner space-y-2">
+                                    <h4 className="text-[10px] font-black uppercase text-indigo-900 tracking-wider flex items-center gap-1">
+                                      📋 Equipamentos Vinculados a {g.local}
+                                    </h4>
+                                    <Table className="text-[10px] w-full min-w-full">
+                                      <TableHeader className="bg-slate-50 text-[9px] font-black uppercase">
+                                        <TableRow>
+                                          <TableHead className="py-1">Equipamento</TableHead>
+                                          <TableHead className="py-1">Placa</TableHead>
+                                          <TableHead className="py-1">Operador</TableHead>
+                                          <TableHead className="py-1">OS</TableHead>
+                                          <TableHead className="py-1">Tempo Parado</TableHead>
+                                          <TableHead className="py-1 text-right">Aderência</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody className="font-bold text-slate-800 text-[10px]">
+                                        {schedules
+                                          .filter(s => matchesDateFilter(s.scheduled_date) && (s.local || "OUTROS") === g.local)
+                                          .map(s => {
+                                            const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+                                            let breakdownMinutes = 0;
+                                            stops.forEach(st => {
+                                              if (st.stop_start) {
+                                                const start = new Date(st.stop_start).getTime();
+                                                const end = st.stop_end ? new Date(st.stop_end).getTime() : timeTick;
+                                                const diff = Math.floor((end - start) / 60000);
+                                                if (diff > 0) breakdownMinutes += diff;
+                                              }
+                                            });
+                                            const totalMinutes = calcPlannedMinutes(s.valley_start, s.valley_end);
+                                            const uptime = Math.max(0, totalMinutes - breakdownMinutes);
+                                            const adherenceScore = totalMinutes > 0 ? Math.round((uptime / totalMinutes) * 100) : 100;
+                                            const hasActiveStop = stops.some(st => st.stop_start && !st.stop_end);
+  
+                                            return (
+                                              <TableRow key={s.id} className={hasActiveStop ? "bg-red-50/20 animate-pulse-slow" : ""}>
+                                                <TableCell className="py-1.5">{s.equipment || "—"}</TableCell>
+                                                <TableCell className="py-1.5">
+                                                  <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] ${hasActiveStop ? "bg-red-100 text-red-700 border border-red-200" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
+                                                    {s.plate}
+                                                  </span>
+                                                </TableCell>
+                                                <TableCell className="py-1.5 uppercase">{s.operator || "—"}</TableCell>
+                                                <TableCell className="py-1.5 font-mono">{s.os_number || "—"}</TableCell>
+                                                <TableCell className={`py-1.5 font-mono ${breakdownMinutes > 0 ? "text-red-600" : "text-slate-400"}`}>
+                                                   {Math.floor(breakdownMinutes / 60)}:{(breakdownMinutes % 60).toString().padStart(2, "0")}h
+                                                 </TableCell>
+                                                <TableCell className="py-1.5 text-right">
+                                                  <span className={`px-1.5 py-0.5 rounded font-black ${adherenceScore >= 90 ? "bg-emerald-100 text-emerald-700" : adherenceScore >= 75 ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                                                    {adherenceScore}%
+                                                  </span>
+                                                </TableCell>
+                                              </TableRow>
+                                            );
+                                          })}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
                             )}
-                          </span>
-                          <span className="text-[8px] text-slate-500 font-bold uppercase block mt-0.5">Local: {off.local} • {off.stopsCount} paradas</span>
+                          </Fragment>
+                        );
+                      })}
+                      {analytics.localList.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={5} className="text-center py-6 text-slate-400 italic font-bold">Sem dados de aderência para este período.</TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+  
+              {/* Right Column: Pareto Offenders & Info */}
+              <div className="space-y-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 text-white space-y-3">
+                  <h3 className="text-xs font-black uppercase text-indigo-400 flex items-center gap-1.5">
+                    ⚠️ Análise de Pareto — Maiores Ofensores
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase leading-tight">
+                    Equipamentos com maior impacto de inatividade corretiva hoje
+                  </p>
+                  <div className="space-y-2 mt-2">
+                    {analytics.topOffenders.map((off, idx) => (
+                      <div key={idx} className="bg-slate-850 p-2.5 rounded-lg border border-slate-800 text-[10.5px] space-y-1">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="font-mono font-black text-slate-200 text-xs flex items-center gap-1.5">
+                              {off.identifier}
+                              {off.plate && off.plate !== "—" && (
+                                <span className="text-[9px] text-indigo-300 font-bold bg-indigo-900/50 px-1.5 py-0.2 rounded border border-indigo-800 font-mono">
+                                  Tag: {off.plate}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-[8px] text-slate-500 font-bold uppercase block mt-0.5">Local: {off.local} • {off.stopsCount} paradas</span>
+                          </div>
+                          <span className="text-rose-400 font-black">-{off.hours}</span>
                         </div>
-                        <span className="text-rose-400 font-black">-{off.hours}</span>
+                        <div className="text-[9px] text-slate-400 font-semibold space-y-0.5 mt-0.5 pt-1 border-t border-slate-800/50">
+                          <div>Operador: <span className="text-slate-200 uppercase">{off.operator}</span></div>
+                          {off.reasons.length > 0 && (
+                            <div>Problema: <span className="text-rose-300 uppercase">{off.reasons.join(", ")}</span></div>
+                          )}
+                        </div>
+                        <div className="bg-slate-900/50 p-1.5 rounded mt-1 border border-slate-800/50 text-[9.5px] italic text-slate-400 font-medium">
+                          💡 Recomenda-se: {off.suggestion}
+                        </div>
                       </div>
-                      <div className="text-[9px] text-slate-400 font-semibold space-y-0.5 mt-0.5 pt-1 border-t border-slate-800/50">
-                        <div>Operador: <span className="text-slate-200 uppercase">{off.operator}</span></div>
-                        {off.reasons.length > 0 && (
-                          <div>Problema: <span className="text-rose-300 uppercase">{off.reasons.join(", ")}</span></div>
-                        )}
-                      </div>
-                      <div className="bg-slate-900/50 p-1.5 rounded mt-1 border border-slate-800/50 text-[9.5px] italic text-slate-400 font-medium">
-                        💡 Recomenda-se: {off.suggestion}
-                      </div>
-                    </div>
-                  ))}
-                  {analytics.topOffenders.length === 0 && (
-                    <p className="text-[10.5px] text-slate-500 italic text-center py-4">Nenhuma parada mecânica inativa hoje.</p>
-                  )}
+                    ))}
+                    {analytics.topOffenders.length === 0 && (
+                      <p className="text-[10.5px] text-slate-500 italic text-center py-4">Nenhuma parada mecânica inativa hoje.</p>
+                    )}
+                  </div>
+                </div>
+  
+                <div className="bg-white border-2 border-slate-200 rounded-xl p-5 space-y-3">
+                  <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1">
+                    <AlertCircle className="h-4 w-4 text-indigo-500" /> Informativo de Aderência
+                  </h3>
+                  <p className="text-[11px] leading-relaxed text-slate-600 font-medium">
+                    O cálculo de aderência é computado a partir do baseline diário programado (12 horas se escalado em turno único, ou 24 horas caso programado em ambos os turnos) por equipamento, deduzindo os minutos em que o ativo ficou inoperante em corretivas.
+                  </p>
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-[10px] text-indigo-800 font-black uppercase">
+                    Aderência mínima de contrato Vale: 90%
+                  </div>
                 </div>
               </div>
-
-              <div className="bg-white border-2 border-slate-200 rounded-xl p-5 space-y-3">
-                <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-1">
-                  <AlertCircle className="h-4 w-4 text-indigo-500" /> Informativo de Aderência
-                </h3>
-                <p className="text-[11px] leading-relaxed text-slate-600 font-medium">
-                  O cálculo de aderência é computado a partir do baseline diário programado (12 horas se escalado em turno único, ou 24 horas caso programado em ambos os turnos) por equipamento, deduzindo os minutos em que o ativo ficou inoperante em corretivas.
-                </p>
-                <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 text-[10px] text-indigo-800 font-black uppercase">
-                  Aderência mínima de contrato Vale: 90%
-                </div>
-              </div>
+  
             </div>
-
-          </div>
           )}
 
           {/* DIALOG DE RELATÓRIO EXECUTIVO GERENCIAL */}
@@ -2787,7 +3499,7 @@ function PortoOperacaoPage() {
                   📊 RELATÓRIO EXECUTIVO OPERACIONAL — BUSATO LOGÍSTICA
                 </DialogTitle>
                 <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">
-                  Visualização Corporativa • Data de Emissão: {format(new Date(selectedDate + "T12:00:00"), "dd/MM/yyyy")}
+                  Visualização Corporativa • Data de Emissão: {format(getSafeDate(selectedDate), "dd/MM/yyyy")}
                 </p>
               </DialogHeader>
               
@@ -2822,7 +3534,7 @@ function PortoOperacaoPage() {
                     <h4 className="text-xs font-black uppercase text-indigo-400 tracking-wider">📝 Sumário Executivo Operacional</h4>
                     <div className="text-xs text-slate-350 space-y-2 leading-relaxed">
                       <p>
-                        • No dia {format(new Date(selectedDate + "T12:00:00"), "dd/MM/yyyy")}, a operação registrou uma aderência de <strong>{analytics.overallAdherence}%</strong>, operando com <strong>{analytics.activeCount} de {analytics.totalScheduledCount}</strong> equipamentos programados.
+                        • No dia {format(getSafeDate(selectedDate), "dd/MM/yyyy")}, a operação registrou uma aderência de <strong>{analytics.overallAdherence}%</strong>, operando com <strong>{analytics.activeCount} de {analytics.totalScheduledCount}</strong> equipamentos programados.
                       </p>
                       <p>
                         • Foram contabilizados um total de <strong>{analytics.totalBreakdowns} paradas corretivas</strong>, resultando em <strong>{analytics.totalBreakdownHours} de indisponibilidade</strong>.
@@ -2954,7 +3666,7 @@ function PortoOperacaoPage() {
                           </TableCell>
                           <TableCell className="text-indigo-800 uppercase">{s.local || "—"}</TableCell>
                           <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
-                          <TableCell className="font-mono text-red-600">{(breakdownMinutes / 60).toFixed(1)} hrs</TableCell>
+                          <TableCell className="font-mono text-red-600">{Math.floor(breakdownMinutes / 60)}:{(breakdownMinutes % 60).toString().padStart(2, "0")}h</TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <div className="flex flex-col gap-1.5">
                               {stops.map(l => (
@@ -3032,6 +3744,240 @@ function PortoOperacaoPage() {
             </div>
           </div>
         </TabsContent>
+
+      {/* ===== ABA PESSOAS ===== */}
+      <TabsContent value="pessoas" className="space-y-4">
+        <div className="space-y-4">
+          {/* Stats row */}
+          {(() => {
+            const hoje = selectedDate || new Date().toISOString().split("T")[0];
+            const letraHoje = getLetraAtiva(hoje);
+            const totalPessoas = people.length;
+            const disponiveisHoje = people.filter(p => {
+              const disp = isPessoaDisponivel(p, hoje);
+              return disp.ok && p.letra === letraHoje;
+            }).length;
+            const emFerias = people.filter(p =>
+              p.vacation_start && p.vacation_end &&
+              hoje >= p.vacation_start && hoje <= p.vacation_end
+            ).length;
+            const indisponiveisPeriodo = people.filter(p => {
+              const indisp = pessoaIndisps.find((i: any) =>
+                i.pessoa_id === p.id && hoje >= i.data_inicio && hoje <= i.data_fim
+              );
+              return !!indisp;
+            }).length;
+
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                    <Users className="h-4 w-4 text-indigo-400" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Total</p>
+                    <p className="text-xl font-black text-white">{totalPessoas}</p>
+                  </div>
+                </div>
+                <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                    <UserCheck className="h-4 w-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Disp. Hoje ({letraHoje})</p>
+                    <p className="text-xl font-black text-emerald-400">{disponiveisHoje}</p>
+                  </div>
+                </div>
+                <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                    <CalendarDays className="h-4 w-4 text-amber-400" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Em Férias</p>
+                    <p className="text-xl font-black text-amber-400">{emFerias}</p>
+                  </div>
+                </div>
+                <div className="bg-slate-900 rounded-xl border border-slate-800 p-3 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-rose-500/20 flex items-center justify-center">
+                    <UserX className="h-4 w-4 text-rose-400" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black uppercase text-slate-500 tracking-wider">Indisponíveis</p>
+                    <p className="text-xl font-black text-rose-400">{indisponiveisPeriodo}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Rotation config + search + new button */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 bg-indigo-950/50 border border-indigo-800/50 rounded-xl px-3 py-2">
+              <Settings2 className="h-3.5 w-3.5 text-indigo-400" />
+              <span className="text-[9px] font-black uppercase text-indigo-400 tracking-wider">Rotação 2x2 — Referência:</span>
+              <input
+                type="date"
+                value={rotacaoRef}
+                onChange={e => {
+                  setRotacaoRef(e.target.value);
+                  localStorage.setItem("porto_rotacao_ref", e.target.value);
+                }}
+                className="h-6 text-[10px] bg-indigo-900/50 border border-indigo-700 text-indigo-200 rounded px-1.5 font-mono"
+              />
+              <span className="text-[9px] font-black uppercase text-indigo-400">Letra:</span>
+              <select
+                value={rotacaoLetraRef}
+                onChange={e => {
+                  const val = e.target.value as "A" | "B";
+                  setRotacaoLetraRef(val);
+                  localStorage.setItem("porto_rotacao_letra_ref", val);
+                }}
+                className="h-6 text-[10px] bg-indigo-900/50 border border-indigo-700 text-indigo-200 rounded px-1.5 font-bold"
+              >
+                <option value="A">A</option>
+                <option value="B">B</option>
+              </select>
+              <span className="text-[9px] text-indigo-300 font-bold ml-1">
+                Hoje: Letra {getLetraAtiva(selectedDate || new Date().toISOString().split("T")[0])}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="Buscar por nome ou matrícula..."
+                value={pessoaSearch}
+                onChange={e => setPessoaSearch(e.target.value)}
+                className="h-8 text-xs w-56 bg-slate-900 border-slate-700 text-white"
+              />
+              <Button
+                onClick={() => {
+                  setEditingPessoa(null);
+                  setPessoaForm({ name: "", matricula: "", shift: "Dia", letra: "A", plate_tag: "", vacation_start: "", vacation_end: "", ativo: true });
+                  setPessoaDialogOpen(true);
+                }}
+                className="h-8 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase px-3"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Nova Pessoa
+              </Button>
+            </div>
+          </div>
+
+          {/* People Table */}
+          <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+            <Table>
+              <TableHeader className="bg-slate-50">
+                <TableRow className="text-[10px] font-black uppercase text-slate-600">
+                  <TableHead>Nome</TableHead>
+                  <TableHead>Matrícula</TableHead>
+                  <TableHead>Turno</TableHead>
+                  <TableHead className="text-center">Letra</TableHead>
+                  <TableHead>Caminhão Fidelizado</TableHead>
+                  <TableHead className="text-center">Status Hoje</TableHead>
+                  <TableHead className="text-right">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="text-xs font-bold text-slate-800">
+                {people
+                  .filter(p => {
+                    const term = pessoaSearch.toLowerCase();
+                    return !term ||
+                      (p.name || "").toLowerCase().includes(term) ||
+                      (p.matricula || "").toLowerCase().includes(term);
+                  })
+                  .map(p => {
+                    const hoje = selectedDate || new Date().toISOString().split("T")[0];
+                    const disp = isPessoaDisponivel(p, hoje);
+                    const pessoaIndispList = pessoaIndisps.filter((i: any) => i.pessoa_id === p.id);
+                    return (
+                      <TableRow key={p.id} className="hover:bg-slate-50/50">
+                        <TableCell className="font-black uppercase">{p.name}</TableCell>
+                        <TableCell className="font-mono text-slate-500">{p.matricula || "—"}</TableCell>
+                        <TableCell>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
+                            (p.shift || "Dia") === "Dia"
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                          }`}>
+                            {(p.shift || "Dia") === "Dia" ? "☀️ Dia" : "🌙 Noite"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                            p.letra === "A" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                          }`}>
+                            {p.letra || "?"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-mono text-indigo-700">{p.plate_tag || "—"}</TableCell>
+                        <TableCell className="text-center">
+                          {disp.ok ? (
+                            <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 text-[9px] font-black uppercase">✓ Disponível</Badge>
+                          ) : (
+                            <Badge className="bg-rose-100 text-rose-700 border border-rose-200 text-[9px] font-black uppercase" title={disp.motivo}>⚠ {disp.motivo.length > 18 ? disp.motivo.substring(0, 18) + "..." : disp.motivo}</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 px-1.5 text-[9px] font-black uppercase text-amber-700 border-amber-200 hover:bg-amber-50"
+                              onClick={() => {
+                                setSelectedPessoaForIndisp(p);
+                                setIndispDialogOpen(true);
+                              }}
+                              title={`Indisponibilidades (${pessoaIndispList.length})`}
+                            >
+                              <CalendarDays className="h-3 w-3" />
+                              {pessoaIndispList.length > 0 && <span className="ml-1">{pessoaIndispList.length}</span>}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 px-1.5 text-[9px] font-black uppercase"
+                              onClick={() => {
+                                setEditingPessoa(p);
+                                setPessoaForm({
+                                  name: p.name || "",
+                                  matricula: p.matricula || "",
+                                  shift: p.shift || "Dia",
+                                  letra: p.letra || "A",
+                                  plate_tag: p.plate_tag || "",
+                                  vacation_start: p.vacation_start || "",
+                                  vacation_end: p.vacation_end || "",
+                                  ativo: p.ativo !== false,
+                                });
+                                setPessoaDialogOpen(true);
+                              }}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 px-1.5 text-[9px] font-black uppercase text-red-600 border-red-200 hover:bg-red-50"
+                              onClick={() => deletePessoa(p.id)}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                {people.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8 text-slate-400 italic">
+                      Nenhuma pessoa cadastrada. Clique em "Nova Pessoa" para começar.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </TabsContent>
 
 
       {/* Corrective Stop Insertion Dialog */}
@@ -3132,7 +4078,7 @@ function PortoOperacaoPage() {
                 {/* Allow editing actual dates for non-template schedules if needed, but display nicely */}
                 {editScheduledDate && !["2000-01-02", "2000-01-03", "2000-01-04", "2000-01-05", "2000-01-06", "2000-01-07", "2000-01-08"].includes(editScheduledDate) && (
                   <option value={editScheduledDate}>
-                    {format(new Date(editScheduledDate + "T12:00:00"), "dd/MM/yyyy (EEEE)", { locale: ptBR })}
+                    {format(getSafeDate(editScheduledDate), "dd/MM/yyyy (EEEE)", { locale: ptBR })}
                   </option>
                 )}
               </select>
@@ -3532,6 +4478,452 @@ function PortoOperacaoPage() {
             <Button onClick={() => setDetailsOpen(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold w-full uppercase tracking-wider text-xs">
               Fechar Detalhes
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Expanded Chart Dialog */}
+      <Dialog open={!!expandedChart} onOpenChange={() => { setExpandedChart(null); setExpandedSearch(""); }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-zinc-950 text-white border border-zinc-800">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase text-indigo-400 flex items-center gap-2 text-base">
+              🔍 {expandedChart === "equipment" && "Tempo Parado por Equipamento"}
+              {expandedChart === "date" && "Tempo Parado por Data"}
+              {expandedChart === "adherence" && "Aderência Geral e por Localidade"}
+              {expandedChart === "operator" && "Tempo Parado por Motorista/Operador"}
+              {expandedChart === "plates" && "Tempo Parado por Placa"}
+              {expandedChart === "maintenance" && "Motivos de Manutenção Corretiva"}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-400 uppercase font-bold">
+              Visão expandida e detalhada com todos os dados do período selecionado.
+            </DialogDescription>
+          </DialogHeader>
+
+          {expandedChart && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 py-4">
+              {/* Chart Column */}
+              <div className="lg:col-span-7 bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col h-[380px]">
+                <span className="text-[10px] font-black uppercase text-center tracking-wider text-zinc-500 mb-4 block">Visualização Gráfica</span>
+                <div className="flex-1 min-h-0 relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    {(() => {
+                      if (expandedChart === "equipment") {
+                        const data = analyticsReport.fullChartDataEquipment
+                          .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()));
+                        return (
+                          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                            <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={80} tickLine={false} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "plates") {
+                        const data = analyticsReport.fullChartDataPlates
+                          .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()));
+                        return (
+                          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                            <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={80} tickLine={false} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "operator") {
+                        const data = analyticsReport.fullChartDataOperator
+                          .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()));
+                        return (
+                          <BarChart data={data} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
+                            <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={80} tickLine={false} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
+                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "date") {
+                        return (
+                          <BarChart data={analyticsReport.chartDataDates} margin={{ top: 20, right: 10, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
+                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                            <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            </Bar>
+                          </BarChart>
+                        );
+                      }
+                      if (expandedChart === "adherence") {
+                        return (
+                          <PieChart>
+                            <Pie
+                              data={[
+                                { value: Math.min(95, analyticsReport.overallAdherence), color: "#ef4444" },
+                                { value: Math.max(0, Math.min(5, analyticsReport.overallAdherence - 95)), color: "#10b981" },
+                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#1f2937" }
+                              ]}
+                              dataKey="value"
+                              innerRadius="65%"
+                              outerRadius="85%"
+                              startAngle={180}
+                              endAngle={0}
+                              paddingAngle={0}
+                              stroke="none"
+                            >
+                              <Cell fill="#ef4444" />
+                              <Cell fill="#10b981" />
+                              <Cell fill="#242424" />
+                            </Pie>
+                          </PieChart>
+                        );
+                      }
+                      if (expandedChart === "maintenance") {
+                        return (
+                          <LineChart data={analyticsReport.chartDataTypes.length > 0 ? analyticsReport.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]} margin={{ top: 15, right: 20, left: 10, bottom: 10 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" />
+                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
+                            <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <Tooltip
+                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
+                            />
+                            <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                            </Line>
+                          </LineChart>
+                        );
+                      }
+                      return <div className="text-zinc-500 text-xs">Sem visualização gráfica disponível.</div>;
+                    })()}
+                  </ResponsiveContainer>
+                  {/* Percentage overlay for adherence gauge */}
+                  {expandedChart === "adherence" && (
+                    <div className="absolute inset-0 flex items-end justify-center pb-10 pointer-events-none">
+                      <div className="flex flex-col items-center">
+                        <span className="text-4xl font-black text-white leading-none">
+                          {analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%
+                        </span>
+                        <span className={`text-[10px] font-black uppercase tracking-wider mt-1 ${
+                          analyticsReport.overallAdherence >= 95 ? "text-emerald-400" :
+                          analyticsReport.overallAdherence >= 75 ? "text-amber-400" : "text-rose-400"
+                        }`}>
+                          {analyticsReport.overallAdherence >= 95 ? "✓ Dentro da Meta" :
+                           analyticsReport.overallAdherence >= 75 ? "⚠ Atenção" : "✗ Crítico"}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Data Table Column */}
+              <div className="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col h-[380px]">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500">Dados Completos</span>
+                  {(expandedChart === "equipment" || expandedChart === "plates" || expandedChart === "operator") && (
+                    <Input
+                      type="text"
+                      placeholder="Pesquisar..."
+                      value={expandedSearch}
+                      onChange={(e) => setExpandedSearch(e.target.value)}
+                      className="w-32 h-6 text-[10px] bg-zinc-800 border-zinc-700 text-white font-bold"
+                    />
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto text-xs scrollbar-thin">
+                  <Table>
+                    <TableHeader className="bg-zinc-850 sticky top-0 z-10">
+                      <TableRow className="border-b border-zinc-800 text-[9px] font-black uppercase text-zinc-400">
+                        <TableHead>{expandedChart === "adherence" ? "Localidade" : "Nome/Item"}</TableHead>
+                        <TableHead className="text-right">
+                          {expandedChart === "adherence" ? "Aderência" : "Tempo Parado"}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="font-bold text-zinc-350">
+                      {(() => {
+                        if (expandedChart === "equipment") {
+                          return analyticsReport.fullChartDataEquipment
+                            .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()))
+                            .map(item => (
+                              <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                                <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                                <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                              </TableRow>
+                            ));
+                        }
+                        if (expandedChart === "plates") {
+                          return analyticsReport.fullChartDataPlates
+                            .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()))
+                            .map(item => (
+                              <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                                <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                                <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                              </TableRow>
+                            ));
+                        }
+                        if (expandedChart === "operator") {
+                          return analyticsReport.fullChartDataOperator
+                            .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()))
+                            .map(item => (
+                              <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                                <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                                <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                              </TableRow>
+                            ));
+                        }
+                        if (expandedChart === "date") {
+                          return analyticsReport.chartDataDates.map(item => (
+                            <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                              <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                              <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                            </TableRow>
+                          ));
+                        }
+                        if (expandedChart === "adherence") {
+                          return analyticsReport.localList.map(item => (
+                            <TableRow key={item.local} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                              <TableCell className="py-2 text-zinc-200 uppercase">{item.local}</TableCell>
+                              <TableCell className="py-2 text-right">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                  item.adherence >= 90 ? "bg-emerald-950 text-emerald-400 border border-emerald-900" :
+                                  item.adherence >= 75 ? "bg-amber-950 text-amber-400 border border-amber-900" :
+                                  "bg-rose-950 text-rose-400 border border-rose-900"
+                                }`}>
+                                  {item.adherence}%
+                                </span>
+                              </TableCell>
+                            </TableRow>
+                          ));
+                        }
+                        if (expandedChart === "maintenance") {
+                          return analyticsReport.chartDataTypes.map(item => (
+                            <TableRow key={item.name} className="border-b border-zinc-850 hover:bg-zinc-800/40">
+                              <TableCell className="py-2 text-zinc-200">{item.name}</TableCell>
+                              <TableCell className="py-2 text-right font-mono text-zinc-400">{formatMinutesToHHMMSS(item.minutes)}</TableCell>
+                            </TableRow>
+                          ));
+                        }
+                        return null;
+                      })()}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="border-t border-zinc-800 pt-3">
+            <Button onClick={() => { setExpandedChart(null); setExpandedSearch(""); }} className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold w-full uppercase text-xs">
+              Fechar Detalhes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Cadastrar / Editar Pessoa */}
+      <Dialog open={pessoaDialogOpen} onOpenChange={open => { if (!open) { setPessoaDialogOpen(false); setEditingPessoa(null); } }}>
+        <DialogContent className="max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase text-slate-800">
+              {editingPessoa ? "✏️ Editar Pessoa" : "➕ Nova Pessoa"}
+            </DialogTitle>
+            <DialogDescription className="sr-only">Cadastro de motorista/operador.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Label className="text-[10px] font-black uppercase text-slate-600">Nome *</Label>
+                <Input
+                  value={pessoaForm.name}
+                  onChange={e => setPessoaForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Nome completo"
+                  className="mt-1 h-8 text-xs font-bold uppercase"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] font-black uppercase text-slate-600">Matrícula</Label>
+                <Input
+                  value={pessoaForm.matricula}
+                  onChange={e => setPessoaForm(f => ({ ...f, matricula: e.target.value }))}
+                  placeholder="Ex: 12345"
+                  className="mt-1 h-8 text-xs font-mono"
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] font-black uppercase text-slate-600">Turno</Label>
+                <select
+                  value={pessoaForm.shift}
+                  onChange={e => setPessoaForm(f => ({ ...f, shift: e.target.value }))}
+                  className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white"
+                >
+                  <option value="Dia">☀️ Dia</option>
+                  <option value="Noite">🌙 Noite</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-[10px] font-black uppercase text-slate-600">Letra de Atuação (2x2)</Label>
+                <select
+                  value={pessoaForm.letra}
+                  onChange={e => setPessoaForm(f => ({ ...f, letra: e.target.value }))}
+                  className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white"
+                >
+                  <option value="A">Letra A</option>
+                  <option value="B">Letra B</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-[10px] font-black uppercase text-slate-600">Caminhão Fidelizado (Placa/TAG)</Label>
+                <select
+                  value={pessoaForm.plate_tag}
+                  onChange={e => setPessoaForm(f => ({ ...f, plate_tag: e.target.value }))}
+                  className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white"
+                >
+                  <option value="">— Nenhum —</option>
+                  {equipments.map(eq => (
+                    <option key={eq.id} value={eq.plate || eq.identifier}>
+                      {eq.identifier}{eq.plate && eq.plate !== eq.identifier ? ` (${eq.plate})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <Label className="text-[10px] font-black uppercase text-slate-600">Período de Férias</Label>
+                <div className="flex gap-2 mt-1">
+                  <div className="flex-1">
+                    <Label className="text-[9px] text-slate-400">Início</Label>
+                    <Input
+                      type="date"
+                      value={pessoaForm.vacation_start}
+                      onChange={e => setPessoaForm(f => ({ ...f, vacation_start: e.target.value }))}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-[9px] text-slate-400">Fim</Label>
+                    <Input
+                      type="date"
+                      value={pessoaForm.vacation_end}
+                      onChange={e => setPessoaForm(f => ({ ...f, vacation_end: e.target.value }))}
+                      className="h-8 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPessoaDialogOpen(false)} className="font-bold text-xs">Cancelar</Button>
+            <Button onClick={savePessoa} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase">Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: Indisponibilidades */}
+      <Dialog open={indispDialogOpen} onOpenChange={open => { if (!open) setIndispDialogOpen(false); }}>
+        <DialogContent className="max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase text-slate-800">
+              📅 Indisponibilidades — {selectedPessoaForIndisp?.name}
+            </DialogTitle>
+            <DialogDescription className="sr-only">Gerenciar períodos de indisponibilidade.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Existing indisps */}
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {pessoaIndisps
+                .filter((i: any) => i.pessoa_id === selectedPessoaForIndisp?.id)
+                .map((i: any) => (
+                  <div key={i.id} className="flex items-center justify-between bg-rose-50 border border-rose-100 rounded-lg px-3 py-1.5">
+                    <div className="text-xs">
+                      <span className="font-black text-rose-700 uppercase">{i.tipo}</span>
+                      <span className="text-slate-500 ml-2">
+                        {new Date(i.data_inicio + "T12:00:00").toLocaleDateString("pt-BR")} →{" "}
+                        {new Date(i.data_fim + "T12:00:00").toLocaleDateString("pt-BR")}
+                      </span>
+                      {i.motivo && <span className="text-slate-400 italic ml-2">— {i.motivo}</span>}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-5 w-5 p-0 text-rose-500 hover:bg-rose-100"
+                      onClick={() => deleteIndisp(i.id)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              {pessoaIndisps.filter((i: any) => i.pessoa_id === selectedPessoaForIndisp?.id).length === 0 && (
+                <p className="text-xs text-slate-400 italic text-center py-2">Nenhuma indisponibilidade cadastrada.</p>
+              )}
+            </div>
+            {/* Add new indisp */}
+            <div className="border-t pt-3 space-y-2">
+              <p className="text-[10px] font-black uppercase text-slate-500">Registrar Nova</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-[9px] font-black uppercase text-slate-500">Tipo</Label>
+                  <select
+                    value={indispForm.tipo}
+                    onChange={e => setIndispForm(f => ({ ...f, tipo: e.target.value }))}
+                    className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white"
+                  >
+                    <option>Atestado</option>
+                    <option>Folga Programada</option>
+                    <option>Suspenso</option>
+                    <option>Outro</option>
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-[9px] font-black uppercase text-slate-500">Motivo (opcional)</Label>
+                  <Input
+                    value={indispForm.motivo}
+                    onChange={e => setIndispForm(f => ({ ...f, motivo: e.target.value }))}
+                    placeholder="Descrição..."
+                    className="mt-1 h-8 text-xs"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[9px] font-black uppercase text-slate-500">Data Início</Label>
+                  <Input type="date" value={indispForm.data_inicio} onChange={e => setIndispForm(f => ({ ...f, data_inicio: e.target.value }))} className="mt-1 h-8 text-xs" />
+                </div>
+                <div>
+                  <Label className="text-[9px] font-black uppercase text-slate-500">Data Fim</Label>
+                  <Input type="date" value={indispForm.data_fim} onChange={e => setIndispForm(f => ({ ...f, data_fim: e.target.value }))} className="mt-1 h-8 text-xs" />
+                </div>
+              </div>
+              <Button onClick={saveIndisp} className="w-full h-8 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs uppercase">
+                <Plus className="h-3.5 w-3.5 mr-1" /> Registrar Indisponibilidade
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIndispDialogOpen(false)} className="font-bold text-xs">Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

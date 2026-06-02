@@ -31,6 +31,16 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
+const getSafeDate = (dateStr: string | null | undefined, fallback: Date = new Date()): Date => {
+  if (!dateStr) return fallback;
+  const cleanStr = dateStr.includes("T") ? dateStr : `${dateStr}T12:00:00`;
+  const parsed = new Date(cleanStr);
+  if (isNaN(parsed.getTime())) {
+    return fallback;
+  }
+  return parsed;
+};
+
 export const Route = createFileRoute("/cco")({
   head: () => ({ meta: [{ title: "CCO Centro de Controle Operacional — Frota Busato" }] }),
   component: () => <AppLayout><CCOPage /></AppLayout>,
@@ -43,90 +53,114 @@ type Equipment = {
   brand: string | null;
   model: string | null;
   status: string;
-  contract_type: string | null;
-  notes: string | null;
+  operator_name: string | null;
   maintenance_expected_return: string | null;
-  maintenance_problem: string | null;
-  te_tag?: string;
-  implement_type?: string;
+  contract_type: string | null;
+  cost_center: string | null;
+  last_verified_at: string | null;
 };
 
-type Allocation = {
+type CCOAllocation = {
   id: string;
-  scheduled_date: string;
   equipment_id: string;
-  operator_name: string;
-  service_front: string;
+  scheduled_date: string;
   shift: string;
+  local: string | null;
+  operator_name: string | null;
+  activity: string | null;
+  status: string;
   notes: string | null;
+  owner_id: string | null;
 };
 
 type Programming = {
   id: string;
+  equipment_id: string;
   scheduled_date: string;
+  day_of_week: string | null;
   stop_type: string;
   notes: string | null;
-  equipment_id: string;
+  is_completed: boolean;
+};
+
+type UsinaSchedule = {
+  id: string;
+  scheduled_date: string;
+  equipment: string;
+  plate: string | null;
+  model: string | null;
+  client: string | null;
+  shift: string;
+  valley_time: number | null;
+  valley_start: string | null;
+  valley_end: string | null;
+  cost_center: string | null;
+  subet: string | null;
+  local: string | null;
+  activity: string | null;
+  operator: string | null;
+  os_number: string | null;
+  is_completed: boolean;
+  owner_id: string | null;
 };
 
 function CCOPage() {
   const { user } = useAuth();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [allocations, setAllocations] = useState<Allocation[]>([]);
+  const [allocations, setAllocations] = useState<CCOAllocation[]>([]);
   const [programming, setProgramming] = useState<Programming[]>([]);
-  const [usinaSchedules, setUsinaSchedules] = useState<any[]>([]);
-  const [correctiveLogs, setCorrectiveLogs] = useState<any[]>([]);
-  
+  const [usinaSchedules, setUsinaSchedules] = useState<UsinaSchedule[]>([]);
+
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [activeTab, setActiveTab] = useState("atendimento"); // Default to Atendimento Diário dashboard
-  const [localFilter, setLocalFilter] = useState("Todos");
-  const [contractFilter, setContractFilter] = useState("Todos");
-  const [drillDownContract, setDrillDownContract] = useState<string | null>(null);
+  const [selectedLocal, setSelectedLocal] = useState<string>("TODOS");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Dialog states for generic stops
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [schedEqId, setSchedEqId] = useState("");
+  const [schedStopType, setSchedStopType] = useState("Corretiva");
+  const [schedDate, setSchedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [schedNotes, setSchedNotes] = useState("");
+
+  const [correctiveLogs, setCorrectiveLogs] = useState<any[]>([]);
+  const [contractFilter, setContractFilter] = useState<string>("Todos");
+  const [localFilter, setLocalFilter] = useState<string>("Todos");
   const [selectedDashboardContract, setSelectedDashboardContract] = useState<string | null>(null);
-  
-  // States for new allocation dialog
+  const [drillDownContract, setDrillDownContract] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("atendimento");
   const [newAllocOpen, setNewAllocOpen] = useState(false);
   const [allocEqId, setAllocEqId] = useState("");
   const [allocOperator, setAllocOperator] = useState("");
   const [allocFront, setAllocFront] = useState("");
-  const [allocShift, setAllocShift] = useState("12 HORAS (Dia)");
+  const [allocShift, setAllocShift] = useState("DIA");
   const [allocNotes, setAllocNotes] = useState("");
 
-  // States for Agendar Parada (moved from CCM Manutenção)
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [schedEqId, setSchedEqId] = useState("");
-  const [schedDate, setSchedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [schedStopType, setSchedStopType] = useState("Manutenção Geral");
-  const [schedNotes, setSchedNotes] = useState("");
-
   const loadData = async () => {
-    // 1. Carrega equipamentos de forma independente
+    // 1. Carrega Equipamentos
     try {
-      const { data: eqs } = await supabase.from("equipment").select("*").order("identifier");
-      const parsedEqs = (eqs ?? []).map((eq: any) => {
-        let te_tag = "";
-        let implement_type = "";
-        try {
-          if (eq.notes && (eq.notes.startsWith("{") || eq.notes.startsWith("["))) {
-            const parsedNotes = JSON.parse(eq.notes);
-            te_tag = parsedNotes.te_tag || "";
-            implement_type = parsedNotes.implement_type || "";
-          }
-        } catch (_) {}
-        return { ...eq, te_tag, implement_type };
-      });
-      setEquipment(parsedEqs);
-      localStorage.setItem("local_equipment", JSON.stringify(parsedEqs));
+      const { data, error } = await supabase
+        .from("equipment")
+        .select("*")
+        .order("identifier", { ascending: true });
+      if (error) throw error;
+      setEquipment((data ?? []) as Equipment[]);
     } catch (_) {
-      const localEqs = JSON.parse(localStorage.getItem("local_equipment") || "[]");
-      setEquipment(localEqs);
+      const localEquip = JSON.parse(localStorage.getItem("local_equipment") || "[]");
+      setEquipment(localEquip);
     }
 
-    // 2. Carrega alocações do CCO
+    // 2. Carrega Alocações do dia
     try {
-      const { data: allocs, error: eAlloc } = await supabase.from("cco_allocations").select("*").eq("scheduled_date", selectedDate);
-      if (eAlloc) throw eAlloc;
-      setAllocations((allocs ?? []) as Allocation[]);
+      const { data, error } = await supabase
+        .from("cco_allocations")
+        .select("*")
+        .eq("scheduled_date", selectedDate);
+      if (error) throw error;
+      setAllocations((data ?? []) as CCOAllocation[]);
+      // Cache
+      const localAllocs = JSON.parse(localStorage.getItem("local_cco_allocations") || "[]");
+      const otherDates = localAllocs.filter((a: any) => a.scheduled_date !== selectedDate);
+      localStorage.setItem("local_cco_allocations", JSON.stringify([...otherDates, ...(data ?? [])]));
     } catch (_) {
       const localAllocs = JSON.parse(localStorage.getItem("local_cco_allocations") || "[]");
       setAllocations(localAllocs.filter((a: any) => a.scheduled_date === selectedDate));
@@ -139,7 +173,11 @@ function CCOPage() {
       setProgramming((progs ?? []) as Programming[]);
     } catch (_) {}
 
-    // 4. Carrega escalas Usina — busca data real E templates (2000-01-0x)
+    // 4. Carrega escalas Usina E Porto — busca data real E templates (2000-01-0x)
+    let finalUsina: any[] = [];
+    let finalPorto: any[] = [];
+
+    // Usina Schedules
     try {
       let { data: scheds, error: eSched } = await supabase
         .from("usina_daily_schedules")
@@ -151,7 +189,7 @@ function CCOPage() {
 
       if (dayScheds.length === 0) {
         // Clone template for selectedDate's day of week
-        const selectedDayOfWeek = new Date(selectedDate + "T12:00:00").getDay();
+        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
         const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
         const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
 
@@ -180,16 +218,15 @@ function CCOPage() {
             .from("usina_daily_schedules")
             .insert(clones)
             .select();
-          if (eInsert) throw eInsert;
 
-          if (inserted) {
+          if (!eInsert && inserted) {
             scheds = [...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate), ...inserted];
           }
         }
       }
 
       const finalScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
-      setUsinaSchedules(finalScheds);
+      finalUsina = finalScheds.map(s => ({ ...s, __source: "USINA" }));
 
       // Merge with local storage instead of overwriting other dates
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
@@ -198,19 +235,95 @@ function CCOPage() {
       localStorage.setItem("local_usina_schedules", JSON.stringify(merged));
     } catch (_) {
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
-      setUsinaSchedules(localScheds.filter((s: any) => s.scheduled_date === selectedDate));
+      finalUsina = localScheds.filter((s: any) => s.scheduled_date === selectedDate).map((s: any) => ({ ...s, __source: "USINA" }));
     }
 
-    // 5. Carrega logs de paradas
+    // Porto Schedules
+    try {
+      let { data: scheds, error: eSched } = await supabase
+        .from("porto_daily_schedules")
+        .select("*")
+        .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+      if (eSched) throw eSched;
+
+      const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
+
+      if (dayScheds.length === 0) {
+        // Clone template for selectedDate's day of week
+        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
+        const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
+        const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
+
+        if (templatesForDay.length > 0) {
+          const clones = templatesForDay.map((t: any) => ({
+            scheduled_date: selectedDate,
+            equipment: t.equipment,
+            plate: t.plate,
+            model: t.model,
+            client: t.client,
+            shift: t.shift,
+            valley_time: t.valley_time,
+            valley_start: t.valley_start,
+            valley_end: t.valley_end,
+            cost_center: t.cost_center,
+            subet: t.subet,
+            local: t.local,
+            activity: t.activity,
+            operator: t.operator,
+            os_number: t.os_number,
+            is_completed: false,
+            owner_id: user?.id
+          }));
+
+          const { data: inserted, error: eInsert } = await supabase
+            .from("porto_daily_schedules")
+            .insert(clones)
+            .select();
+
+          if (!eInsert && inserted) {
+            scheds = [...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate), ...inserted];
+          }
+        }
+      }
+
+      const finalScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
+      finalPorto = finalScheds.map(s => ({ ...s, __source: "PORTO" }));
+
+      // Merge with local storage instead of overwriting other dates
+      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
+      const otherDatesScheds = localScheds.filter((s: any) => s.scheduled_date !== selectedDate);
+      const merged = [...otherDatesScheds, ...finalScheds];
+      localStorage.setItem("local_porto_schedules", JSON.stringify(merged));
+    } catch (_) {
+      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
+      finalPorto = localScheds.filter((s: any) => s.scheduled_date === selectedDate).map((s: any) => ({ ...s, __source: "PORTO" }));
+    }
+
+    setUsinaSchedules([...finalUsina, ...finalPorto]);
+
+    // 5. Carrega logs de paradas (Usina E Porto)
+    let logsUsina: any[] = [];
+    let logsPorto: any[] = [];
+
     try {
       const { data: logs, error: eLogs } = await supabase.from("usina_corrective_logs").select("*");
       if (eLogs) throw eLogs;
-      setCorrectiveLogs(logs ?? []);
+      logsUsina = logs ?? [];
       localStorage.setItem("local_usina_corrective_logs", JSON.stringify(logs ?? []));
     } catch (_) {
-      const localLogs = JSON.parse(localStorage.getItem("local_usina_corrective_logs") || "[]");
-      setCorrectiveLogs(localLogs);
+      logsUsina = JSON.parse(localStorage.getItem("local_usina_corrective_logs") || "[]");
     }
+
+    try {
+      const { data: logs, error: eLogs } = await supabase.from("porto_corrective_logs").select("*");
+      if (eLogs) throw eLogs;
+      logsPorto = logs ?? [];
+      localStorage.setItem("local_porto_corrective_logs", JSON.stringify(logs ?? []));
+    } catch (_) {
+      logsPorto = JSON.parse(localStorage.getItem("local_porto_corrective_logs") || "[]");
+    }
+
+    setCorrectiveLogs([...logsUsina, ...logsPorto]);
   };
 
   useEffect(() => {
@@ -312,7 +425,7 @@ function CCOPage() {
   };
 
   // D+1 Date helper
-  const dateDPlus1 = format(addDays(new Date(selectedDate + "T12:00:00"), 1), "yyyy-MM-dd");
+  const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
 
   // Get unavailable list for D+1
   const dPlus1Unavailable = useMemo(() => {
@@ -350,6 +463,12 @@ function CCOPage() {
 
   // Daily Attendance Dashboard computations
   const getScheduleContract = (s: any) => {
+    if (s.__source) {
+      const srcUpper = s.__source.trim().toUpperCase();
+      if (srcUpper === "PORTO" || srcUpper === "USINA" || srcUpper === "EVENTUAL") {
+        return srcUpper;
+      }
+    }
     if (s.client) {
       const clientUpper = s.client.trim().toUpperCase();
       if (clientUpper.includes("USINA")) return "USINA";
@@ -370,7 +489,7 @@ function CCOPage() {
         return typeUpper;
       }
     }
-    return "USINA";
+    return s.__source || "USINA";
   };
 
   const filteredScheds = useMemo(() => {
@@ -392,12 +511,17 @@ function CCOPage() {
     });
     const atendidos = total - naoAtendidos.length;
     const pct = total > 0 ? Math.round((atendidos / total) * 100) : 100;
+    const correctiveHistoryList = filteredScheds.filter(s => {
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      return stops.length > 0;
+    });
 
     return {
       total,
       atendidos,
       naoAtendidos: naoAtendidos.length,
       naoAtendidosList: naoAtendidos,
+      correctiveHistoryList,
       pct
     };
   }, [filteredScheds, correctiveLogs]);
@@ -475,22 +599,7 @@ function CCOPage() {
     if (!drillDownContract) return null;
     
     const compScheds = filteredScheds.filter(s => {
-      const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const eq = equipment.find(e => {
-        const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
-      });
-      
-      // Default: USINA
-      let contractKey = "USINA";
-      if (eq?.contract_type) {
-        const typeUpper = eq.contract_type.trim().toUpperCase();
-        if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
-          contractKey = typeUpper;
-        }
-      }
+      const contractKey = getScheduleContract(s);
       return contractKey === drillDownContract.toUpperCase();
     });
 
@@ -509,8 +618,8 @@ function CCOPage() {
         typeMap[eqType] = { total: 0, atendidos: 0, naoAtendidos: 0, items: [] };
       }
 
-      const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id);
-      const isBroken = activeStops.some(l => !l.stop_end);
+      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+      const isBroken = stops.some(l => !l.stop_end);
 
       typeMap[eqType].total++;
       if (isBroken) {
@@ -518,7 +627,7 @@ function CCOPage() {
       } else {
         typeMap[eqType].atendidos++;
       }
-      typeMap[eqType].items.push({ schedule: s, isBroken });
+      typeMap[eqType].items.push({ schedule: s, isBroken, stops });
     });
 
     return Object.keys(typeMap).map(type => ({
@@ -601,7 +710,17 @@ function CCOPage() {
               <input 
                 type="date" 
                 value={selectedDate} 
-                onChange={(e) => setSelectedDate(e.target.value)} 
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const today = format(new Date(), "yyyy-MM-dd");
+                  if (val > today) {
+                    setSelectedDate(today);
+                    toast.warning("Não é permitido selecionar uma data futura.");
+                  } else {
+                    setSelectedDate(val);
+                  }
+                }} 
+                max={format(new Date(), "yyyy-MM-dd")}
                 className="bg-teal-800 text-white border border-teal-600 rounded px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-400 font-bold font-mono h-8 cursor-pointer" 
               />
             </div>
@@ -799,10 +918,10 @@ function CCOPage() {
 
           {/* Bottom Table: Detalhamento dos Não Atendimentos */}
           <div className="bg-white border rounded-xl shadow-sm overflow-hidden mt-6">
-            <div className="bg-rose-50 border-b border-rose-100 p-3">
-              <h3 className="font-black text-rose-800 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                <AlertTriangle className="h-4 w-4 animate-pulse text-rose-600" />
-                Detalhamento dos Não Atendimentos
+            <div className="bg-slate-50 border-b border-slate-200 p-3">
+              <h3 className="font-black text-slate-700 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                Histórico e Detalhamento de Corretivas
               </h3>
             </div>
             <div className="overflow-x-auto">
@@ -818,27 +937,41 @@ function CCOPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody className="text-xs font-bold text-slate-800">
-                  {stats.naoAtendidosList.map((s, idx) => {
-                    const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id && !l.stop_end);
+                  {stats.correctiveHistoryList.map((s, idx) => {
+                    const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
+                    const activeStop = stops.find(l => !l.stop_end);
+                    const isBroken = !!activeStop;
                     const contractKey = getScheduleContract(s);
+                    const displayReason = activeStop?.reason || stops[0]?.reason || "Parada mecânica sem justificativa";
+                    
                     return (
-                      <TableRow key={idx} className="bg-rose-50/20 hover:bg-rose-50/40">
+                      <TableRow 
+                        key={idx} 
+                        className={isBroken 
+                          ? "bg-rose-50/30 hover:bg-rose-50/50 border-l-4 border-l-rose-500" 
+                          : "hover:bg-slate-50/60 border-l-4 border-l-slate-200 opacity-80"
+                        }
+                      >
                         <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
                         <TableCell className="uppercase">{contractKey}</TableCell>
                         <TableCell className="font-mono text-slate-700">
                           {s.equipment} {s.plate ? `(${s.plate})` : ""}
                         </TableCell>
-                        <TableCell className="text-rose-600 uppercase text-[10px] font-black">
-                          ⚠️ Em Corretiva
+                        <TableCell className="text-[10px] font-black uppercase">
+                          {isBroken ? (
+                            <span className="text-rose-600">⚠️ Em Corretiva</span>
+                          ) : (
+                            <span className="text-emerald-600">✓ Resolvido</span>
+                          )}
                         </TableCell>
                         <TableCell className="uppercase text-slate-500">{s.local || "—"}</TableCell>
-                        <TableCell className="italic text-slate-400 font-medium max-w-[200px] truncate" title={activeStops[0]?.reason || ""}>
-                          {activeStops[0]?.reason || "Parada mecânica sem justificativa"}
+                        <TableCell className="italic text-slate-400 font-medium max-w-[200px] truncate" title={displayReason}>
+                          {displayReason}
                         </TableCell>
                       </TableRow>
                     );
                   })}
-                  {stats.naoAtendidosList.length === 0 && (
+                  {stats.correctiveHistoryList.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={6} className="text-center py-8 text-emerald-600 italic font-black uppercase text-[10px]">
                         ✓ 100% de Atendimento. Nenhuma pendência registrada hoje!
@@ -983,23 +1116,68 @@ function CCOPage() {
             {drillDownData && drillDownData.length > 0 && (
               <div className="space-y-2 mt-4">
                 <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Lista detalhada de equipamentos:</p>
-                <div className="max-h-60 overflow-y-auto border rounded-xl divide-y divide-slate-100 p-2 space-y-2">
-                  {drillDownData.flatMap(d => d.items).map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center text-xs py-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono bg-slate-100 border px-1.5 py-0.5 rounded text-[11px] text-slate-700">{item.schedule.equipment || "—"}</span>
-                        <span className="font-mono text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded text-[10px]">{item.schedule.plate}</span>
-                        <span className="text-slate-500 text-[10px] uppercase font-semibold">({item.schedule.local})</span>
-                      </div>
-                      <div>
-                        {item.isBroken ? (
-                          <Badge className="bg-red-100 text-red-700 border border-red-200 text-[9px] font-black uppercase">⚠️ Parado / Corretiva</Badge>
-                        ) : (
-                          <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 text-[9px] font-black uppercase">✓ Operacional</Badge>
+                <div className="max-h-72 overflow-y-auto border rounded-xl divide-y divide-slate-100">
+                  {drillDownData.flatMap(d => d.items).map((item, idx) => {
+                    const fmtTime = (iso: string | null | undefined) => {
+                      if (!iso) return null;
+                      try { return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
+                      catch { return null; }
+                    };
+                    // Show plate only if different from equipment name
+                    const showPlate = item.schedule.plate && item.schedule.plate !== item.schedule.equipment;
+                    return (
+                      <div key={idx} className={`px-3 py-2 space-y-1 ${item.isBroken ? "bg-rose-50/30" : ""}`}>
+                        {/* Equipment row */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono bg-slate-100 border px-1.5 py-0.5 rounded text-[11px] text-slate-700 font-black">
+                              {item.schedule.equipment || "—"}
+                            </span>
+                            {showPlate && (
+                              <span className="font-mono text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded text-[10px]">
+                                {item.schedule.plate}
+                              </span>
+                            )}
+                            {item.schedule.local && (
+                              <span className="text-slate-400 text-[9px] uppercase font-semibold">{item.schedule.local}</span>
+                            )}
+                          </div>
+                          <div>
+                            {item.isBroken ? (
+                              <Badge className="bg-red-100 text-red-700 border border-red-200 text-[9px] font-black uppercase">⚠️ Em Corretiva</Badge>
+                            ) : (
+                              <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 text-[9px] font-black uppercase">✓ Operacional</Badge>
+                            )}
+                          </div>
+                        </div>
+                        {/* Stop times */}
+                        {item.stops?.length > 0 && (
+                          <div className="pl-1 space-y-0.5">
+                            {item.stops.map((stop: any, si: number) => {
+                              const inicio = fmtTime(stop.stop_start);
+                              const fim = fmtTime(stop.stop_end);
+                              const isActive = !stop.stop_end;
+                              return (
+                                <div key={si} className="flex items-center gap-2 text-[9px] font-bold">
+                                  <span className="text-slate-400">Parada {si + 1}:</span>
+                                  <span className="text-slate-600 font-mono">{inicio || "—"}</span>
+                                  <span className="text-slate-300">→</span>
+                                  {isActive ? (
+                                    <span className="text-rose-600 font-black uppercase tracking-wide animate-pulse">Em aberto</span>
+                                  ) : (
+                                    <span className="text-slate-600 font-mono">{fim}</span>
+                                  )}
+                                  {stop.reason && (
+                                    <span className="text-slate-400 italic truncate max-w-[180px]" title={stop.reason}>— {stop.reason}</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
