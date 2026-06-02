@@ -33,7 +33,8 @@ import {
   UserX,
   CalendarDays,
   Settings2,
-  Plus
+  Plus,
+  Download
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { useAuth } from "@/hooks/use-auth";
@@ -653,6 +654,114 @@ function PortoOperacaoPage() {
     await supabase.from("porto_pessoas_indisponibilidades" as any).delete().eq("id", id);
     await loadPessoaIndisps();
     toast.success("Indisponibilidade removida.");
+  };
+
+  const downloadPessoasTemplate = () => {
+    const data = [
+      {
+        "Nome": "João da Silva",
+        "Matricula": "M12345",
+        "Turno": "Dia",
+        "Letra": "A",
+        "Caminhao Fidelizado": "PLACA123",
+        "Inicio Ferias": "2026-06-15",
+        "Fim Ferias": "2026-06-30"
+      },
+      {
+        "Nome": "Maria Oliveira",
+        "Matricula": "M67890",
+        "Turno": "Noite",
+        "Letra": "B",
+        "Caminhao Fidelizado": "PLACA456",
+        "Inicio Ferias": "",
+        "Fim Ferias": ""
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Modelo Importacao Pessoas");
+    XLSX.writeFile(wb, "modelo_importacao_pessoas.xlsx");
+    toast.success("Modelo baixado! Preencha e utilize o botão Importar.");
+  };
+
+  const handlePessoasImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: "binary" });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        
+        const rawRows = XLSX.utils.sheet_to_json(ws) as any[];
+        if (rawRows.length === 0) {
+          toast.error("Planilha vazia.");
+          return;
+        }
+
+        let importCount = 0;
+        for (const row of rawRows) {
+          const name = row["Nome"] || row["nome"] || row["Nome Completo"];
+          if (!name) continue;
+
+          const matricula = row["Matricula"] || row["matricula"] || row["Matrícula"];
+          let shift = row["Turno"] || row["turno"] || "Dia";
+          shift = shift.toString().trim().toLowerCase();
+          if (shift.includes("noite")) {
+            shift = "Noite";
+          } else {
+            shift = "Dia";
+          }
+
+          let letra = row["Letra"] || row["letra"] || "A";
+          letra = letra.toString().trim().toUpperCase() === "B" ? "B" : "A";
+
+          const plate_tag = row["Caminhao Fidelizado"] || row["caminhao"] || row["caminhão"] || row["Placa"] || row["placa"] || null;
+          const vacation_start = row["Inicio Ferias"] || row["Início Férias"] || row["vacation_start"] || null;
+          const vacation_end = row["Fim Ferias"] || row["Fim Férias"] || row["vacation_end"] || null;
+
+          const payload = {
+            name: name.toString().trim(),
+            matricula: matricula ? matricula.toString().trim() : null,
+            shift,
+            letra,
+            plate_tag: plate_tag ? plate_tag.toString().trim() : null,
+            vacation_start: vacation_start ? vacation_start.toString().trim() : null,
+            vacation_end: vacation_end ? vacation_end.toString().trim() : null,
+            ativo: true,
+            owner_id: user?.id
+          };
+
+          // Check if person exists by name or matricula
+          let query = supabase.from("people" as any).select("id");
+          if (payload.matricula) {
+            query = query.or(`name.eq."${payload.name}",matricula.eq."${payload.matricula}"`);
+          } else {
+            query = query.eq("name", payload.name);
+          }
+
+          const { data: existing } = await query;
+
+          if (existing && existing.length > 0) {
+            await supabase.from("people" as any).update(payload).eq("id", existing[0].id);
+          } else {
+            await supabase.from("people" as any).insert(payload);
+          }
+          importCount++;
+        }
+
+        toast.success(`${importCount} pessoas importadas/atualizadas com sucesso!`);
+        await loadPessoas();
+      } catch (err: any) {
+        toast.error("Erro ao importar planilha: " + err.message);
+      }
+    };
+    reader.readAsBinaryString(selectedFile);
+    e.target.value = "";
   };
 
   const loadData = async () => {
@@ -3847,8 +3956,35 @@ function PortoOperacaoPage() {
                 placeholder="Buscar por nome ou matrícula..."
                 value={pessoaSearch}
                 onChange={e => setPessoaSearch(e.target.value)}
-                className="h-8 text-xs w-56 bg-slate-900 border-slate-700 text-white"
+                className="h-8 text-xs w-48 bg-slate-900 border-slate-700 text-white"
               />
+              <Button
+                variant="outline"
+                onClick={downloadPessoasTemplate}
+                className="h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-bold text-xs uppercase px-2.5"
+                title="Baixar Modelo de Excel para Preenchimento"
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                Modelo
+              </Button>
+              <div className="relative">
+                <input
+                  type="file"
+                  id="pessoas-import-file-input"
+                  className="hidden"
+                  accept=".xlsx, .xls"
+                  onChange={handlePessoasImport}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => document.getElementById("pessoas-import-file-input")?.click()}
+                  className="h-8 border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-bold text-xs uppercase px-2.5"
+                  title="Importar planilha de Pessoas (.xlsx)"
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                  Importar
+                </Button>
+              </div>
               <Button
                 onClick={() => {
                   setEditingPessoa(null);
