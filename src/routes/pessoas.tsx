@@ -247,6 +247,8 @@ function PessoasPage() {
           shift = shift.toString().trim().toLowerCase();
           if (shift.includes("noite")) {
             shift = "Noite";
+          } else if (shift.includes("adm")) {
+            shift = "Adm";
           } else {
             shift = "Dia";
           }
@@ -311,7 +313,7 @@ function PessoasPage() {
     
     const disponiveisHoje = people.filter(p => {
       const disp = isPessoaDisponivel(p, hoje);
-      return disp.ok && p.letra === letraHoje;
+      return disp.ok && ((p.shift || "Dia") === "Adm" || p.letra === letraHoje);
     }).length;
     
     const emFerias = people.filter(p =>
@@ -518,17 +520,23 @@ function PessoasPage() {
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
                         (p.shift || "Dia") === "Dia"
                           ? "bg-amber-50 text-amber-700 border-amber-200"
-                          : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : (p.shift || "Dia") === "Noite"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : "bg-sky-50 text-sky-700 border-sky-200"
                       }`}>
-                        {(p.shift || "Dia") === "Dia" ? "☀️ Dia" : "🌙 Noite"}
+                        {(p.shift || "Dia") === "Dia" ? "☀️ Dia" : (p.shift || "Dia") === "Noite" ? "🌙 Noite" : "💼 Adm"}
                       </span>
                     </TableCell>
                     <TableCell className="text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                        p.letra === "A" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
-                      }`}>
-                        {p.letra || "A"}
-                      </span>
+                      {(p.shift || "Dia") === "Adm" ? (
+                        <span className="text-slate-400 font-mono">—</span>
+                      ) : (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                          p.letra === "A" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                        }`}>
+                          {p.letra || "A"}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="font-mono text-emerald-700">{p.plate_tag || "—"}</TableCell>
                     <TableCell>
@@ -657,14 +665,16 @@ function PessoasPage() {
                 >
                   <option value="Dia">☀️ Dia</option>
                   <option value="Noite">🌙 Noite</option>
+                  <option value="Adm">💼 Adm</option>
                 </select>
               </div>
               <div>
                 <Label className="text-[10px] font-black uppercase text-slate-600">Letra de Atuação (2x2)</Label>
                 <select
+                  disabled={pessoaForm.shift === "Adm"}
                   value={pessoaForm.letra}
                   onChange={e => setPessoaForm(f => ({ ...f, letra: e.target.value }))}
-                  className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white"
+                  className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                 >
                   <option value="A">Letra A</option>
                   <option value="B">Letra B</option>
@@ -672,18 +682,20 @@ function PessoasPage() {
               </div>
               <div className="col-span-2">
                 <Label className="text-[10px] font-black uppercase text-slate-600">Caminhão Fidelizado (Placa/TAG)</Label>
-                <select
-                  value={pessoaForm.plate_tag}
+                <Input
+                  list="equipments-list"
+                  value={pessoaForm.plate_tag || ""}
                   onChange={e => setPessoaForm(f => ({ ...f, plate_tag: e.target.value }))}
-                  className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white"
-                >
-                  <option value="">— Nenhum —</option>
+                  placeholder="Busque ou digite a Placa/TAG..."
+                  className="mt-1 h-8 text-xs font-black font-mono uppercase bg-white border border-slate-300"
+                />
+                <datalist id="equipments-list">
                   {equipments.map(eq => (
                     <option key={eq.id} value={eq.plate || eq.identifier}>
-                      {eq.identifier}{eq.plate && eq.plate !== eq.identifier ? ` (${eq.plate})` : ""}
+                      {eq.identifier} {eq.plate && eq.plate !== eq.identifier ? `(${eq.plate})` : ""}
                     </option>
                   ))}
-                </select>
+                </datalist>
               </div>
               <div className="col-span-2">
                 <Label className="text-[10px] font-black uppercase text-slate-600">Período de Férias</Label>
