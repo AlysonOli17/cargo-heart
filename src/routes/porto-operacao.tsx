@@ -618,7 +618,7 @@ function PortoOperacaoPage() {
 
     // 2. Carrega as escalas e corretivas da Porto
     try {
-      const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
+      const dateDPlus1 = selectedDate;
       let { data: scheds, error: e1 } = await (supabase as any)
         .from("porto_daily_schedules")
         .select("*")
@@ -725,7 +725,7 @@ function PortoOperacaoPage() {
         }
       }
 
-      const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
+      const dateDPlus1 = selectedDate;
       setSchedules(mergedScheds.filter((s: any) => 
         s.scheduled_date === selectedDate || 
         s.scheduled_date === dateDPlus1 ||
@@ -1395,9 +1395,8 @@ function PortoOperacaoPage() {
     }).filter(item => item.warning !== null && (item.warning.type === "unavailable" || item.warning.type === "programming_conflict"));
   }, [filteredSchedules, programming, equipments]);
 
-  // Filter D+1 schedules (schedules matching selectedDate + 1 day)
   const habitualSchedules = useMemo(() => {
-    const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
+    const dateDPlus1 = selectedDate;
     return schedules.filter(s => {
       const isDPlus1 = s.scheduled_date === dateDPlus1;
       if (!isDPlus1) return false;
