@@ -209,6 +209,16 @@ function PessoasPage() {
         "Contrato": "CCO USINA",
         "Inicio Ferias": "",
         "Fim Ferias": ""
+      },
+      {
+        "Nome": "Pedro Souza",
+        "Matricula": "M99999",
+        "Turno": "Adm",
+        "Letra": "A",
+        "Caminhao Fidelizado": "PLACA789",
+        "Contrato": "CCO PORTO",
+        "Inicio Ferias": "",
+        "Fim Ferias": ""
       }
     ];
 
