@@ -47,15 +47,17 @@ function PessoasPage() {
   
   const [pessoaForm, setPessoaForm] = useState({
     name: "", matricula: "", shift: "Dia", letra: "A",
-    plate_tag: "", vacation_start: "", vacation_end: "", ativo: true
+    plate_tag: "", vacation_start: "", vacation_end: "", ativo: true,
+    contrato: "CCO PORTO"
   });
   const [indispForm, setIndispForm] = useState({
     tipo: "Atestado", data_inicio: "", data_fim: "", motivo: ""
   });
 
   // 2x2 rotation config (stored in localStorage)
+  // Escala A = 02/06/2026, de acordo com o padrão solicitado.
   const [rotacaoRef, setRotacaoRef] = useState<string>(() =>
-    localStorage.getItem("porto_rotacao_ref") || new Date().toISOString().split("T")[0]
+    localStorage.getItem("porto_rotacao_ref") || "2026-06-02"
   );
   const [rotacaoLetraRef, setRotacaoLetraRef] = useState<"A" | "B">(() =>
     (localStorage.getItem("porto_rotacao_letra_ref") as "A" | "B") || "A"
@@ -72,8 +74,10 @@ function PessoasPage() {
 
   const isPessoaDisponivel = (pessoa: any, dateStr: string): { ok: boolean; motivo: string } => {
     if (pessoa.ativo === false) return { ok: false, motivo: "Inativo" };
-    if (pessoa.vacation_start && pessoa.vacation_end &&
-        dateStr >= pessoa.vacation_start && dateStr <= pessoa.vacation_end) {
+    if (pessoa.vacation_start &&
+        pessoa.vacation_end &&
+        dateStr >= pessoa.vacation_start &&
+        dateStr <= pessoa.vacation_end) {
       return { ok: false, motivo: `Férias até ${new Date(pessoa.vacation_end + "T12:00:00").toLocaleDateString("pt-BR")}` };
     }
     const unavArr = pessoa.unavailability || [];
@@ -130,7 +134,8 @@ function PessoasPage() {
         plate_tag: pessoaForm.plate_tag.trim() || null,
         vacation_start: pessoaForm.vacation_start || null,
         vacation_end: pessoaForm.vacation_end || null,
-        ativo: pessoaForm.ativo
+        ativo: pessoaForm.ativo,
+        contrato: pessoaForm.contrato
       };
       if (!payload.name) { toast.error("Nome é obrigatório."); return; }
       if (editingPessoa) {
@@ -191,6 +196,7 @@ function PessoasPage() {
         "Turno": "Dia",
         "Letra": "A",
         "Caminhao Fidelizado": "PLACA123",
+        "Contrato": "CCO PORTO",
         "Inicio Ferias": "2026-06-15",
         "Fim Ferias": "2026-06-30"
       },
@@ -200,6 +206,7 @@ function PessoasPage() {
         "Turno": "Noite",
         "Letra": "B",
         "Caminhao Fidelizado": "PLACA456",
+        "Contrato": "CCO USINA",
         "Inicio Ferias": "",
         "Fim Ferias": ""
       }
@@ -248,6 +255,10 @@ function PessoasPage() {
           letra = letra.toString().trim().toUpperCase() === "B" ? "B" : "A";
 
           const plate_tag = row["Caminhao Fidelizado"] || row["caminhao"] || row["caminhão"] || row["Placa"] || row["placa"] || null;
+          
+          let contrato = row["Contrato"] || row["contrato"] || "CCO PORTO";
+          contrato = contrato.toString().trim().toUpperCase().includes("USINA") ? "CCO USINA" : "CCO PORTO";
+
           const vacation_start = row["Inicio Ferias"] || row["Início Férias"] || row["vacation_start"] || null;
           const vacation_end = row["Fim Ferias"] || row["Fim Férias"] || row["vacation_end"] || null;
 
@@ -260,6 +271,7 @@ function PessoasPage() {
             vacation_start: vacation_start ? vacation_start.toString().trim() : null,
             vacation_end: vacation_end ? vacation_end.toString().trim() : null,
             ativo: true,
+            contrato,
             owner_id: user?.id
           };
 
@@ -323,11 +335,11 @@ function PessoasPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight flex items-center gap-3">
-            <Users className="h-8 w-8 text-indigo-600" />
+            <Users className="h-8 w-8 text-emerald-600" />
             <span>Pessoas e Operadores</span>
           </h1>
           <p className="text-muted-foreground mt-1">
-            Gerenciamento geral de motoristas e operadores: turnos, férias, indisponibilidades e escala 2x2.
+            Gerenciamento geral de motoristas e operadores: turnos, férias, indisponibilidades, contratos e escala 2x2.
           </p>
         </div>
         
@@ -346,8 +358,8 @@ function PessoasPage() {
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-            <Users className="h-5 w-5 text-indigo-400" />
+          <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+            <Users className="h-5 w-5 text-emerald-400" />
           </div>
           <div>
             <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Total Cadastrado</p>
@@ -389,9 +401,9 @@ function PessoasPage() {
       {/* Rotation config + search + action buttons */}
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         {/* Rotation 2x2 panel */}
-        <div className="flex flex-wrap items-center gap-3 bg-indigo-950/40 border border-indigo-900/50 rounded-xl px-4 py-2.5">
-          <Settings2 className="h-4 w-4 text-indigo-400" />
-          <span className="text-[10px] font-black uppercase text-indigo-400 tracking-wider">Escala 2x2 — Referência:</span>
+        <div className="flex flex-wrap items-center gap-3 bg-emerald-950/40 border border-emerald-900/50 rounded-xl px-4 py-2.5">
+          <Settings2 className="h-4 w-4 text-emerald-400" />
+          <span className="text-[10px] font-black uppercase text-emerald-400 tracking-wider">Escala 2x2 — Referência:</span>
           <input
             type="date"
             value={rotacaoRef}
@@ -399,9 +411,9 @@ function PessoasPage() {
               setRotacaoRef(e.target.value);
               localStorage.setItem("porto_rotacao_ref", e.target.value);
             }}
-            className="h-7 text-xs bg-indigo-950/80 border border-indigo-850 text-indigo-200 rounded px-2 font-mono focus:outline-none"
+            className="h-7 text-xs bg-emerald-950/80 border border-emerald-900/60 text-emerald-200 rounded px-2 font-mono focus:outline-none"
           />
-          <span className="text-[10px] font-black uppercase text-indigo-400">Letra:</span>
+          <span className="text-[10px] font-black uppercase text-emerald-400">Letra:</span>
           <select
             value={rotacaoLetraRef}
             onChange={e => {
@@ -409,12 +421,12 @@ function PessoasPage() {
               setRotacaoLetraRef(val);
               localStorage.setItem("porto_rotacao_letra_ref", val);
             }}
-            className="h-7 text-xs bg-indigo-950/80 border border-indigo-850 text-indigo-200 rounded px-2 font-bold focus:outline-none"
+            className="h-7 text-xs bg-emerald-950/80 border border-emerald-900/60 text-emerald-200 rounded px-2 font-bold focus:outline-none"
           >
             <option value="A">A</option>
             <option value="B">B</option>
           </select>
-          <span className="text-[10px] text-indigo-300 font-bold ml-1 bg-indigo-900/40 px-2 py-0.5 rounded">
+          <span className="text-[10px] text-emerald-300 font-bold ml-1 bg-emerald-900/40 px-2 py-0.5 rounded">
             Letra no dia selecionado: {stats.letraHoje}
           </span>
         </div>
@@ -431,7 +443,7 @@ function PessoasPage() {
           <Button
             variant="outline"
             onClick={downloadPessoasTemplate}
-            className="h-9 border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-bold text-xs uppercase px-3"
+            className="h-9 border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold text-xs uppercase px-3"
             title="Baixar Modelo de Excel para Preenchimento"
           >
             <Download className="h-4 w-4 mr-1.5" />
@@ -449,7 +461,7 @@ function PessoasPage() {
             <Button
               variant="outline"
               onClick={() => document.getElementById("global-pessoas-import-input")?.click()}
-              className="h-9 border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-bold text-xs uppercase px-3"
+              className="h-9 border-emerald-200 text-emerald-700 hover:bg-emerald-50 font-bold text-xs uppercase px-3"
               title="Importar planilha de Pessoas (.xlsx)"
             >
               <Upload className="h-4 w-4 mr-1.5" />
@@ -460,10 +472,10 @@ function PessoasPage() {
           <Button
             onClick={() => {
               setEditingPessoa(null);
-              setPessoaForm({ name: "", matricula: "", shift: "Dia", letra: "A", plate_tag: "", vacation_start: "", vacation_end: "", ativo: true });
+              setPessoaForm({ name: "", matricula: "", shift: "Dia", letra: "A", plate_tag: "", vacation_start: "", vacation_end: "", ativo: true, contrato: "CCO PORTO" });
               setPessoaDialogOpen(true);
             }}
-            className="h-9 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase px-4"
+            className="h-9 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase px-4"
           >
             <Plus className="h-4 w-4 mr-1.5" />
             Nova Pessoa
@@ -481,6 +493,7 @@ function PessoasPage() {
               <TableHead>Turno</TableHead>
               <TableHead className="text-center">Letra</TableHead>
               <TableHead>Caminhão Fidelizado</TableHead>
+              <TableHead>Contrato</TableHead>
               <TableHead className="text-center">Status Hoje</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
@@ -505,7 +518,7 @@ function PessoasPage() {
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
                         (p.shift || "Dia") === "Dia"
                           ? "bg-amber-50 text-amber-700 border-amber-200"
-                          : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200"
                       }`}>
                         {(p.shift || "Dia") === "Dia" ? "☀️ Dia" : "🌙 Noite"}
                       </span>
@@ -517,7 +530,16 @@ function PessoasPage() {
                         {p.letra || "A"}
                       </span>
                     </TableCell>
-                    <TableCell className="font-mono text-indigo-700">{p.plate_tag || "—"}</TableCell>
+                    <TableCell className="font-mono text-emerald-700">{p.plate_tag || "—"}</TableCell>
+                    <TableCell>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
+                        (p.contrato || "CCO PORTO") === "CCO PORTO"
+                          ? "bg-sky-50 text-sky-700 border-sky-200"
+                          : "bg-teal-50 text-teal-700 border-teal-200"
+                      }`}>
+                        {p.contrato || "CCO PORTO"}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-center">
                       {disp.ok ? (
                         <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 text-[9px] font-black uppercase">✓ Disponível</Badge>
@@ -555,6 +577,7 @@ function PessoasPage() {
                               vacation_start: p.vacation_start || "",
                               vacation_end: p.vacation_end || "",
                               ativo: p.ativo !== false,
+                              contrato: p.contrato || "CCO PORTO"
                             });
                             setPessoaDialogOpen(true);
                           }}
@@ -576,7 +599,7 @@ function PessoasPage() {
               })}
             {people.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-slate-400 italic">
+                <TableCell colSpan={8} className="text-center py-8 text-slate-400 italic">
                   Nenhuma pessoa cadastrada. Clique em "Nova Pessoa" para começar.
                 </TableCell>
               </TableRow>
@@ -615,6 +638,17 @@ function PessoasPage() {
                 />
               </div>
               <div>
+                <Label className="text-[10px] font-black uppercase text-slate-600">Contrato / Operação</Label>
+                <select
+                  value={pessoaForm.contrato}
+                  onChange={e => setPessoaForm(f => ({ ...f, contrato: e.target.value }))}
+                  className="mt-1 w-full h-8 text-xs font-bold border border-slate-300 rounded-md px-2 bg-white"
+                >
+                  <option value="CCO PORTO">CCO PORTO</option>
+                  <option value="CCO USINA">CCO USINA</option>
+                </select>
+              </div>
+              <div>
                 <Label className="text-[10px] font-black uppercase text-slate-600">Turno</Label>
                 <select
                   value={pessoaForm.shift}
@@ -636,7 +670,7 @@ function PessoasPage() {
                   <option value="B">Letra B</option>
                 </select>
               </div>
-              <div>
+              <div className="col-span-2">
                 <Label className="text-[10px] font-black uppercase text-slate-600">Caminhão Fidelizado (Placa/TAG)</Label>
                 <select
                   value={pessoaForm.plate_tag}
@@ -678,7 +712,7 @@ function PessoasPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPessoaDialogOpen(false)} className="font-bold text-xs">Cancelar</Button>
-            <Button onClick={savePessoa} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase">Salvar</Button>
+            <Button onClick={savePessoa} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs uppercase">Salvar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

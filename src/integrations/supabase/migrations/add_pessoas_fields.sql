@@ -17,14 +17,17 @@ CREATE TABLE IF NOT EXISTS public.people (
     unavailability DATE[] DEFAULT '{}',
     matricula TEXT,
     ativo BOOLEAN DEFAULT true,
+    contrato TEXT,
     owner_id UUID REFERENCES auth.users(id)
 );
+
+-- Se a tabela já existia antes, garante que a coluna contrato seja adicionada
+ALTER TABLE public.people ADD COLUMN IF NOT EXISTS contrato text;
 
 -- Habilitar RLS na tabela `people` se ainda não estiver habilitada
 ALTER TABLE public.people ENABLE ROW LEVEL SECURITY;
 
 -- Adiciona a política de acesso público para a tabela `people`
--- (Nota: CREATE POLICY IF NOT EXISTS não é padrão no postgres, então usamos um bloco DO ou removemos se já existir)
 DO $$
 BEGIN
     IF NOT EXISTS (
