@@ -1852,6 +1852,10 @@ function PortoOperacaoPage() {
                 <Clock className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
                 Demanda D+1
               </TabsTrigger>
+              <TabsTrigger value="vale" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
+                <CalendarDays className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
+                Programação Vale
+              </TabsTrigger>
               <TabsTrigger value="corretivas" className="font-bold text-[10.5px] uppercase px-2.5 py-1.5">
                 <Wrench className="h-3.5 w-3.5 mr-1.5 text-indigo-600" />
                 Corretivas
@@ -1866,7 +1870,7 @@ function PortoOperacaoPage() {
           </TabsList>
         </div>
 
-        {(activeTab === "operacao" || activeTab === "habituais" || activeTab === "corretivas") && (
+        {(activeTab === "operacao" || activeTab === "habituais" || activeTab === "corretivas" || activeTab === "vale") && (
           <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Filtrar Data:</span>
             
@@ -2172,12 +2176,6 @@ function PortoOperacaoPage() {
                         <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "local" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
                       </div>
                     </TableHead>
-                    <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("activity")}>
-                      <div className="flex items-center gap-1">
-                        Atividade
-                        <ArrowUpDown className={`h-3.5 w-3.5 transition-colors ${sortColumn === "activity" ? "text-indigo-600 font-bold" : "text-slate-400"}`} />
-                      </div>
-                    </TableHead>
                     <TableHead className="py-2.5 cursor-pointer select-none hover:bg-slate-200/50 transition-colors" onClick={() => handleSort("operator")}>
                       <div className="flex items-center gap-1">
                         Operador
@@ -2197,7 +2195,7 @@ function PortoOperacaoPage() {
                 <TableBody className="divide-y divide-slate-100 text-[10.5px] font-bold text-slate-900">
                   {filteredSchedules.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={13} className="text-center py-8 text-slate-400 italic font-black">Nenhum equipamento escalado hoje.</TableCell>
+                      <TableCell colSpan={12} className="text-center py-8 text-slate-400 italic font-black">Nenhum equipamento escalado hoje.</TableCell>
                     </TableRow>
                   ) : (
                     filteredSchedules.map(s => {
@@ -2249,7 +2247,6 @@ function PortoOperacaoPage() {
                           <TableCell className="font-mono text-slate-700">{s.valley_end || "—"}</TableCell>
                           <TableCell className="font-mono text-slate-500">{s.cost_center || "—"}</TableCell>
                           <TableCell className="text-indigo-800 uppercase">{s.local || "—"}</TableCell>
-                          <TableCell className="max-w-[150px] truncate text-slate-500 font-medium" title={s.activity || ""}>{s.activity || "—"}</TableCell>
                           <TableCell className="text-slate-800 uppercase">{s.operator || "—"}</TableCell>
                           <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
                           <TableCell onClick={(e) => e.stopPropagation()}>
@@ -2799,6 +2796,59 @@ function PortoOperacaoPage() {
                         </TableRow>
                       );
                     })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="vale" className="space-y-6 mt-0">
+          <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+            <div className="bg-slate-50 border-b p-3 flex justify-between items-center flex-wrap gap-2">
+              <div>
+                <h2 className="font-black text-slate-800 text-xs uppercase tracking-wider">Programação Vale</h2>
+                <p className="text-[9px] text-muted-foreground uppercase font-bold mt-0.5">Visualização simplificada das colunas da Vale</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="relative w-full max-w-xs">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Input 
+                    placeholder="Buscar..." 
+                    value={search} 
+                    onChange={e => setSearch(e.target.value)} 
+                    className="pl-8 h-8 text-xs font-medium w-48"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <Table className="min-w-[600px] w-full text-[10.5px] [&_td]:py-2 [&_td]:px-3 [&_th]:py-2 [&_th]:px-3">
+                <TableHeader className="bg-slate-100/50">
+                  <TableRow className="text-[10px] uppercase font-black tracking-wider text-slate-600">
+                    <TableHead>Equipamento</TableHead>
+                    <TableHead>Local</TableHead>
+                    <TableHead>Atividade</TableHead>
+                    <TableHead>Operador</TableHead>
+                    <TableHead>OS</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody className="divide-y divide-slate-100 text-[10.5px] font-bold text-slate-900">
+                  {habitualSchedules.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-8 text-slate-400 italic font-black">Nenhuma programação importada para este dia.</TableCell>
+                    </TableRow>
+                  ) : (
+                    habitualSchedules.map(s => (
+                      <TableRow key={s.id} className="hover:bg-slate-50/50">
+                        <TableCell className="font-mono text-slate-700">{s.equipment || "—"}</TableCell>
+                        <TableCell className="text-indigo-800 uppercase">{s.local || "—"}</TableCell>
+                        <TableCell className="text-slate-500 font-medium">{s.activity || "—"}</TableCell>
+                        <TableCell className="text-slate-800 uppercase">{s.operator || "—"}</TableCell>
+                        <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
+                      </TableRow>
+                    ))
                   )}
                 </TableBody>
               </Table>
