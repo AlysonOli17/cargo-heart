@@ -581,15 +581,10 @@ function UsinaOperacaoPage() {
             }
           });
 
-          // Infer schedule type based on block index
-          let scheduleType = "habitual";
-          if (blockIndex === 1) {
-            scheduleType = "eventual";
-          } else if (blockIndex >= 2) {
-            scheduleType = "habitual";
-          }
-          rowObj._schedule_type = scheduleType;
-          rowObj._turno_secao = "Dia"; // Fallback for PDF
+          // We'll infer schedule type AFTER parsing all rows based on max block count
+          rowObj._block_index = blockIndex;
+          rowObj._explicit_type = currentSection?.type || null;
+          rowObj._turno_secao = currentSection?.turno || "Dia"; // Fallback for PDF
 
           // Only keep rows that have some meaningful identifier
           if (rowObj.placa || rowObj.equipment || rowObj.equipamento || rowObj.tetag) {
@@ -612,7 +607,23 @@ function UsinaOperacaoPage() {
         }
       }
 
-      console.log(`[Import PDF] ${allParsed.length} linhas detectadas.`, allParsed.slice(0, 3));
+      // Post-process schedule types based on total blocks found
+      const maxBlock = Math.max(0, ...allParsed.map(r => r._block_index));
+      allParsed.forEach(row => {
+        if (row._explicit_type) {
+          row._schedule_type = row._explicit_type;
+        } else {
+          // If only 1 block exists in the whole file, it's Habitual.
+          // If >1 blocks exist, the 1st is Eventual, 2nd+ is Habitual.
+          if (maxBlock === 1) {
+            row._schedule_type = "habitual";
+          } else {
+            row._schedule_type = row._block_index === 1 ? "eventual" : "habitual";
+          }
+        }
+      });
+
+      console.log(`[Import PDF] ${allParsed.length} linhas detectadas. Max blocks: ${maxBlock}`, allParsed.slice(0, 3));
       setPreviewData(allParsed);
     } catch (err) {
       console.error("PDF parse error", err);
@@ -728,19 +739,9 @@ function UsinaOperacaoPage() {
               if (key) newRow[key] = row[idx] ?? "";
             });
 
-            // Determine schedule type:
-            // 1. Use explicit section title if found
-            // 2. Otherwise, infer from block index: Block 1 = Eventual, Block 2+ = Habitual
-            let scheduleType = "habitual";
-            if (currentSection) {
-              scheduleType = currentSection.type;
-            } else if (blockIndex === 1) {
-              scheduleType = "eventual";
-            } else if (blockIndex >= 2) {
-              scheduleType = "habitual";
-            }
-
-            newRow._schedule_type = scheduleType;
+            // We'll infer schedule type AFTER parsing all rows based on max block count
+            newRow._block_index = blockIndex;
+            newRow._explicit_type = currentSection?.type || null;
             newRow._turno_secao = currentSection?.turno || "Dia";
             newRow._equipe = currentSection?.equipe || "";
 
@@ -766,7 +767,21 @@ function UsinaOperacaoPage() {
           }
         }
 
-        console.log(`[Import Usina] ${allParsed.length} linhas detectadas.`, allParsed.slice(0, 3));
+        // Post-process schedule types based on total blocks found
+        const maxBlock = Math.max(0, ...allParsed.map(r => r._block_index));
+        allParsed.forEach(row => {
+          if (row._explicit_type) {
+            row._schedule_type = row._explicit_type;
+          } else {
+            if (maxBlock === 1) {
+              row._schedule_type = "habitual";
+            } else {
+              row._schedule_type = row._block_index === 1 ? "eventual" : "habitual";
+            }
+          }
+        });
+
+        console.log(`[Import Usina] ${allParsed.length} linhas detectadas. Max blocks: ${maxBlock}`, allParsed.slice(0, 3));
         setPreviewData(allParsed);
       } catch (err) {
         console.error(err);
@@ -2775,9 +2790,9 @@ function UsinaOperacaoPage() {
                   {/* 1. EQUIPAMENTO (Horizontal Bar) */}
                   <div 
                     onClick={() => setExpandedChart("equipment")}
-                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    className="bg-white border border-slate-200 shadow-sm rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all duration-300 group"
                   >
-                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-4 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">EQUIPAMENTO</h4>
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-widest text-slate-500 mb-4">EQUIPAMENTO</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
@@ -2785,17 +2800,17 @@ function UsinaOperacaoPage() {
                           layout="vertical"
                           margin={{ top: 10, right: 85, left: 10, bottom: 5 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
-                          <XAxis type="number" stroke="#71717a" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
-                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={10} fontWeight={700} width={130} tickLine={false} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} vertical={true} />
+                          <XAxis type="number" stroke="#94a3b8" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#64748b" fontSize={10} fontWeight={700} width={130} tickLine={false} />
                           <Tooltip
-                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
+                            contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                            labelStyle={{ color: '#0f172a', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#4f46e5', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
-                          <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={26}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={8} />
+                          <Bar dataKey="minutes" fill="#818cf8" barSize={26} radius={[0, 4, 4, 0]}>
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#64748b', fontSize: 11, fontWeight: 800 }} offset={8} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2805,26 +2820,26 @@ function UsinaOperacaoPage() {
                   {/* 4. MANUTENÇÃO (Line Chart) */}
                   <div 
                     onClick={() => setExpandedChart("maintenance")}
-                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    className="bg-white border border-slate-200 shadow-sm rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all duration-300 group"
                   >
-                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-4 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">MANUTENÇÃO</h4>
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-widest text-slate-500 mb-4">MANUTENÇÃO</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={analyticsReport.chartDataTypes.length > 0 ? analyticsReport.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]}
                           margin={{ top: 20, right: 20, left: 10, bottom: 10 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" />
-                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={10} fontWeight={700} />
-                          <YAxis stroke="#a1a1aa" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                          <XAxis dataKey="name" stroke="#64748b" fontSize={10} fontWeight={700} />
+                          <YAxis stroke="#94a3b8" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
                           <Tooltip
-                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
+                            contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                            labelStyle={{ color: '#0f172a', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#4f46e5', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
-                          <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={10} />
+                          <Line type="monotone" dataKey="minutes" stroke="#6366f1" strokeWidth={3} dot={{ fill: '#6366f1', r: 5 }} activeDot={{ r: 8 }}>
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#64748b', fontSize: 11, fontWeight: 800 }} offset={10} />
                           </Line>
                         </LineChart>
                       </ResponsiveContainer>
@@ -2842,26 +2857,26 @@ function UsinaOperacaoPage() {
                     {/* 2. DATA (Vertical Bar) */}
                     <div 
                       onClick={() => setExpandedChart("date")}
-                      className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                      className="bg-white border border-slate-200 shadow-sm rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all duration-300 group"
                     >
-                      <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">DATA</h4>
+                      <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-slate-500 mb-2">DATA</h4>
                       <div className="flex-1 min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
                             data={analyticsReport.chartDataDates}
                             margin={{ top: 24, right: 10, left: 10, bottom: 5 }}
                           >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
-                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={11} fontWeight={700} />
-                            <YAxis stroke="#a1a1aa" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                            <XAxis dataKey="name" stroke="#64748b" fontSize={11} fontWeight={700} />
+                            <YAxis stroke="#94a3b8" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
                             <Tooltip
-                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                              labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
-                              itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
+                              contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                              labelStyle={{ color: '#0f172a', fontWeight: 900, fontSize: '11px' }}
+                              itemStyle={{ color: '#4f46e5', fontSize: '11px', fontWeight: 700 }}
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
-                            <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={6} />
+                            <Bar dataKey="minutes" fill="#6366f1" barSize={36} radius={[4, 4, 0, 0]}>
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} style={{ fill: '#64748b', fontSize: 11, fontWeight: 900 }} offset={6} />
                             </Bar>
                           </BarChart>
                         </ResponsiveContainer>
@@ -2871,9 +2886,9 @@ function UsinaOperacaoPage() {
                     {/* 3. ADERÊNCIA (Gauge) */}
                     <div 
                       onClick={() => setExpandedChart("adherence")}
-                      className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                      className="bg-white border border-slate-200 shadow-sm rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all duration-300 group"
                     >
-                      <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">ADERÊNCIA</h4>
+                      <h4 className="text-[11px] font-black uppercase text-center tracking-widest text-slate-500 mb-2">ADERÊNCIA</h4>
                       <div className="flex-1 flex flex-col items-center justify-center relative min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
@@ -2881,7 +2896,7 @@ function UsinaOperacaoPage() {
                               data={[
                                 { value: Math.min(95, analyticsReport.overallAdherence), color: "#ef4444" },
                                 { value: Math.max(0, Math.min(5, analyticsReport.overallAdherence - 95)), color: "#10b981" },
-                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#1f2937" }
+                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#e2e8f0" }
                               ]}
                               dataKey="value"
                               innerRadius="65%"
@@ -2893,15 +2908,15 @@ function UsinaOperacaoPage() {
                             >
                               <Cell fill="#ef4444" />
                               <Cell fill="#10b981" />
-                              <Cell fill="#242424" />
+                              <Cell fill="#f1f5f9" />
                             </Pie>
                           </PieChart>
                         </ResponsiveContainer>
                         <div className="absolute top-[58%] flex flex-col items-center gap-0.5">
-                          <span className="text-4xl font-black text-white tracking-tight drop-shadow-[0_0_12px_rgba(255,255,255,0.4)]">
+                          <span className="text-4xl font-black text-slate-800 tracking-tight">
                             {analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%
                           </span>
-                          <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Aderência Geral</span>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Aderência Geral</span>
                         </div>
                       </div>
                     </div>
@@ -2911,9 +2926,9 @@ function UsinaOperacaoPage() {
                   {/* 5. MOTORISTA/OPERADOR (Horizontal Bar) */}
                   <div 
                     onClick={() => setExpandedChart("operator")}
-                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    className="bg-white border border-slate-200 shadow-sm rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all duration-300 group"
                   >
-                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">MOTORISTA/OPERADOR</h4>
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-widest text-slate-500 mb-2">MOTORISTA/OPERADOR</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
@@ -2921,17 +2936,17 @@ function UsinaOperacaoPage() {
                           layout="vertical"
                           margin={{ top: 5, right: 85, left: 10, bottom: 5 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
-                          <XAxis type="number" stroke="#71717a" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
-                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={10} fontWeight={700} width={120} tickLine={false} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} vertical={true} />
+                          <XAxis type="number" stroke="#94a3b8" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#64748b" fontSize={10} fontWeight={700} width={120} tickLine={false} />
                           <Tooltip
-                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
+                            contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                            labelStyle={{ color: '#0f172a', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#4f46e5', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
-                          <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={8} />
+                          <Bar dataKey="minutes" fill="#818cf8" barSize={16} radius={[0, 4, 4, 0]}>
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#64748b', fontSize: 11, fontWeight: 800 }} offset={8} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2941,26 +2956,26 @@ function UsinaOperacaoPage() {
                   {/* 6. PLACA (Vertical Bar) */}
                   <div 
                     onClick={() => setExpandedChart("plates")}
-                    className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
+                    className="bg-white border border-slate-200 shadow-sm rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all duration-300 group"
                   >
-                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">PLACA</h4>
+                    <h4 className="text-[11px] font-black uppercase text-center tracking-widest text-slate-500 mb-2">PLACA</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={analyticsReport.chartDataPlates}
                           margin={{ top: 24, right: 10, left: 10, bottom: 5 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
-                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={11} fontWeight={700} />
-                          <YAxis stroke="#a1a1aa" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                          <XAxis dataKey="name" stroke="#64748b" fontSize={11} fontWeight={700} />
+                          <YAxis stroke="#94a3b8" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
                           <Tooltip
-                            contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
+                            contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                            labelStyle={{ color: '#0f172a', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#4f46e5', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
-                          <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={6} />
+                          <Bar dataKey="minutes" fill="#6366f1" barSize={36} radius={[4, 4, 0, 0]}>
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#64748b', fontSize: 11, fontWeight: 800 }} offset={6} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -3705,9 +3720,9 @@ function UsinaOperacaoPage() {
 
       {/* Expanded Chart Dialog */}
       <Dialog open={!!expandedChart} onOpenChange={() => { setExpandedChart(null); setExpandedSearch(""); }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-zinc-950 text-white border border-zinc-800">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white border border-slate-200">
           <DialogHeader>
-            <DialogTitle className="font-black uppercase text-indigo-400 flex items-center gap-2 text-base">
+            <DialogTitle className="font-black uppercase text-indigo-600 flex items-center gap-2 text-base">
               🔍 {expandedChart === "equipment" && "Tempo Parado por Equipamento"}
               {expandedChart === "date" && "Tempo Parado por Data"}
               {expandedChart === "adherence" && "Aderência Geral e por Localidade"}
@@ -3715,7 +3730,7 @@ function UsinaOperacaoPage() {
               {expandedChart === "plates" && "Tempo Parado por Placa"}
               {expandedChart === "maintenance" && "Motivos de Manutenção Corretiva"}
             </DialogTitle>
-            <DialogDescription className="text-xs text-zinc-400 uppercase font-bold">
+            <DialogDescription className="text-xs text-slate-500 uppercase font-bold">
               Visão expandida e detalhada com todos os dados do período selecionado.
             </DialogDescription>
           </DialogHeader>
@@ -3723,8 +3738,8 @@ function UsinaOperacaoPage() {
           {expandedChart && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 py-4">
               {/* Chart Column */}
-              <div className="lg:col-span-7 bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex flex-col h-[380px]">
-                <span className="text-[10px] font-black uppercase text-center tracking-wider text-zinc-500 mb-4 block">Visualização Gráfica</span>
+              <div className="lg:col-span-7 bg-white border border-slate-100 rounded-xl p-4 flex flex-col h-[380px]">
+                <span className="text-[10px] font-black uppercase text-center tracking-wider text-slate-400 mb-4 block">Visualização Gráfica</span>
                 <div className="flex-1 min-h-0 relative">
                   <ResponsiveContainer width="100%" height="100%">
                     {(() => {
@@ -3733,15 +3748,15 @@ function UsinaOperacaoPage() {
                           .filter(item => item.name.toLowerCase().includes(expandedSearch.toLowerCase()));
                         return (
                           <BarChart data={data} layout="vertical" margin={{ top: 5, right: 60, left: 10, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
-                            <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
-                            <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={80} tickLine={false} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} vertical={true} />
+                            <XAxis type="number" stroke="#94a3b8" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <YAxis dataKey="name" type="category" stroke="#64748b" fontSize={8} width={80} tickLine={false} />
                             <Tooltip
-                              contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
+                              contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
-                            <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={8} className="font-bold font-mono" offset={8} />
+                            <Bar dataKey="minutes" fill="#818cf8" barSize={16}>
+                              <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#64748b" fontSize={8} className="font-bold font-mono" offset={8} />
                             </Bar>
                           </BarChart>
                         );
