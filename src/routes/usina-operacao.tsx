@@ -294,6 +294,10 @@ function UsinaOperacaoPage() {
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [importOpen, setImportOpen] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
+  // Data alvo da importação (dia que será operado) — default: amanhã
+  const [importTargetDate, setImportTargetDate] = useState(
+    format(addDays(new Date(), 1), "yyyy-MM-dd")
+  );
 
   // Corrective Stop Dialog State
   const [stopOpen, setStopOpen] = useState(false);
@@ -439,19 +443,19 @@ function UsinaOperacaoPage() {
     try {
       let schedsQuery = (supabase as any).from("usina_daily_schedules").select("*");
       if (dateFilterMode === "single") {
-        schedsQuery = schedsQuery.or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+        schedsQuery = schedsQuery.eq("scheduled_date", selectedDate);
       } else if (dateFilterMode === "range") {
         const start = startDate || "2000-01-01";
         const end = endDate || "2999-12-31";
-        schedsQuery = schedsQuery.or(`and(scheduled_date.gte.${start},scheduled_date.lte.${end}),and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+        schedsQuery = schedsQuery.gte("scheduled_date", start).lte("scheduled_date", end);
       } else if (dateFilterMode === "month") {
         const start = `${selectedYear}-${selectedMonth}-01`;
         const end = `${selectedYear}-${selectedMonth}-31`;
-        schedsQuery = schedsQuery.or(`and(scheduled_date.gte.${start},scheduled_date.lte.${end}),and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
+        schedsQuery = schedsQuery.gte("scheduled_date", start).lte("scheduled_date", end);
       }
-      let { data: scheds, error: e1 } = await schedsQuery;
+      const { data: scheds, error: e1 } = await schedsQuery;
       if (e1) throw e1;
-      
+
       const { data: logs, error: e2 } = await (supabase as any).from("usina_corrective_logs").select("*");
       if (e2) throw e2;
 
@@ -459,47 +463,6 @@ function UsinaOperacaoPage() {
       if (eProg) throw eProg;
       setProgramming(progs ?? []);
       localStorage.setItem("local_programming", JSON.stringify(progs ?? []));
-
-      // Check if we have daily schedules for selectedDate
-      const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
-      if (dayScheds.length === 0 && dateFilterMode === "single") {
-        // Find templates for this weekday
-        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
-        const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
-        const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
-
-        if (templatesForDay.length > 0) {
-          // Clone templates to selectedDate
-          const clones = templatesForDay.map((t: any) => ({
-            scheduled_date: selectedDate,
-            equipment: t.equipment,
-            plate: t.plate,
-            model: t.model,
-            client: t.client,
-            shift: t.shift,
-            valley_time: t.valley_time,
-            valley_start: t.valley_start,
-            valley_end: t.valley_end,
-            cost_center: t.cost_center,
-            subet: t.subet,
-            local: t.local,
-            activity: t.activity,
-            operator: t.operator,
-            os_number: t.os_number,
-            is_completed: false,
-            owner_id: user?.id
-          }));
-
-          const { data: inserted, error: eInsert } = await (supabase as any)
-            .from("usina_daily_schedules")
-            .insert(clones)
-            .select();
-          
-          if (!eInsert && inserted) {
-            scheds = [...(scheds ?? []), ...inserted];
-          }
-        }
-      }
 
       setSchedules((scheds ?? []) as UsinaSchedule[]);
       setCorrectiveLogs((logs ?? []) as CorrectiveLog[]);
@@ -509,38 +472,12 @@ function UsinaOperacaoPage() {
       const merged = [...nonMatchingScheds, ...(scheds ?? [])];
       localStorage.setItem("local_usina_schedules", JSON.stringify(merged));
     } catch (err) {
-      // Fallback localStorage para escalas e corretivas
+      // Fallback localStorage
       const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
       const localLogs = JSON.parse(localStorage.getItem("local_usina_corrective_logs") || "[]");
       const localProgs = JSON.parse(localStorage.getItem("local_programming") || "[]");
-
       setProgramming(localProgs);
-
-      const dayScheds = localScheds.filter((s: any) => s.scheduled_date === selectedDate);
-      let mergedScheds = [...localScheds];
-
-      if (dayScheds.length === 0 && dateFilterMode === "single") {
-        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
-        const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
-        const templatesForDay = localScheds.filter((s: any) => s.scheduled_date === templateDateStr);
-
-        if (templatesForDay.length > 0) {
-          const clones = templatesForDay.map((t: any) => ({
-            ...t,
-            id: Math.random().toString(36).substring(2),
-            scheduled_date: selectedDate,
-            is_completed: false,
-            owner_id: user?.id
-          }));
-          mergedScheds = [...localScheds, ...clones];
-          localStorage.setItem("local_usina_schedules", JSON.stringify(mergedScheds));
-        }
-      }
-
-      setSchedules(mergedScheds.filter((s: any) => 
-        matchesDateFilter(s.scheduled_date) || 
-        (s.scheduled_date >= "2000-01-02" && s.scheduled_date <= "2000-01-08")
-      ));
+      setSchedules(localScheds.filter((s: any) => matchesDateFilter(s.scheduled_date)));
       setCorrectiveLogs(localLogs);
     }
   };
@@ -865,8 +802,9 @@ function UsinaOperacaoPage() {
         }
       }
 
-      const rowDateStr = getRowTargetDate(row, selectedDate);
-      const rowDateObj = new Date(rowDateStr + "T12:00:00");
+      // — Usa a data escolhida pelo usuário diretamente (sem inferir dia da semana)
+      const targetDateStr = importTargetDate;
+      const targetDateObj = new Date(targetDateStr + "T12:00:00");
 
       // Dynamically find the local column: any key containing "local" or "frente" or "area" or "posto"
       const localKey = Object.keys(row).find(k =>
@@ -886,7 +824,7 @@ function UsinaOperacaoPage() {
         const osParts = rawOS.split("/").map((o: string) => o.trim());
         const os1 = osParts[0];
         const os2 = osParts[1] || osParts[0];
-        const nextDayDate = format(addDays(rowDateObj, 1), "yyyy-MM-dd");
+        const nextDayDate = format(addDays(targetDateObj, 1), "yyyy-MM-dd");
 
         const basePayload = {
           equipment: row.equipamento || row.equipment || null,
@@ -905,7 +843,7 @@ function UsinaOperacaoPage() {
         // Record 1: from start time to 23:59
         finalPayloads.push({
           ...basePayload,
-          scheduled_date: rowDateStr,
+          scheduled_date: targetDateStr,
           shift: "NOITE (P1)",
           valley_time: `${valley_start} - 23:59`,
           valley_start,
@@ -928,12 +866,12 @@ function UsinaOperacaoPage() {
       } else {
         // Standard single record
         // If it starts after midnight (e.g. 00:00 to 07:00), schedule it to the next day
-        let finalScheduledDate = rowDateStr;
+        let finalScheduledDate = targetDateStr;
         if (valley_start) {
           const parts = valley_start.split(":");
           const startHour = parseInt(parts[0], 10);
           if (!isNaN(startHour) && startHour >= 0 && startHour < 7) {
-            finalScheduledDate = format(addDays(rowDateObj, 1), "yyyy-MM-dd");
+            finalScheduledDate = format(addDays(targetDateObj, 1), "yyyy-MM-dd");
           }
         }
 
@@ -1267,31 +1205,30 @@ function UsinaOperacaoPage() {
     }).filter(item => item.warning !== null && (item.warning.type === "unavailable" || item.warning.type === "programming_conflict"));
   }, [filteredSchedules, programming, equipments]);
 
-  // Filter habitual schedules (the template week 2000-01-02 to 2000-01-08)
+  // Schedules D+1 (habituais) — agora filtrados por schedule_type + data real
   const habitualSchedules = useMemo(() => {
     return schedules.filter((s: any) => {
-      const isTemplate = s.scheduled_date >= "2000-01-02" && s.scheduled_date <= "2000-01-08";
-      if (!isTemplate) return false;
+      // Deve ser do tipo habitual
+      const sType = (s.schedule_type || "habitual").toLowerCase();
+      if (sType !== "habitual") return false;
 
-      // Filter by schedule type
-      if (scheduleTypeFilter !== "todos") {
-        const sType = (s.schedule_type || "habitual").toLowerCase();
-        if (sType !== scheduleTypeFilter) return false;
-      }
-      
+      // Filtra pela data selecionada
+      if (!matchesDateFilter(s.scheduled_date)) return false;
+
+      // Filtro adicional por tipo (Eventual/Habitual) do filtro de UI
+      if (scheduleTypeFilter !== "todos" && sType !== scheduleTypeFilter) return false;
+
       const term = search.toLowerCase();
       const cleanTerm = term.replace(/[^a-zA-Z0-9]/g, "");
-      const schedDateParsed = new Date(s.scheduled_date + "T12:00:00");
-      const weekdayStr = format(schedDateParsed, "EEEE", { locale: ptBR }).toLowerCase();
 
       const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
-      const matchCorretiva = stops.some(st => 
-        (st.reason || "").toLowerCase().includes(term) || 
+      const matchCorretiva = stops.some(st =>
+        (st.reason || "").toLowerCase().includes(term) ||
         (st.notes || "").toLowerCase().includes(term) ||
         parseCorrectiveReason(st.reason).type.toLowerCase().includes(term)
       );
 
-      const matchSearch = 
+      const matchSearch =
         (s.equipment || "").toLowerCase().includes(term) ||
         (cleanTerm && (s.equipment || "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase().includes(cleanTerm)) ||
         (s.plate || "").toLowerCase().includes(term) ||
@@ -1304,12 +1241,12 @@ function UsinaOperacaoPage() {
         (s.activity || "").toLowerCase().includes(term) ||
         (s.operator || "").toLowerCase().includes(term) ||
         (s.os_number || "").toLowerCase().includes(term) ||
-        matchCorretiva ||
-        weekdayStr.includes(term);
+        (s.scheduled_date || "").includes(term) ||
+        matchCorretiva;
 
       return matchSearch;
     }).sort((a: any, b: any) => a.scheduled_date.localeCompare(b.scheduled_date));
-  }, [schedules, search, correctiveLogs, scheduleTypeFilter]);
+  }, [schedules, search, correctiveLogs, scheduleTypeFilter, selectedDate, dateFilterMode, startDate, endDate, selectedMonth, selectedYear]);
 
   // Analytics: Adherence & Downtime math
   const analytics = useMemo(() => {
@@ -2230,6 +2167,25 @@ function UsinaOperacaoPage() {
                         <div className="space-y-3">
                           <p className="text-[10px] font-black text-indigo-600 text-center uppercase">Contém {previewData.length} registros no arquivo.</p>
                           
+                          {/* Seletor de data de operação */}
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex items-center gap-3">
+                            <div className="flex-1">
+                              <label className="block text-[9px] font-black uppercase text-indigo-700 mb-1">
+                                📅 Data de Operação (dia que será operado)
+                              </label>
+                              <input
+                                type="date"
+                                value={importTargetDate}
+                                onChange={e => setImportTargetDate(e.target.value)}
+                                className="w-full border border-indigo-300 rounded-md px-2 py-1 text-sm font-bold text-indigo-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                            </div>
+                            <div className="text-[9px] text-indigo-600 font-black uppercase text-center">
+                              <div className="text-lg">{importTargetDate === format(addDays(new Date(), 1), "yyyy-MM-dd") ? "🕒" : "📆"}</div>
+                              {importTargetDate === format(addDays(new Date(), 1), "yyyy-MM-dd") ? "Amanhã" : format(new Date(importTargetDate + "T12:00:00"), "EEE dd/MM", { locale: ptBR })}
+                            </div>
+                          </div>
+                          
                           <div className="border rounded-lg overflow-hidden max-h-64 overflow-y-auto">
                             <Table>
                               <TableHeader className="bg-slate-50 sticky top-0">
@@ -2369,7 +2325,7 @@ function UsinaOperacaoPage() {
                         title="Selecionar todos"
                       />
                     </TableHead>
-                    <TableHead className="py-2.5">Dia da Semana</TableHead>
+                    <TableHead className="py-2.5">Data</TableHead>
                     <TableHead className="py-2.5">Tipo</TableHead>
                     <TableHead className="py-2.5">Equipamento</TableHead>
                     <TableHead className="py-2.5">Placa</TableHead>
@@ -2412,7 +2368,12 @@ function UsinaOperacaoPage() {
                               }}
                             />
                           </TableCell>
-                          <TableCell className="font-mono text-indigo-700 font-black capitalize">{displayDateStr}</TableCell>
+                          <TableCell className="font-mono text-slate-600 font-black">
+                            {format(new Date(s.scheduled_date + "T12:00:00"), "dd/MM/yyyy", { locale: ptBR })}
+                            <div className="text-[9px] text-slate-400 font-medium capitalize">
+                              {format(new Date(s.scheduled_date + "T12:00:00"), "EEEE", { locale: ptBR })}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             {(() => {
                               const stype = ((s as any).schedule_type || "habitual").toLowerCase();
