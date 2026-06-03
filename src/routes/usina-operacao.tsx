@@ -534,56 +534,86 @@ function UsinaOperacaoPage() {
         });
       }
 
-      // Detect header row
-      let headerRowIndex = -1;
+      // Multi-block detection for PDF
       let headerCells: { text: string; x: number }[] = [];
-      
+      let blockIndex = 0;
+      const allParsed: any[] = [];
+
       for (let i = 0; i < parsedRows.length; i++) {
         const row = parsedRows[i];
+        
+        // Detect if row is a header
         const hasPlaca = row.some(cell => /placa|plate/i.test(cell.text));
         const hasEquip = row.some(cell => /equipamento|equip/i.test(cell.text));
         const hasTurno = row.some(cell => /turno|shift/i.test(cell.text));
-        if (hasPlaca || (hasEquip && hasTurno)) {
-          headerRowIndex = i;
-          headerCells = row;
-          break;
-        }
-      }
-
-      if (headerRowIndex === -1) {
-        const firstRow = parsedRows.find(r => r.length > 3);
-        if (firstRow) {
-          headerCells = firstRow;
-          headerRowIndex = parsedRows.indexOf(firstRow);
-        }
-      }
-
-      const dataRows = parsedRows.slice(headerRowIndex + 1);
-      const normalizedData = dataRows.map(row => {
-        const rowObj: any = {};
         
-        row.forEach(cell => {
-          let closestHeader: any = null;
-          let minDistance = Infinity;
-          
-          headerCells.forEach(hCell => {
-            const dist = Math.abs(hCell.x - cell.x);
-            if (dist < minDistance) {
-              minDistance = dist;
-              closestHeader = hCell;
+        if (hasPlaca || (hasEquip && hasTurno)) {
+          headerCells = row;
+          blockIndex++;
+          continue; // Skip the header row itself
+        }
+
+        // If we haven't found any header yet, and this row has lots of columns, treat it as a fallback header
+        if (headerCells.length === 0 && row.length > 3) {
+          headerCells = row;
+          blockIndex++;
+          continue;
+        }
+
+        // Parse data row if we have headers
+        if (headerCells.length > 0) {
+          const rowObj: any = {};
+          row.forEach(cell => {
+            let closestHeader: any = null;
+            let minDistance = Infinity;
+            
+            headerCells.forEach(hCell => {
+              const dist = Math.abs(hCell.x - cell.x);
+              if (dist < minDistance) {
+                minDistance = dist;
+                closestHeader = hCell;
+              }
+            });
+            
+            if (closestHeader) {
+              const key = closestHeader.text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+              rowObj[key] = rowObj[key] ? (rowObj[key] + " " + cell.text) : cell.text;
             }
           });
-          
-          if (closestHeader) {
-            const key = closestHeader.text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
-            rowObj[key] = rowObj[key] ? (rowObj[key] + " " + cell.text) : cell.text;
-          }
-        });
-        
-        return rowObj;
-      });
 
-      setPreviewData(normalizedData.filter(row => row.placa || row.equipment || row.equipamento || row.tetag));
+          // Infer schedule type based on block index
+          let scheduleType = "habitual";
+          if (blockIndex === 1) {
+            scheduleType = "eventual";
+          } else if (blockIndex >= 2) {
+            scheduleType = "habitual";
+          }
+          rowObj._schedule_type = scheduleType;
+          rowObj._turno_secao = "Dia"; // Fallback for PDF
+
+          // Only keep rows that have some meaningful identifier
+          if (rowObj.placa || rowObj.equipment || rowObj.equipamento || rowObj.tetag) {
+            
+            // Ultra-aggressive filter for header rows
+            const plateVal = (rowObj.placa || "").toString().toLowerCase().replace(/[^a-z]/g, "");
+            const equipVal = (rowObj.equipamento || "").toString().toLowerCase().replace(/[^a-z]/g, "");
+            const tagVal = (rowObj.tetag || rowObj.te_tag || "").toString().toLowerCase().replace(/[^a-z]/g, "");
+            
+            if (
+              plateVal === "placa" || plateVal === "plate" || 
+              equipVal === "equipamento" || equipVal === "equipment" ||
+              tagVal === "tetag" || tagVal === "tag"
+            ) {
+              continue; // Skip this row, it's a header
+            }
+
+            allParsed.push(rowObj);
+          }
+        }
+      }
+
+      console.log(`[Import PDF] ${allParsed.length} linhas detectadas.`, allParsed.slice(0, 3));
+      setPreviewData(allParsed);
     } catch (err) {
       console.error("PDF parse error", err);
       toast.error("Erro ao ler arquivo PDF.");
