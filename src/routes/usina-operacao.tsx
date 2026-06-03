@@ -616,7 +616,6 @@ function UsinaOperacaoPage() {
   const parseSectionTitle = (row: any[]): { type: "eventual" | "habitual"; turno: string; equipe: string } | null => {
     const text = row.map(c => (c ?? "").toString().trim()).join(" ").replace(/\s+/g, " ");
     const matchType = text.match(/(Eventual|Habitual)/i);
-    if (!matchType && !text.toLowerCase().includes("programação")) return null;
     if (!matchType) return null;
 
     const type = matchType[1].toLowerCase() as "eventual" | "habitual";
@@ -732,15 +731,29 @@ function UsinaOperacaoPage() {
           for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
             if (isDataHeader(rawRows[i])) { headerRowIdx = i; break; }
           }
-          const headers = rawRows[headerRowIdx].map(normalizeHeaderKey);
-          rawRows.slice(headerRowIdx + 1).forEach(row => {
-            if (isBlankRow(row)) return;
-            const newRow: any = {};
-            headers.forEach((key, idx) => { if (key) newRow[key] = row[idx] ?? ""; });
-            newRow._schedule_type = "habitual";
-            newRow._turno_secao = "Dia";
-            allParsed.push(newRow);
-          });
+          if (rawRows[headerRowIdx]) {
+            const headers = rawRows[headerRowIdx].map(normalizeHeaderKey);
+            rawRows.slice(headerRowIdx + 1).forEach(row => {
+              if (isBlankRow(row)) return;
+              const newRow: any = {};
+              headers.forEach((key, idx) => { if (key) newRow[key] = row[idx] ?? ""; });
+              
+              const hasPlate = newRow.placa && newRow.placa.toString().trim() !== "";
+              const hasEquip = newRow.equipamento && newRow.equipamento.toString().trim() !== "";
+              if (!hasPlate && !hasEquip) return;
+
+              const plateVal = (newRow.placa || "").toString().toLowerCase().trim();
+              const equipVal = (newRow.equipamento || "").toString().toLowerCase().trim();
+              if (
+                plateVal === "placa" || plateVal === "plate" || 
+                equipVal === "equipamento" || equipVal === "equipment"
+              ) return;
+
+              newRow._schedule_type = "habitual";
+              newRow._turno_secao = "Dia";
+              allParsed.push(newRow);
+            });
+          }
         }
 
         console.log(`[Import Usina] ${allParsed.length} linhas detectadas.`, allParsed.slice(0, 3));
