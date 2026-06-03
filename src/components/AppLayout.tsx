@@ -57,6 +57,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAdmin } = useRole();
   const navigate = useNavigate();
   const loc = useLocation();
+  const baseNav = menuGroups.flatMap(g => g.items);
   const nav = isAdmin
     ? [...baseNav, { to: "/acesso", label: "Acesso", icon: Shield }]
     : baseNav;
