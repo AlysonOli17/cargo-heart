@@ -615,11 +615,16 @@ function UsinaOperacaoPage() {
   // Detect if a raw row is a section title (Programação Eventual/Habitual)
   const parseSectionTitle = (row: any[]): { type: "eventual" | "habitual"; turno: string; equipe: string } | null => {
     const text = row.map(c => (c ?? "").toString().trim()).join(" ").replace(/\s+/g, " ");
-    const match = text.match(/Programa[çc][aã]o\s+(Eventual|Habitual)\s*[-–]?\s*(Dia|Noite|Madrugada)?/i);
-    if (!match) return null;
-    const type = match[1].toLowerCase() as "eventual" | "habitual";
-    const turno = match[2] || "Dia";
-    // Extract equipe label e.g. "Equipe Usina 1/A" or "Equipe Usina B"
+    const matchType = text.match(/(Eventual|Habitual)/i);
+    if (!matchType && !text.toLowerCase().includes("programação")) return null;
+    if (!matchType) return null;
+
+    const type = matchType[1].toLowerCase() as "eventual" | "habitual";
+    
+    let turno = "Dia";
+    if (text.match(/Noite/i)) turno = "Noite";
+    else if (text.match(/Madrugada/i)) turno = "Madrugada";
+
     const equipeMatch = text.match(/Equipe\s+\S+\s+([\w\/]+)/i);
     const equipe = equipeMatch ? equipeMatch[1] : "";
     return { type, turno, equipe };
@@ -708,8 +713,14 @@ function UsinaOperacaoPage() {
             if (!hasPlate && !hasEquip && !hasStatus) continue;
 
             // Also skip rows that look like repeated headers
-            const plateVal = (newRow.placa || "").toString().toLowerCase();
-            if (plateVal === "placa" || plateVal === "plate" || plateVal === "tag") continue;
+            const plateVal = (newRow.placa || "").toString().toLowerCase().trim();
+            const equipVal = (newRow.equipamento || "").toString().toLowerCase().trim();
+            const tagVal = (newRow.tetag || newRow.te_tag || "").toString().toLowerCase().trim();
+            if (
+              plateVal === "placa" || plateVal === "plate" || 
+              equipVal === "equipamento" || equipVal === "equipment" ||
+              tagVal === "te+tag" || tagVal === "tetag"
+            ) continue;
 
             allParsed.push(newRow);
           }
