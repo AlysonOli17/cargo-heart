@@ -14,40 +14,30 @@ import logoGlobo from "@/assets/logo-globo.png";
 
 const menuGroups = [
   {
-    title: "AGENDA & KANBAN",
-    items: [
-      { to: "/usina-operacao", label: "Operação Usina", icon: Calendar },
-      { to: "/porto-operacao", label: "Operação Porto", icon: CalendarDays },
-      { to: "/operacao", label: "Operação Geral", icon: HardDrive },
-    ]
-  },
-  {
-    title: "ACOMPANHAMENTO",
+    title: "DASHBOARD",
     items: [
       { to: "/cco", label: "CCO Central", icon: Globe },
-      { to: "/historico", label: "Histórico", icon: Clock },
+      { to: "/historico", label: "Histórico de Registros", icon: Clock },
     ]
   },
   {
-    title: "CADASTROS",
+    title: "OPERAÇÃO",
+    items: [
+      { to: "/operacao", label: "Controle & Kanban", icon: HardDrive },
+      { to: "/usina-operacao", label: "Aderência Usina", icon: Calendar },
+      { to: "/porto-operacao", label: "Aderência Porto", icon: CalendarDays },
+      { to: "/manutencao", label: "Oficina & Manutenção", icon: Wrench },
+    ]
+  },
+  {
+    title: "GESTÃO DE DADOS",
     isAccordion: true,
-    id: "cadastros",
+    id: "gestao",
     icon: FileText,
     items: [
-      { to: "/equipamentos", label: "Equipamentos", icon: Wrench },
-      { to: "/pessoas", label: "Pessoas", icon: User },
-    ]
-  },
-  {
-    title: "CONTRATOS",
-    items: [
-      { to: "/fidelizacao", label: "Fidelização", icon: FileText },
-    ]
-  },
-  {
-    title: "MANUTENÇÃO",
-    items: [
-      { to: "/manutencao", label: "CCM Manutenção", icon: Wrench },
+      { to: "/equipamentos", label: "Equipamentos", icon: Truck },
+      { to: "/pessoas", label: "Colaboradores", icon: User },
+      { to: "/fidelizacao", label: "Contratos (Fidelização)", icon: FileText },
     ]
   }
 ];
@@ -67,7 +57,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return localStorage.getItem("sidebar_collapsed") === "true";
   });
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({ cadastros: true });
+  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({ gestao: true });
 
   const toggleAccordion = (id: string) => {
     setOpenAccordions(prev => ({ ...prev, [id]: !prev[id] }));
