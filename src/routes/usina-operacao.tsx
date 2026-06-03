@@ -658,21 +658,18 @@ function UsinaOperacaoPage() {
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
 
-        // Parse as raw 2D array
         const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
 
         const allParsed: any[] = [];
-
         let currentSection: { type: "eventual" | "habitual"; turno: string; equipe: string } | null = null;
         let currentHeaders: string[] = [];
         let inDataBlock = false;
+        let blockIndex = 0; // Tracks how many data blocks we've encountered
 
         for (let i = 0; i < rawRows.length; i++) {
           const row = rawRows[i];
 
-          // Skip blank rows
           if (isBlankRow(row)) {
-            // A blank row ends the current data block but keeps the section
             inDataBlock = false;
             continue;
           }
@@ -686,73 +683,56 @@ function UsinaOperacaoPage() {
             continue;
           }
 
-          // Check for data header row (only valid if we have a section)
-          if (currentSection && !inDataBlock && isDataHeader(row)) {
+          // Check for data header row
+          if (isDataHeader(row)) {
             currentHeaders = row.map(normalizeHeaderKey);
             inDataBlock = true;
+            blockIndex++;
             continue;
           }
 
           // Data rows
-          if (currentSection && inDataBlock && currentHeaders.length > 0) {
+          if (inDataBlock && currentHeaders.length > 0) {
             const newRow: any = {};
             currentHeaders.forEach((key, idx) => {
               if (key) newRow[key] = row[idx] ?? "";
             });
 
-            // Tag with section info
-            newRow._schedule_type = currentSection.type;
-            newRow._turno_secao = currentSection.turno;
-            newRow._equipe = currentSection.equipe;
+            // Determine schedule type:
+            // 1. Use explicit section title if found
+            // 2. Otherwise, infer from block index: Block 1 = Eventual, Block 2+ = Habitual
+            let scheduleType = "habitual";
+            if (currentSection) {
+              scheduleType = currentSection.type;
+            } else if (blockIndex === 1) {
+              scheduleType = "eventual";
+            } else if (blockIndex >= 2) {
+              scheduleType = "habitual";
+            }
 
-            // Ignore rows with no plate and no equipment (header repeats or sub-titles)
+            newRow._schedule_type = scheduleType;
+            newRow._turno_secao = currentSection?.turno || "Dia";
+            newRow._equipe = currentSection?.equipe || "";
+
+            // Ignore blank data rows
             const hasPlate = newRow.placa && newRow.placa.toString().trim() !== "";
             const hasEquip = newRow.equipamento && newRow.equipamento.toString().trim() !== "";
-            const hasStatus = newRow.status && newRow.status.toString().trim() !== "";
-            if (!hasPlate && !hasEquip && !hasStatus) continue;
+            if (!hasPlate && !hasEquip) continue;
 
-            // Also skip rows that look like repeated headers
-            const plateVal = (newRow.placa || "").toString().toLowerCase().trim();
-            const equipVal = (newRow.equipamento || "").toString().toLowerCase().trim();
-            const tagVal = (newRow.tetag || newRow.te_tag || "").toString().toLowerCase().trim();
+            // Ultra-aggressive filter for header rows that might have slipped through
+            const plateVal = (newRow.placa || "").toString().toLowerCase().replace(/[^a-z]/g, "");
+            const equipVal = (newRow.equipamento || "").toString().toLowerCase().replace(/[^a-z]/g, "");
+            const tagVal = (newRow.tetag || newRow.te_tag || "").toString().toLowerCase().replace(/[^a-z]/g, "");
+            
             if (
               plateVal === "placa" || plateVal === "plate" || 
               equipVal === "equipamento" || equipVal === "equipment" ||
-              tagVal === "te+tag" || tagVal === "tetag"
-            ) continue;
+              tagVal === "tetag" || tagVal === "tag"
+            ) {
+              continue; // Skip this row, it's a header
+            }
 
             allParsed.push(newRow);
-          }
-        }
-
-        // Fallback: if no sections were detected, use old single-block logic
-        if (allParsed.length === 0) {
-          let headerRowIdx = 0;
-          for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
-            if (isDataHeader(rawRows[i])) { headerRowIdx = i; break; }
-          }
-          if (rawRows[headerRowIdx]) {
-            const headers = rawRows[headerRowIdx].map(normalizeHeaderKey);
-            rawRows.slice(headerRowIdx + 1).forEach(row => {
-              if (isBlankRow(row)) return;
-              const newRow: any = {};
-              headers.forEach((key, idx) => { if (key) newRow[key] = row[idx] ?? ""; });
-              
-              const hasPlate = newRow.placa && newRow.placa.toString().trim() !== "";
-              const hasEquip = newRow.equipamento && newRow.equipamento.toString().trim() !== "";
-              if (!hasPlate && !hasEquip) return;
-
-              const plateVal = (newRow.placa || "").toString().toLowerCase().trim();
-              const equipVal = (newRow.equipamento || "").toString().toLowerCase().trim();
-              if (
-                plateVal === "placa" || plateVal === "plate" || 
-                equipVal === "equipamento" || equipVal === "equipment"
-              ) return;
-
-              newRow._schedule_type = "habitual";
-              newRow._turno_secao = "Dia";
-              allParsed.push(newRow);
-            });
           }
         }
 
