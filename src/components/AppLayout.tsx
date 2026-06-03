@@ -4,7 +4,7 @@ import { useRole } from "@/hooks/use-role";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Globe, Calendar, HardDrive, Wrench, FileText, CalendarDays, Clock, Shield, LogOut, Menu, ChevronLeft, ChevronRight, Truck, CheckCircle2, User } from "lucide-react";
+import { Globe, Calendar, HardDrive, Wrench, FileText, CalendarDays, Clock, Shield, LogOut, Menu, ChevronLeft, ChevronRight, Truck, CheckCircle2, User, Activity, Monitor, Anchor, CalendarCheck } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { MaintenanceGovernanceAlert } from "./MaintenanceGovernanceAlert";
@@ -22,10 +22,13 @@ const menuGroups = [
   },
   {
     title: "OPERAÇÃO",
+    isAccordion: true,
+    id: "operacao",
+    icon: Activity,
     items: [
-      { to: "/operacao", label: "Controle & Kanban", icon: HardDrive },
-      { to: "/usina-operacao", label: "Aderência Usina", icon: Calendar },
-      { to: "/porto-operacao", label: "Aderência Porto", icon: CalendarDays },
+      { to: "/operacao", label: "Agendamentos", icon: CalendarCheck },
+      { to: "/usina-operacao", label: "Sala de Controle Usina", icon: Monitor },
+      { to: "/porto-operacao", label: "Sala de Controle Porto", icon: Anchor },
       { to: "/manutencao", label: "Oficina & Manutenção", icon: Wrench },
     ]
   },
@@ -57,7 +60,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return localStorage.getItem("sidebar_collapsed") === "true";
   });
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({ gestao: true });
+  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({ operacao: true, gestao: true });
 
   const toggleAccordion = (id: string) => {
     setOpenAccordions(prev => ({ ...prev, [id]: !prev[id] }));
