@@ -213,7 +213,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <MaintenanceGovernanceAlert />
       
       {/* SIDEBAR FOR DESKTOP */}
-      <aside className={`hidden md:flex flex-col bg-[#131b2c] text-slate-300 border-r border-[#1e293b] transition-all duration-300 h-screen sticky top-0 ${collapsed ? "w-20" : "w-[260px]"}`}>
+      <aside className={`hidden md:flex flex-col bg-[#131b2c] text-slate-300 border-r border-[#1e293b] transition-all duration-300 h-screen sticky top-0 ${collapsed ? "w-20" : "w-[240px]"}`}>
         <div className="h-24 flex flex-col items-center justify-center border-b border-[#1e293b] shrink-0 pt-2">
           {!collapsed ? (
             <Link to="/cco" className="flex flex-col items-center gap-1 overflow-hidden w-full justify-center">
@@ -230,7 +230,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           )}
         </div>
 
-        <nav className="flex-1 py-6 px-4 space-y-5 overflow-y-auto overflow-x-hidden custom-scrollbar">
+        <nav className="flex-1 py-6 px-4 space-y-5 overflow-y-auto overflow-x-hidden custom-scrollbar [&::-webkit-scrollbar]:hidden [scrollbar-width:none]">
           {menuGroups.map((group, idx) => {
             if (group.isAccordion) {
               const isOpen = openAccordions[group.id!] && !collapsed;
@@ -250,7 +250,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     >
                       <div className="flex items-center gap-3">
                         <group.icon className={`h-4 w-4 ${isOpen ? "text-indigo-400" : ""}`} />
-                        <span className="text-[11px] font-black uppercase tracking-widest">{group.title}</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest">{group.title}</span>
                       </div>
                       <ChevronRight className={`h-3 w-3 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`} />
                     </button>
@@ -269,7 +269,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                             className={`flex items-center rounded-lg transition-all duration-200 ${
                               collapsed 
                                 ? "justify-center h-12 w-12 mx-auto" 
-                                : "w-full gap-3 px-3 py-2 text-[13px] relative"
+                                : "w-full gap-3 px-3 py-2 text-[11px] relative"
                             } font-bold ${
                               active 
                                 ? "bg-[#1b253b] text-blue-400" 
@@ -294,7 +294,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             return (
               <div key={idx} className="space-y-2">
                 {!collapsed && (
-                  <h3 className="px-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500/70 mb-1">
+                  <h3 className="px-3 text-[9px] font-black uppercase tracking-[0.2em] text-slate-500/70 mb-1">
                     {group.title}
                   </h3>
                 )}
@@ -307,7 +307,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       className={`flex items-center rounded-lg transition-all duration-200 ${
                         collapsed 
                           ? "justify-center h-12 w-12 mx-auto" 
-                          : "w-full gap-3 px-3 py-2.5 text-[13px] relative"
+                          : "w-full gap-3 px-3 py-2.5 text-[11px] relative"
                       } font-bold uppercase tracking-wider ${
                         active 
                           ? "bg-[#1b253b] text-blue-400" 
@@ -330,7 +330,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {isAdmin && (
             <div className="space-y-2 pt-4 border-t border-[#1e293b]">
               {!collapsed && (
-                <h3 className="px-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500/70 mb-1">
+                <h3 className="px-3 text-[9px] font-black uppercase tracking-[0.2em] text-slate-500/70 mb-1">
                   ADMINISTRAÇÃO
                 </h3>
               )}
@@ -339,7 +339,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 className={`flex items-center rounded-lg transition-all duration-200 ${
                   collapsed 
                     ? "justify-center h-12 w-12 mx-auto" 
-                    : "w-full gap-3 px-3 py-2.5 text-[13px] relative"
+                    : "w-full gap-3 px-3 py-2.5 text-[11px] relative"
                 } font-bold uppercase tracking-wider ${
                   loc.pathname === "/acesso" 
                     ? "bg-[#1b253b] text-blue-400" 
