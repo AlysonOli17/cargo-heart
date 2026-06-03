@@ -868,16 +868,9 @@ function UsinaOperacaoPage() {
           schedule_type: scheduleType,
         });
       } else {
-        // Standard single record
-        // If it starts after midnight (e.g. 00:00 to 07:00), schedule it to the next day
+        // Standard single record (Dia ou Madrugada ou Noite sem split)
+        // Mantém a data escolhida pelo usuário para a programação desta linha
         let finalScheduledDate = targetDateStr;
-        if (valley_start) {
-          const parts = valley_start.split(":");
-          const startHour = parseInt(parts[0], 10);
-          if (!isNaN(startHour) && startHour >= 0 && startHour < 7) {
-            finalScheduledDate = format(addDays(targetDateObj, 1), "yyyy-MM-dd");
-          }
-        }
 
         finalPayloads.push({
           scheduled_date: finalScheduledDate,
