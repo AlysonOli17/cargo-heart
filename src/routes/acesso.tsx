@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Shield, RefreshCw, Bell, Plus, Trash2, Clock, Calendar } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Shield, RefreshCw, Bell, Plus, Trash2, Clock, Calendar, UserPlus, Copy, Eye, EyeOff, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole, type AppRole } from "@/hooks/use-role";
@@ -27,7 +28,18 @@ function AccessPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
+  // Create User Dialog
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<AppRole>("operador");
+  const [newDepartment, setNewDepartment] = useState("Operação");
+  const [creating, setCreating] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [createdCredentials, setCreatedCredentials] = useState<{ email: string; password: string } | null>(null);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -62,6 +74,71 @@ function AccessPage() {
   if (authLoading || roleLoading) return null;
   if (!user || !isAdmin) return <Navigate to="/" />;
 
+  // Generate a random secure password
+  const generatePassword = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$!";
+    let pass = "";
+    for (let i = 0; i < 12; i++) {
+      pass += chars[Math.floor(Math.random() * chars.length)];
+    }
+    setNewPassword(pass);
+  };
+
+  const handleCreateUser = async () => {
+    if (!newEmail || !newPassword || !newName) {
+      toast.error("Preencha todos os campos obrigatórios.");
+      return;
+    }
+    setCreating(true);
+    try {
+      // Use Supabase Admin API via signUp (with admin client or edge function if available)
+      // For now use the regular signUp - the admin must configure Supabase to disable email confirmation
+      const { data, error } = await supabase.auth.signUp({
+        email: newEmail,
+        password: newPassword,
+        options: {
+          data: { full_name: newName },
+          emailRedirectTo: undefined,
+        },
+      });
+
+      if (error) {
+        toast.error(`Erro: ${error.message}`);
+        setCreating(false);
+        return;
+      }
+
+      if (data.user) {
+        // Assign role
+        await supabase.from("user_roles").upsert({ user_id: data.user.id, role: newRole });
+        // Update profile with department and full_name
+        await supabase.from("profiles").update({ full_name: newName, department: newDepartment }).eq("id", data.user.id);
+
+        setCreatedCredentials({ email: newEmail, password: newPassword });
+        toast.success(`Usuário "${newName}" criado com sucesso!`);
+        load();
+      }
+    } catch (err: any) {
+      toast.error(`Erro inesperado: ${err.message}`);
+    }
+    setCreating(false);
+  };
+
+  const resetCreateForm = () => {
+    setNewEmail("");
+    setNewName("");
+    setNewPassword("");
+    setNewRole("operador");
+    setNewDepartment("Operação");
+    setShowPassword(false);
+    setCreatedCredentials(null);
+    setCreateOpen(false);
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(() => toast.success(`${label} copiado!`));
+  };
+
   const addRule = async () => {
     const { error } = await supabase.from("alert_rules").insert({
       name: "Nova Regra de Auditoria",
@@ -69,11 +146,10 @@ function AccessPage() {
       alert_time: "10:00:00"
     });
     if (error) {
-      console.error("Erro ao criar regra:", error);
       toast.error(`Erro ao criar regra: ${error.message}`);
-    } else { 
-      toast.success("Regra criada!"); 
-      load(); 
+    } else {
+      toast.success("Regra criada!");
+      load();
     }
   };
 
@@ -92,19 +168,32 @@ function AccessPage() {
     <div className="space-y-10">
       {/* SEÇÃO DE USUÁRIOS */}
       <section className="space-y-4">
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center flex-wrap gap-3">
           <div>
             <h1 className="text-3xl font-black uppercase tracking-tighter flex items-center gap-2">
               <Shield className="h-8 w-8 text-primary" /> Equipe e Acessos
             </h1>
-            <p className="text-muted-foreground font-medium italic">Aprovação de novos usuários e setores</p>
+            <p className="text-muted-foreground font-medium italic">Gerenciamento de usuários e permissões</p>
           </div>
-          <Button variant="outline" size="sm" onClick={load} disabled={loading} className="font-bold uppercase text-[10px]">
-            <RefreshCw className={cn("h-3 w-3 mr-2", loading && "animate-spin")} /> Sincronizar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => { setCreatedCredentials(null); setCreateOpen(true); }}
+              className="font-black uppercase text-[10px] h-9 bg-indigo-600 hover:bg-indigo-700 text-white px-4"
+            >
+              <UserPlus className="h-3.5 w-3.5 mr-1.5" /> Criar Usuário
+            </Button>
+            <Button variant="outline" size="sm" onClick={load} disabled={loading} className="font-bold uppercase text-[10px]">
+              <RefreshCw className={cn("h-3 w-3 mr-2", loading && "animate-spin")} /> Sincronizar
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-3">
+          {users.length === 0 && !loading && (
+            <div className="text-center py-12 text-slate-400 font-bold text-sm border-2 border-dashed rounded-xl">
+              Nenhum usuário cadastrado ainda. Clique em "Criar Usuário" para começar.
+            </div>
+          )}
           {users.map(u => (
             <Card key={u.user_id} className="p-4 border-2 shadow-sm">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -179,11 +268,171 @@ function AccessPage() {
           ))}
         </div>
       </section>
+
+      {/* ── DIALOG: Criar Usuário ── */}
+      <Dialog open={createOpen} onOpenChange={(o) => { if (!o) resetCreateForm(); else setCreateOpen(true); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-black uppercase text-slate-800 flex items-center gap-2">
+              <UserPlus className="h-5 w-5 text-indigo-600" />
+              Criar Novo Usuário
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              O administrador define as credenciais de acesso. Compartilhe o email e senha com o usuário.
+            </DialogDescription>
+          </DialogHeader>
+
+          {createdCredentials ? (
+            /* ── Tela de sucesso com credenciais ── */
+            <div className="space-y-4 py-2">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-black uppercase text-emerald-800">✅ Usuário criado com sucesso!</p>
+                <p className="text-[11px] text-emerald-700">Compartilhe as credenciais abaixo com o usuário:</p>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between bg-white border border-emerald-200 rounded-lg px-3 py-2">
+                    <div>
+                      <p className="text-[9px] font-black uppercase text-slate-400">Email</p>
+                      <p className="text-xs font-bold text-slate-800 font-mono">{createdCredentials.email}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-slate-400 hover:text-slate-700"
+                      onClick={() => copyToClipboard(createdCredentials.email, "Email")}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center justify-between bg-white border border-emerald-200 rounded-lg px-3 py-2">
+                    <div>
+                      <p className="text-[9px] font-black uppercase text-slate-400">Senha</p>
+                      <p className="text-xs font-bold text-slate-800 font-mono">{createdCredentials.password}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-slate-400 hover:text-slate-700"
+                      onClick={() => copyToClipboard(createdCredentials.password, "Senha")}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 font-bold">
+                  ⚠️ Anote a senha agora! Ela não será exibida novamente.
+                </p>
+              </div>
+
+              <DialogFooter>
+                <Button onClick={resetCreateForm} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold">
+                  Fechar
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            /* ── Formulário de criação ── */
+            <div className="space-y-4 py-2">
+              <div className="space-y-1">
+                <Label className="text-[10px] font-black uppercase text-slate-600">Nome Completo *</Label>
+                <Input
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  placeholder="Ex: João da Silva"
+                  className="font-medium text-sm"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[10px] font-black uppercase text-slate-600">Email *</Label>
+                <Input
+                  type="email"
+                  value={newEmail}
+                  onChange={e => setNewEmail(e.target.value)}
+                  placeholder="usuario@busato.com.br"
+                  className="font-medium text-sm font-mono"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label className="text-[10px] font-black uppercase text-slate-600">Senha *</Label>
+                  <button
+                    type="button"
+                    onClick={generatePassword}
+                    className="text-[9px] font-black uppercase text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                  >
+                    <KeyRound className="h-3 w-3" /> Gerar Automática
+                  </button>
+                </div>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    className="font-mono font-medium text-sm pr-10"
+                    minLength={6}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[10px] font-black uppercase text-slate-600">Setor</Label>
+                  <select
+                    value={newDepartment}
+                    onChange={e => setNewDepartment(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="Operação">Operação</option>
+                    <option value="Manutenção">Manutenção</option>
+                    <option value="Administrativo">Administrativo</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-[10px] font-black uppercase text-slate-600">Cargo</Label>
+                  <select
+                    value={newRole}
+                    onChange={e => setNewRole(e.target.value as AppRole)}
+                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="operador">Operador</option>
+                    <option value="admin">Administrador</option>
+                    <option value="visualizador">Visualizador</option>
+                  </select>
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button variant="outline" onClick={resetCreateForm} className="font-bold">Cancelar</Button>
+                <Button
+                  onClick={handleCreateUser}
+                  disabled={creating || !newEmail || !newPassword || !newName}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                >
+                  {creating ? "Criando..." : "Criar Usuário"}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-// Funções auxiliares movidas para fora para limpar o código
+// Funções auxiliares
 async function updateProfile(userId: string, updates: any, reload: () => void) {
   const { error } = await supabase.from("profiles").update(updates).eq("id", userId);
   if (error) toast.error("Atenção: Rode o SQL que enviei antes para habilitar esta função!"); else { toast.success("Atualizado"); reload(); }

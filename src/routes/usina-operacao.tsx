@@ -258,6 +258,7 @@ function UsinaOperacaoPage() {
   const [equipments, setEquipments] = useState<{ id: string; identifier: string; plate?: string | null; model?: string | null; status?: string | null }[]>([]);
   const [search, setSearch] = useState("");
   const [shiftFilter, setShiftFilter] = useState<"todos" | "dia" | "noite" | "madrugada">("todos");
+  const [scheduleTypeFilter, setScheduleTypeFilter] = useState<"todos" | "habitual" | "eventual">("todos");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [activeTab, setActiveTab] = useState("operacao");
@@ -652,7 +653,52 @@ function UsinaOperacaoPage() {
     }
   };
 
-  // Excel/PDF parser for Usina
+  // ── Helpers to normalize Excel header keys ──────────────────────────────────
+  const normalizeHeaderKey = (raw: any): string => {
+    if (!raw) return "";
+    const clean = raw.toString().trim().toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (clean.includes("dia") && clean.includes("semana")) return "diadasemana";
+    if (clean.includes("equipamento") || clean.includes("equip")) return "equipamento";
+    if (clean.includes("placa") || (clean.includes("tag") && !clean.includes("atividade"))) return "placa";
+    if (clean.includes("modelo") || clean.includes("model")) return "modelo";
+    if (clean.includes("status")) return "status";
+    if (clean.includes("turno") || clean.includes("jornada")) return "turno";
+    if (clean.includes("horario") || clean.includes("vale")) return "horariovale";
+    if (clean.includes("operador") || clean.includes("motorista")) return "operador";
+    if (clean.includes("os") || clean.includes("ordem")) return "os";
+    if (clean.includes("atividade") || clean.includes("tag programacao") || clean.includes("tagprogramacao")) return "atividade";
+    if (clean.includes("local") || clean.includes("frente")) return "local";
+    if (clean.includes("caminhao") || clean.includes("fidelizado") || clean.includes("subet")) return "caminhao";
+    if (clean.includes("centro") || clean.includes("custo") || clean === "cc" || clean === "contrato") return "centrodecusto";
+    if (clean.includes("observ") || clean.includes("obs")) return "observacoes";
+    return clean.replace(/[^a-z0-9]/g, "");
+  };
+
+  // Detect if a raw row is a section title (Programação Eventual/Habitual)
+  const parseSectionTitle = (row: any[]): { type: "eventual" | "habitual"; turno: string; equipe: string } | null => {
+    const text = row.map(c => (c ?? "").toString().trim()).join(" ").replace(/\s+/g, " ");
+    const match = text.match(/Programa[çc][aã]o\s+(Eventual|Habitual)\s*[-–]?\s*(Dia|Noite|Madrugada)?/i);
+    if (!match) return null;
+    const type = match[1].toLowerCase() as "eventual" | "habitual";
+    const turno = match[2] || "Dia";
+    // Extract equipe label e.g. "Equipe Usina 1/A" or "Equipe Usina B"
+    const equipeMatch = text.match(/Equipe\s+\S+\s+([\w\/]+)/i);
+    const equipe = equipeMatch ? equipeMatch[1] : "";
+    return { type, turno, equipe };
+  };
+
+  // Check if a row is a data header (has Placa/Equipamento/Status columns)
+  const isDataHeader = (row: any[]): boolean => {
+    const text = row.map(c => (c ?? "").toString().toLowerCase()).join(" ");
+    return /placa|equipamento|modelo|status/.test(text);
+  };
+
+  // Check if a row is completely blank
+  const isBlankRow = (row: any[]): boolean =>
+    row.every(c => c === null || c === undefined || c.toString().trim() === "");
+
+  // Excel/PDF parser for Usina — multi-section aware
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
@@ -670,94 +716,89 @@ function UsinaOperacaoPage() {
         const wb = XLSX.read(bstr, { type: "binary" });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        
-        // Parse as raw 2D array of rows to handle header offset dynamically
-        const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-        
-        // Find the index of the header row (typically row 1 or 2, looking for 'DIA DA SEMANA', 'Equipamento', or 'Placa')
-        let headerRowIdx = 0;
-        for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
-          const row = rawRows[i] || [];
-          const hasDay = row.some(cell => /dia|semana/i.test(String(cell)));
-          const hasPlaca = row.some(cell => /placa|plate|tag/i.test(String(cell)));
-          const hasEquip = row.some(cell => /equipamento|equip/i.test(String(cell)));
-          if (hasDay || (hasPlaca && hasEquip)) {
-            headerRowIdx = i;
-            break;
+
+        // Parse as raw 2D array
+        const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
+
+        const allParsed: any[] = [];
+
+        let currentSection: { type: "eventual" | "habitual"; turno: string; equipe: string } | null = null;
+        let currentHeaders: string[] = [];
+        let inDataBlock = false;
+
+        for (let i = 0; i < rawRows.length; i++) {
+          const row = rawRows[i];
+
+          // Skip blank rows
+          if (isBlankRow(row)) {
+            // A blank row ends the current data block but keeps the section
+            inDataBlock = false;
+            continue;
+          }
+
+          // Check for section title
+          const sectionInfo = parseSectionTitle(row);
+          if (sectionInfo) {
+            currentSection = sectionInfo;
+            currentHeaders = [];
+            inDataBlock = false;
+            continue;
+          }
+
+          // Check for data header row (only valid if we have a section)
+          if (currentSection && !inDataBlock && isDataHeader(row)) {
+            currentHeaders = row.map(normalizeHeaderKey);
+            inDataBlock = true;
+            continue;
+          }
+
+          // Data rows
+          if (currentSection && inDataBlock && currentHeaders.length > 0) {
+            const newRow: any = {};
+            currentHeaders.forEach((key, idx) => {
+              if (key) newRow[key] = row[idx] ?? "";
+            });
+
+            // Tag with section info
+            newRow._schedule_type = currentSection.type;
+            newRow._turno_secao = currentSection.turno;
+            newRow._equipe = currentSection.equipe;
+
+            // Ignore rows with no plate and no equipment (header repeats or sub-titles)
+            const hasPlate = newRow.placa && newRow.placa.toString().trim() !== "";
+            const hasEquip = newRow.equipamento && newRow.equipamento.toString().trim() !== "";
+            const hasStatus = newRow.status && newRow.status.toString().trim() !== "";
+            if (!hasPlate && !hasEquip && !hasStatus) continue;
+
+            // Also skip rows that look like repeated headers
+            const plateVal = (newRow.placa || "").toString().toLowerCase();
+            if (plateVal === "placa" || plateVal === "plate" || plateVal === "tag") continue;
+
+            allParsed.push(newRow);
           }
         }
 
-        const headers = rawRows[headerRowIdx] || [];
-        const dataRows = rawRows.slice(headerRowIdx + 1);
-
-        const normalized = dataRows.map((row: any[]) => {
-          const newRow: any = {};
-          headers.forEach((k: any, index: number) => {
-            if (!k) return;
-            const cleanKey = k.toString().trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            
-            // Normalize header combinations to exact known keys
-            let normKey = cleanKey.replace(/[^a-z0-9]/g, "");
-            if (cleanKey.includes("dia") && cleanKey.includes("semana")) {
-              normKey = "diadasemana";
-            } else if (cleanKey.includes("equipamento") || cleanKey.includes("equip")) {
-              normKey = "equipamento";
-            } else if (cleanKey.includes("placa") || cleanKey.includes("tag")) {
-              normKey = "placa";
-            } else if (cleanKey.includes("modelo") || cleanKey.includes("model")) {
-              normKey = "modelo";
-            } else if (cleanKey.includes("turno")) {
-              normKey = "turno";
-            } else if (cleanKey.includes("horario") || cleanKey.includes("vale")) {
-              normKey = "horariovale";
-            } else if (cleanKey.includes("operador") || cleanKey.includes("motorista")) {
-              normKey = "operador";
-            } else if (cleanKey.includes("os") || cleanKey.includes("ordem")) {
-              normKey = "os";
-            } else if (cleanKey.includes("local") || cleanKey.includes("frente")) {
-              normKey = "local";
-            } else if (cleanKey.includes("centro") || cleanKey.includes("custo") || cleanKey === "cc") {
-              normKey = "centrodecusto";
-            }
-            
-            newRow[normKey] = row[index];
+        // Fallback: if no sections were detected, use old single-block logic
+        if (allParsed.length === 0) {
+          let headerRowIdx = 0;
+          for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+            if (isDataHeader(rawRows[i])) { headerRowIdx = i; break; }
+          }
+          const headers = rawRows[headerRowIdx].map(normalizeHeaderKey);
+          rawRows.slice(headerRowIdx + 1).forEach(row => {
+            if (isBlankRow(row)) return;
+            const newRow: any = {};
+            headers.forEach((key, idx) => { if (key) newRow[key] = row[idx] ?? ""; });
+            newRow._schedule_type = "habitual";
+            newRow._turno_secao = "Dia";
+            allParsed.push(newRow);
           });
-
-          // Split merged equipment & plate values if present
-          let plateVal = newRow.placa ? newRow.placa.toString().trim() : "";
-          let equipVal = newRow.equipamento ? newRow.equipamento.toString().trim() : "";
-
-          if (plateVal && plateVal.includes("-") && plateVal.length > 10) {
-            const lastIndex = plateVal.lastIndexOf("-");
-            const left = plateVal.substring(0, lastIndex).trim();
-            const right = plateVal.substring(lastIndex + 1).trim();
-            if (left && right) {
-              if (!equipVal) {
-                newRow.equipamento = left;
-              }
-              newRow.placa = right;
-            }
-          } else if (equipVal && equipVal.includes("-") && equipVal.length > 10 && !plateVal) {
-            const lastIndex = equipVal.lastIndexOf("-");
-            const left = equipVal.substring(0, lastIndex).trim();
-            const right = equipVal.substring(lastIndex + 1).trim();
-            if (left && right) {
-              newRow.equipamento = left;
-              newRow.placa = right;
-            }
-          }
-
-          return newRow;
-        });
-
-        // Debug: log normalized keys of first row to help diagnose missing columns
-        if (normalized.length > 0) {
-          console.log("[Import Debug] Colunas normalizadas:", Object.keys(normalized[0]));
-          console.log("[Import Debug] Valores linha 1:", normalized[0]);
         }
 
-        setPreviewData(normalized);
+        console.log(`[Import Usina] ${allParsed.length} linhas detectadas.`, allParsed.slice(0, 3));
+        setPreviewData(allParsed);
       } catch (err) {
+        console.error(err);
         toast.error("Erro ao processar planilha.");
       }
     };
@@ -790,13 +831,16 @@ function UsinaOperacaoPage() {
         rawPlaca = te_tag;
       }
 
-      // If there's still no plate/tag, fall back to equipment identifier or a generated tag so the record is not lost
+      // If there's still no plate/tag, fall back to equipment identifier
       const rawEquip = (row.equipamento || row.equipment || "").toString().trim().toUpperCase();
       if (!rawPlaca && rawEquip) {
         rawPlaca = rawEquip;
       }
 
       if (!rawPlaca && !rawEquip) continue;
+
+      // Schedule type from section detection
+      const scheduleType: string = (row._schedule_type || "habitual").toLowerCase();
 
       const rawValley = (row.horariovale || row.valley_time || row.horario || "").toString().trim();
       const match = rawValley.match(timeRegex);
@@ -866,7 +910,8 @@ function UsinaOperacaoPage() {
           valley_time: `${valley_start} - 23:59`,
           valley_start,
           valley_end: "23:59",
-          os_number: os1
+          os_number: os1,
+          schedule_type: scheduleType,
         });
 
         // Record 2: from 00:00 to end time
@@ -877,7 +922,8 @@ function UsinaOperacaoPage() {
           valley_time: `00:00 - ${valley_end || ""}`,
           valley_start: "00:00",
           valley_end: valley_end || null,
-          os_number: os2
+          os_number: os2,
+          schedule_type: scheduleType,
         });
       } else {
         // Standard single record
@@ -897,16 +943,17 @@ function UsinaOperacaoPage() {
           plate: rawPlaca,
           model: row.modelo || row.model || null,
           client: row.cliente || row.client || null,
-          shift: isNightShift ? "NOITE" : (row.turno || row.shift || "DIA"),
+          shift: isNightShift ? "NOITE" : (row.turno || row._turno_secao || row.shift || "DIA"),
           valley_time: rawValley || null,
           valley_start,
           valley_end: valley_end || null,
           cost_center: row.centrodecusto || row.costcenter || null,
-          subet: row.subet || row.subetapa || null,
+          subet: row.caminhao || row.subet || row.subetapa || null,
           local: resolvedLocal,
           activity: row.atividade || row.tagprogramacaovale || null,
           operator: row.operador || row.motorista || null,
           os_number: rawOS,
+          schedule_type: scheduleType,
           is_completed: false,
           owner_id: user?.id
         });
@@ -1222,16 +1269,21 @@ function UsinaOperacaoPage() {
 
   // Filter habitual schedules (the template week 2000-01-02 to 2000-01-08)
   const habitualSchedules = useMemo(() => {
-    return schedules.filter(s => {
+    return schedules.filter((s: any) => {
       const isTemplate = s.scheduled_date >= "2000-01-02" && s.scheduled_date <= "2000-01-08";
       if (!isTemplate) return false;
+
+      // Filter by schedule type
+      if (scheduleTypeFilter !== "todos") {
+        const sType = (s.schedule_type || "habitual").toLowerCase();
+        if (sType !== scheduleTypeFilter) return false;
+      }
       
       const term = search.toLowerCase();
       const cleanTerm = term.replace(/[^a-zA-Z0-9]/g, "");
       const schedDateParsed = new Date(s.scheduled_date + "T12:00:00");
       const weekdayStr = format(schedDateParsed, "EEEE", { locale: ptBR }).toLowerCase();
 
-      // Check if any associated corrective stop matches search term
       const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
       const matchCorretiva = stops.some(st => 
         (st.reason || "").toLowerCase().includes(term) || 
@@ -1256,8 +1308,8 @@ function UsinaOperacaoPage() {
         weekdayStr.includes(term);
 
       return matchSearch;
-    }).sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
-  }, [schedules, search, correctiveLogs]);
+    }).sort((a: any, b: any) => a.scheduled_date.localeCompare(b.scheduled_date));
+  }, [schedules, search, correctiveLogs, scheduleTypeFilter]);
 
   // Analytics: Adherence & Downtime math
   const analytics = useMemo(() => {
@@ -2140,7 +2192,7 @@ function UsinaOperacaoPage() {
                 <div className="relative w-full max-w-xs">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                   <Input 
-                    placeholder="Buscar por placa, equipamento, operador, corretiva, local, modelo..." 
+                    placeholder="Buscar por placa, equipamento, operador..." 
                     value={search} 
                     onChange={e => setSearch(e.target.value)} 
                     className="pl-8 h-8 text-xs font-medium w-48"
@@ -2182,7 +2234,7 @@ function UsinaOperacaoPage() {
                             <Table>
                               <TableHeader className="bg-slate-50 sticky top-0">
                                 <TableRow className="text-[9px] uppercase font-black">
-                                  <TableHead className="py-1">Dia da Semana</TableHead>
+                                  <TableHead className="py-1">Tipo</TableHead>
                                   <TableHead className="py-1">Equipamento</TableHead>
                                   <TableHead className="py-1">Placa</TableHead>
                                   <TableHead className="py-1">Turno/Horário</TableHead>
@@ -2251,10 +2303,23 @@ function UsinaOperacaoPage() {
 
                                   return (
                                     <TableRow key={idx} className={warn?.type === "unavailable" ? "bg-rose-50/50" : ""}>
-                                      <TableCell className="py-1 font-mono text-[10px] text-indigo-700 capitalize">{displayWeekday}</TableCell>
+                                      <TableCell className="py-1">
+                                        {(() => {
+                                          const stype = (row._schedule_type || "habitual").toLowerCase();
+                                          return (
+                                            <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase border ${
+                                              stype === "eventual"
+                                                ? "bg-amber-50 text-amber-700 border-amber-300"
+                                                : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                            }`}>
+                                              {stype}
+                                            </span>
+                                          );
+                                        })()}
+                                      </TableCell>
                                       <TableCell className="py-1 font-mono">{equipName || "—"}</TableCell>
                                       <TableCell className="py-1 font-mono">{rawPlaca || "—"}</TableCell>
-                                      <TableCell className="py-1">{row.turno || row.shift || "DIA"} ({row.horariovale || row.valley_time || "—"})</TableCell>
+                                      <TableCell className="py-1">{row.turno || row._turno_secao || row.shift || "DIA"} ({row.horariovale || row.valley_time || "—"})</TableCell>
                                       <TableCell className="py-1 uppercase text-[10px]">{row.operador || row.motorista || "—"}</TableCell>
                                       <TableCell className="py-1">
                                         {warn ? (
@@ -2305,6 +2370,7 @@ function UsinaOperacaoPage() {
                       />
                     </TableHead>
                     <TableHead className="py-2.5">Dia da Semana</TableHead>
+                    <TableHead className="py-2.5">Tipo</TableHead>
                     <TableHead className="py-2.5">Equipamento</TableHead>
                     <TableHead className="py-2.5">Placa</TableHead>
                     <TableHead className="py-2.5">Modelo</TableHead>
@@ -2347,6 +2413,20 @@ function UsinaOperacaoPage() {
                             />
                           </TableCell>
                           <TableCell className="font-mono text-indigo-700 font-black capitalize">{displayDateStr}</TableCell>
+                          <TableCell>
+                            {(() => {
+                              const stype = ((s as any).schedule_type || "habitual").toLowerCase();
+                              return (
+                                <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase border ${
+                                  stype === "eventual"
+                                    ? "bg-amber-50 text-amber-700 border-amber-300"
+                                    : "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                }`}>
+                                  {stype}
+                                </span>
+                              );
+                            })()}
+                          </TableCell>
                           <TableCell className="font-mono text-slate-700">{s.equipment || "—"}</TableCell>
                           <TableCell>
                             <div className="flex flex-col gap-0.5 items-start">
@@ -2709,25 +2789,25 @@ function UsinaOperacaoPage() {
                     onClick={() => setExpandedChart("equipment")}
                     className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
                   >
-                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">EQUIPAMENTO</h4>
+                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-4 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">EQUIPAMENTO</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={analyticsReport.chartDataEquipment}
                           layout="vertical"
-                          margin={{ top: 10, right: 75, left: 10, bottom: 5 }}
+                          margin={{ top: 10, right: 85, left: 10, bottom: 5 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
-                          <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
-                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={130} tickLine={false} />
+                          <XAxis type="number" stroke="#71717a" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={10} fontWeight={700} width={130} tickLine={false} />
                           <Tooltip
                             contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={26}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={8} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2739,24 +2819,24 @@ function UsinaOperacaoPage() {
                     onClick={() => setExpandedChart("maintenance")}
                     className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[340px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
                   >
-                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-4">MANUTENÇÃO</h4>
+                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-4 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">MANUTENÇÃO</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <LineChart
                           data={analyticsReport.chartDataTypes.length > 0 ? analyticsReport.chartDataTypes : [{ name: "SEM DADOS", minutes: 0 }]}
-                          margin={{ top: 15, right: 20, left: 10, bottom: 10 }}
+                          margin={{ top: 20, right: 20, left: 10, bottom: 10 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" />
-                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
-                          <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={10} fontWeight={700} />
+                          <YAxis stroke="#a1a1aa" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
                           <Tooltip
                             contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Line type="monotone" dataKey="minutes" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 5 }} activeDot={{ r: 8 }}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} className="font-bold font-mono" offset={10} />
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={10} />
                           </Line>
                         </LineChart>
                       </ResponsiveContainer>
@@ -2776,24 +2856,24 @@ function UsinaOperacaoPage() {
                       onClick={() => setExpandedChart("date")}
                       className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
                     >
-                      <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">DATA</h4>
+                      <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">DATA</h4>
                       <div className="flex-1 min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
                             data={analyticsReport.chartDataDates}
-                            margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
+                            margin={{ top: 24, right: 10, left: 10, bottom: 5 }}
                           >
                             <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
-                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
-                            <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                            <XAxis dataKey="name" stroke="#a1a1aa" fontSize={11} fontWeight={700} />
+                            <YAxis stroke="#a1a1aa" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
                             <Tooltip
                               contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                              labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
-                              itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                              labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
+                              itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={6} />
                             </Bar>
                           </BarChart>
                         </ResponsiveContainer>
@@ -2805,15 +2885,15 @@ function UsinaOperacaoPage() {
                       onClick={() => setExpandedChart("adherence")}
                       className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[240px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
                     >
-                      <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">ADERÊNCIA</h4>
+                      <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">ADERÊNCIA</h4>
                       <div className="flex-1 flex flex-col items-center justify-center relative min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <Pie
                               data={[
-                                { value: Math.min(95, analyticsReport.overallAdherence), color: "#ef4444" }, // Red zone
-                                { value: Math.max(0, Math.min(5, analyticsReport.overallAdherence - 95)), color: "#10b981" }, // Green zone
-                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#1f2937" } // Gap
+                                { value: Math.min(95, analyticsReport.overallAdherence), color: "#ef4444" },
+                                { value: Math.max(0, Math.min(5, analyticsReport.overallAdherence - 95)), color: "#10b981" },
+                                { value: Math.max(0, 100 - analyticsReport.overallAdherence), color: "#1f2937" }
                               ]}
                               dataKey="value"
                               innerRadius="65%"
@@ -2829,8 +2909,11 @@ function UsinaOperacaoPage() {
                             </Pie>
                           </PieChart>
                         </ResponsiveContainer>
-                        <div className="absolute top-[60%] flex flex-col items-center">
-                          <span className="text-3xl font-black text-white">{analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%</span>
+                        <div className="absolute top-[58%] flex flex-col items-center gap-0.5">
+                          <span className="text-4xl font-black text-white tracking-tight drop-shadow-[0_0_12px_rgba(255,255,255,0.4)]">
+                            {analyticsReport.overallAdherence.toFixed(2).replace('.', ',')}%
+                          </span>
+                          <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400">Aderência Geral</span>
                         </div>
                       </div>
                     </div>
@@ -2842,25 +2925,25 @@ function UsinaOperacaoPage() {
                     onClick={() => setExpandedChart("operator")}
                     className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
                   >
-                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">MOTORISTA/OPERADOR</h4>
+                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">MOTORISTA/OPERADOR</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={analyticsReport.chartDataOperator}
                           layout="vertical"
-                          margin={{ top: 5, right: 75, left: 10, bottom: 5 }}
+                          margin={{ top: 5, right: 85, left: 10, bottom: 5 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" horizontal={false} vertical={true} />
-                          <XAxis type="number" stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
-                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={8} width={120} tickLine={false} />
+                          <XAxis type="number" stroke="#71717a" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <YAxis dataKey="name" type="category" stroke="#a1a1aa" fontSize={10} fontWeight={700} width={120} tickLine={false} />
                           <Tooltip
                             contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#horizontalCylinder)" barSize={16}>
-                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="right" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={8} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -2872,24 +2955,24 @@ function UsinaOperacaoPage() {
                     onClick={() => setExpandedChart("plates")}
                     className="bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] border border-[#3e3e3e] shadow-[inset_0_1px_1px_rgba(255,255,255,0.05),0_8px_16px_rgba(0,0,0,0.5)] rounded-xl p-4 flex flex-col h-[220px] cursor-pointer hover:border-indigo-500/50 transition-all duration-300 group"
                   >
-                    <h4 className="text-[11px] font-black uppercase text-center tracking-wider text-white mb-2">PLACA</h4>
+                    <h4 className="text-[13px] font-black uppercase text-center tracking-widest text-white mb-2 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)]">PLACA</h4>
                     <div className="flex-1 min-h-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={analyticsReport.chartDataPlates}
-                          margin={{ top: 20, right: 10, left: 10, bottom: 5 }}
+                          margin={{ top: 24, right: 10, left: 10, bottom: 5 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#2b2b2b" vertical={false} />
-                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={8} />
-                          <YAxis stroke="#a1a1aa" fontSize={8} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
+                          <XAxis dataKey="name" stroke="#a1a1aa" fontSize={11} fontWeight={700} />
+                          <YAxis stroke="#a1a1aa" fontSize={10} fontWeight={700} tickFormatter={(v) => formatMinutesToHHMMSS(Number(v))} />
                           <Tooltip
                             contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px' }}
-                            labelStyle={{ color: '#a1a1aa', fontWeight: 'bold', fontSize: '9px' }}
-                            itemStyle={{ color: '#60a5fa', fontSize: '9px' }}
+                            labelStyle={{ color: '#e4e4e7', fontWeight: 900, fontSize: '11px' }}
+                            itemStyle={{ color: '#60a5fa', fontSize: '11px', fontWeight: 700 }}
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} style={{ fill: '#ffffff', fontSize: 11, fontWeight: 900 }} offset={6} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>

@@ -74,6 +74,11 @@ function PessoasPage() {
 
   const isPessoaDisponivel = (pessoa: any, dateStr: string): { ok: boolean; motivo: string } => {
     if (pessoa.ativo === false) return { ok: false, motivo: "Inativo" };
+    if ((pessoa.shift || "Dia") === "Adm" && dateStr) {
+      const dateObj = new Date(dateStr + "T12:00:00");
+      const day = dateObj.getDay(); // 0 = Sunday, 6 = Saturday
+      if (day === 0 || day === 6) return { ok: false, motivo: "Fim de Semana" };
+    }
     if (pessoa.vacation_start &&
         pessoa.vacation_end &&
         dateStr >= pessoa.vacation_start &&
@@ -269,7 +274,14 @@ function PessoasPage() {
           const plate_tag = row["Caminhao Fidelizado"] || row["caminhao"] || row["caminhão"] || row["Placa"] || row["placa"] || null;
           
           let contrato = row["Contrato"] || row["contrato"] || "CCO PORTO";
-          contrato = contrato.toString().trim().toUpperCase().includes("USINA") ? "CCO USINA" : "CCO PORTO";
+          const contratoUpper = contrato.toString().trim().toUpperCase();
+          if (contratoUpper.includes("USINA")) {
+            contrato = "CCO USINA";
+          } else if (contratoUpper.includes("ADM") || contratoUpper.includes("ADMINISTRATIVO")) {
+            contrato = "Administrativo";
+          } else {
+            contrato = "CCO PORTO";
+          }
 
           const vacation_start = row["Inicio Ferias"] || row["Início Férias"] || row["vacation_start"] || null;
           const vacation_end = row["Fim Ferias"] || row["Fim Férias"] || row["vacation_end"] || null;
@@ -369,43 +381,43 @@ function PessoasPage() {
 
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-            <Users className="h-5 w-5 text-emerald-400" />
+        <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-200 shrink-0">
+            <Users className="h-5 w-5 text-slate-500" />
           </div>
           <div>
             <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Total Cadastrado</p>
-            <p className="text-2xl font-black text-white">{stats.totalPessoas}</p>
+            <p className="text-2xl font-black text-slate-800">{stats.totalPessoas}</p>
           </div>
         </div>
 
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-            <UserCheck className="h-5 w-5 text-emerald-400" />
+        <div className="bg-white rounded-xl border border-emerald-100 p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center border border-emerald-200 shrink-0">
+            <UserCheck className="h-5 w-5 text-emerald-600" />
           </div>
           <div>
-            <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Disp. Hoje ({stats.letraHoje})</p>
-            <p className="text-2xl font-black text-emerald-400">{stats.disponiveisHoje}</p>
+            <p className="text-[9px] font-black uppercase text-emerald-500 tracking-wider">Disp. Hoje ({stats.letraHoje})</p>
+            <p className="text-2xl font-black text-emerald-600">{stats.disponiveisHoje}</p>
           </div>
         </div>
 
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
-            <CalendarDays className="h-5 w-5 text-amber-400" />
+        <div className="bg-white rounded-xl border border-amber-100 p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center border border-amber-200 shrink-0">
+            <CalendarDays className="h-5 w-5 text-amber-600" />
           </div>
           <div>
-            <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Em Férias</p>
-            <p className="text-2xl font-black text-amber-400">{stats.emFerias}</p>
+            <p className="text-[9px] font-black uppercase text-amber-500 tracking-wider">Em Férias</p>
+            <p className="text-2xl font-black text-amber-600">{stats.emFerias}</p>
           </div>
         </div>
 
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-rose-500/20 flex items-center justify-center">
-            <UserX className="h-5 w-5 text-rose-400" />
+        <div className="bg-white rounded-xl border border-rose-100 p-4 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center border border-rose-200 shrink-0">
+            <UserX className="h-5 w-5 text-rose-600" />
           </div>
           <div>
-            <p className="text-[9px] font-black uppercase text-slate-400 tracking-wider">Indisponíveis</p>
-            <p className="text-2xl font-black text-rose-400">{stats.indisponiveisPeriodo}</p>
+            <p className="text-[9px] font-black uppercase text-rose-500 tracking-wider">Indisponíveis</p>
+            <p className="text-2xl font-black text-rose-600">{stats.indisponiveisPeriodo}</p>
           </div>
         </div>
       </div>
@@ -553,7 +565,9 @@ function PessoasPage() {
                       <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${
                         (p.contrato || "CCO PORTO") === "CCO PORTO"
                           ? "bg-sky-50 text-sky-700 border-sky-200"
-                          : "bg-teal-50 text-teal-700 border-teal-200"
+                          : (p.contrato || "CCO PORTO") === "CCO USINA"
+                          ? "bg-teal-50 text-teal-700 border-teal-200"
+                          : "bg-purple-50 text-purple-700 border-purple-200"
                       }`}>
                         {p.contrato || "CCO PORTO"}
                       </span>
@@ -664,6 +678,7 @@ function PessoasPage() {
                 >
                   <option value="CCO PORTO">CCO PORTO</option>
                   <option value="CCO USINA">CCO USINA</option>
+                  <option value="Administrativo">Administrativo</option>
                 </select>
               </div>
               <div>
