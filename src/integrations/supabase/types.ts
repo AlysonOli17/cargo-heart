@@ -251,6 +251,63 @@ export type Database = {
         }
         Relationships: []
       }
+      service_requests: {
+        Row: {
+          consegue_atuar: string | null
+          contrato: string | null
+          created_at: string
+          descricao_problema: string | null
+          detalhes_local: string | null
+          equipe_atendimento: string | null
+          id: string
+          local_operacao: string | null
+          matricula: string | null
+          nome_completo: string | null
+          observacoes_cco: string | null
+          onde_problema: string | null
+          placa_tag: string | null
+          prioridade: string | null
+          status: string | null
+          tipo_equipamento: string | null
+        }
+        Insert: {
+          consegue_atuar?: string | null
+          contrato?: string | null
+          created_at?: string
+          descricao_problema?: string | null
+          detalhes_local?: string | null
+          equipe_atendimento?: string | null
+          id?: string
+          local_operacao?: string | null
+          matricula?: string | null
+          nome_completo?: string | null
+          observacoes_cco?: string | null
+          onde_problema?: string | null
+          placa_tag?: string | null
+          prioridade?: string | null
+          status?: string | null
+          tipo_equipamento?: string | null
+        }
+        Update: {
+          consegue_atuar?: string | null
+          contrato?: string | null
+          created_at?: string
+          descricao_problema?: string | null
+          detalhes_local?: string | null
+          equipe_atendimento?: string | null
+          id?: string
+          local_operacao?: string | null
+          matricula?: string | null
+          nome_completo?: string | null
+          observacoes_cco?: string | null
+          onde_problema?: string | null
+          placa_tag?: string | null
+          prioridade?: string | null
+          status?: string | null
+          tipo_equipamento?: string | null
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string

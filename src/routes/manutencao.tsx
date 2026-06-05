@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { useRole } from "@/hooks/use-role";
 import { STATUS_LABELS, STATUS_COLORS, type EquipmentStatus } from "@/lib/equipment";
+import { TriagemInbox } from "@/components/TriagemInbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -434,7 +435,7 @@ function MaintenancePage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black flex items-center gap-2 uppercase tracking-tighter text-foreground/90"><Wrench className="h-8 w-8 text-primary" /> CCM MANUTENÇÃO</h1>
-          <p className="text-muted-foreground font-medium italic">{items.length} máquinas em intervenção</p>
+          <p className="text-muted-foreground font-medium italic">{items.length} máquinas em intervenção oficial</p>
         </div>
         <div className="md:hidden w-full">
            <div className="relative">
@@ -528,78 +529,93 @@ function MaintenancePage() {
           </Dialog>
         </div>
       </div>
-         <div className="space-y-8">
-        {sortedGroups.map(group => (
-          <section key={group} className="animate-in fade-in duration-500">
-            <h2 className="text-sm font-black uppercase mb-3 flex items-center gap-2 border-b-2 pb-1.5 text-foreground/75">
-              <Tag className="h-4 w-4 text-primary" /> 
-              {group === 'MEV' ? 'Equipamentos em MEV' : `Frota: ${group}`}
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {grouped[group].map(e => {
-                const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
-                const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
-                const isOverdue = dias >= threshold;
+      <Tabs defaultValue="triagem" className="w-full">
+        <TabsList className="mb-6 bg-slate-100/80 p-1 rounded-xl">
+          <TabsTrigger value="triagem" className="font-black uppercase text-xs data-[state=active]:bg-white data-[state=active]:text-indigo-700 data-[state=active]:shadow-sm px-6 h-9">
+            Triagem (Forms)
+          </TabsTrigger>
+          <TabsTrigger value="os" className="font-black uppercase text-xs data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm px-6 h-9">
+            Intervenções (O.S)
+          </TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="triagem" className="mt-0 outline-none">
+          <TriagemInbox />
+        </TabsContent>
 
-                return (
-                  <Card key={e.id} onClick={() => setSelectedDetail(e)} className={cn("p-3 flex flex-col justify-between border shadow-sm space-y-2.5 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all duration-200", isOverdue && "border-red-200 bg-red-50/10")}>
-                    <div className="space-y-1.5">
-                      <div className="flex justify-between items-start gap-1">
-                        <div className="flex items-center gap-1.5">
-                          <p className="font-mono font-black text-sm text-slate-800">{e.identifier}</p>
-                          {isOverdue && <AlertCircle className="h-3.5 w-3.5 text-red-600 animate-pulse" />}
-                        </div>
-                        <div className="text-[10px] font-black text-slate-900 bg-slate-100/80 px-1.5 py-0.5 rounded flex items-center gap-1">
-                          <Clock className="h-3 w-3 text-slate-500" />
-                          <span>{dias}d</span>
-                        </div>
-                      </div>
-                      
-                      <div className="flex flex-wrap gap-1 text-[9px] font-bold uppercase">
-                        <span className="text-muted-foreground">{e.type}</span>
-                        {e.contract_type && (
-                          <span className="text-primary font-black">· {e.contract_type}</span>
-                        )}
-                      </div>
+        <TabsContent value="os" className="mt-0 outline-none space-y-8">
+          {sortedGroups.map(group => (
+            <section key={group} className="animate-in fade-in duration-500">
+              <h2 className="text-sm font-black uppercase mb-3 flex items-center gap-2 border-b-2 pb-1.5 text-foreground/75">
+                <Tag className="h-4 w-4 text-primary" /> 
+                {group === 'MEV' ? 'Equipamentos em MEV' : `Frota: ${group}`}
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                {grouped[group].map(e => {
+                  const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
+                  const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
+                  const isOverdue = dias >= threshold;
 
-                      <div className="bg-slate-50/80 border border-slate-100 p-2 rounded text-[11px] text-slate-650 max-h-16 overflow-y-auto whitespace-pre-wrap leading-tight">
-                        {e.maintenance_problem || '—'}
-                      </div>
-
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
-                        <div>
-                          <span className="block text-[8px] font-black uppercase text-slate-400">Entrada</span>
-                          <span>{e.maintenance_started_at ? formatDate(e.maintenance_started_at).split(" ")[0] : '—'}</span>
+                  return (
+                    <Card key={e.id} onClick={() => setSelectedDetail(e)} className={cn("p-3 flex flex-col justify-between border shadow-sm space-y-2.5 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all duration-200", isOverdue && "border-red-200 bg-red-50/10")}>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-start gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <p className="font-mono font-black text-sm text-slate-800">{e.identifier}</p>
+                            {isOverdue && <AlertCircle className="h-3.5 w-3.5 text-red-600 animate-pulse" />}
+                          </div>
+                          <div className="text-[10px] font-black text-slate-900 bg-slate-100/80 px-1.5 py-0.5 rounded flex items-center gap-1">
+                            <Clock className="h-3 w-3 text-slate-500" />
+                            <span>{dias}d</span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="block text-[8px] font-black uppercase text-slate-400">Previsão</span>
-                          {e.maintenance_expected_return ? (
-                            <span className="text-primary font-black">{formatDate(e.maintenance_expected_return).split(" ")[0]}</span>
-                          ) : (
-                            <span className="italic text-slate-400 text-[9px]">N/I</span>
+                        
+                        <div className="flex flex-wrap gap-1 text-[9px] font-bold uppercase">
+                          <span className="text-muted-foreground">{e.type}</span>
+                          {e.contract_type && (
+                            <span className="text-primary font-black">· {e.contract_type}</span>
                           )}
                         </div>
-                      </div>
-                    </div>
 
-                    <div className="flex gap-1 pt-1.5 border-t border-slate-100">
-                      <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); handleStartEdit(e); }} className="flex-1 font-bold h-7 text-[9px] text-amber-600 border-amber-100 hover:bg-amber-50 px-1.5">
-                        EDITAR
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(e); }} className="flex-1 font-bold h-7 text-[9px] text-blue-600 border-blue-100 hover:bg-blue-50 px-1.5">
-                        HISTÓRICO
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); release(e); }} className="flex-1 font-bold h-7 text-[9px] text-emerald-600 border-emerald-100 hover:bg-emerald-50 px-1.5">
-                        LIBERAR
-                      </Button>
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          </section>
-        ))}
-      </div>
+                        <div className="bg-slate-50/80 border border-slate-100 p-2 rounded text-[11px] text-slate-650 max-h-16 overflow-y-auto whitespace-pre-wrap leading-tight">
+                          {e.maintenance_problem || '—'}
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                          <div>
+                            <span className="block text-[8px] font-black uppercase text-slate-400">Entrada</span>
+                            <span>{e.maintenance_started_at ? formatDate(e.maintenance_started_at).split(" ")[0] : '—'}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="block text-[8px] font-black uppercase text-slate-400">Previsão</span>
+                            {e.maintenance_expected_return ? (
+                              <span className="text-primary font-black">{formatDate(e.maintenance_expected_return).split(" ")[0]}</span>
+                            ) : (
+                              <span className="italic text-slate-400 text-[9px]">N/I</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-1 pt-1.5 border-t border-slate-100">
+                        <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); handleStartEdit(e); }} className="flex-1 font-bold h-7 text-[9px] text-amber-600 border-amber-100 hover:bg-amber-50 px-1.5">
+                          EDITAR
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(e); }} className="flex-1 font-bold h-7 text-[9px] text-blue-600 border-blue-100 hover:bg-blue-50 px-1.5">
+                          HISTÓRICO
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); release(e); }} className="flex-1 font-bold h-7 text-[9px] text-emerald-600 border-emerald-100 hover:bg-emerald-50 px-1.5">
+                          LIBERAR
+                        </Button>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </TabsContent>
+      </Tabs>
 
       {/* DIALOG DE ATUALIZAÇÃO DE STATUS / HISTÓRICO */}
       <Dialog open={!!updatingEq} onOpenChange={(o) => !o && setUpdatingEq(null)}>
@@ -815,9 +831,43 @@ function MaintenancePage() {
               </div>
 
               {selectedDetail.maintenance_problem && (
-                <div className="bg-slate-50 border rounded-lg p-3">
-                  <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Problemas / Histórico de Observações</p>
-                  <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{selectedDetail.maintenance_problem}</p>
+                <div className="mt-4 pt-4 border-t">
+                  <p className="text-[10px] font-black uppercase text-slate-400 mb-3">Histórico de Ocorrências e Atualizações</p>
+                  <div className="space-y-3 pl-2 border-l-2 border-slate-200 ml-2">
+                    {selectedDetail.maintenance_problem.split('\n').filter(Boolean).map((line, i) => {
+                      const isDateTag = line.match(/^\[(.*?)\]/);
+                      let dateStr = "";
+                      let contentStr = line;
+                      let isHighlight = false;
+                      
+                      if (isDateTag) {
+                        dateStr = isDateTag[1];
+                        contentStr = line.replace(`[${dateStr}]`, '').trim();
+                      }
+
+                      if (contentStr.includes("[RESOLVIDO]") || contentStr.includes("[LIBERAÇÃO") || dateStr.includes("LIBERAÇÃO")) {
+                         isHighlight = true;
+                      } else if (contentStr.includes("TRIAGEM") || dateStr.includes("TRIAGEM")) {
+                         isHighlight = true;
+                      }
+
+                      return (
+                        <div key={i} className="relative">
+                          <div className={cn(
+                            "absolute -left-[25px] top-1 h-4 w-4 rounded-full border-2 border-white",
+                            isHighlight ? "bg-indigo-500" : "bg-slate-400"
+                          )} />
+                          <div className={cn(
+                            "p-2.5 rounded-lg border text-xs",
+                            isHighlight ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-slate-50"
+                          )}>
+                            {dateStr && <span className="font-black text-[10px] uppercase text-indigo-700 block mb-0.5">{dateStr}</span>}
+                            <span className="text-slate-700 font-medium leading-relaxed block mt-1">{contentStr}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 
