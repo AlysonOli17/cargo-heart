@@ -724,20 +724,6 @@ function MaintenancePage() {
                               )}
                             </div>
                           </div>
-                        </div>
-
-                        {/* Hover Actions Bar */}
-                        <div className="absolute inset-x-0 bottom-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-white via-white to-transparent rounded-b-2xl flex gap-1 justify-center translate-y-1 group-hover:translate-y-0">
-                          <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); handleStartEdit(e); }} className="h-8 text-[9px] font-black uppercase shadow-sm">
-                            Editar
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(e); }} className="h-8 text-[9px] font-black uppercase bg-blue-50 text-blue-700 border-blue-200 shadow-sm hover:bg-blue-100">
-                            Atualizar Status
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); release(e); }} className="h-8 text-[9px] font-black uppercase bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm hover:bg-emerald-100">
-                            Liberar
-                          </Button>
-                        </div>
                       </Card>
                     );
                   })}
