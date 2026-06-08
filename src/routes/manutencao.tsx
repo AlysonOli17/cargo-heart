@@ -65,6 +65,9 @@ function MaintenancePage() {
   const [isAdding, setIsAdding] = useState(false);
   const [mode, setMode] = useState<"now" | "schedule">("now");
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState<"cards" | "list">("cards");
+  const [groupBy, setGroupBy] = useState<"equipment_type" | "maintenance_type" | "priority">("maintenance_type");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
   const [openCombo, setOpenCombo] = useState(false);
   const [selectedEqId, setSelectedEqId] = useState("");
@@ -133,6 +136,38 @@ function MaintenancePage() {
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [user]);
+
+  const handleBulkRelease = async () => {
+    if (selectedIds.length === 0) return;
+    const dateTag = `[LIBERAÇÃO EM MASSA ${new Date().toLocaleDateString('pt-BR')}]`;
+    const finalProblemAddition = "\n" + dateTag + " Liberação em lote pelo CCO.";
+
+    const promises = selectedIds.map(async (id) => {
+       const eq = items.find(i => i.id === id);
+       if(!eq) return;
+       await supabase.from("equipment").update({
+          status: "operacional",
+          maintenance_problem: (eq.maintenance_problem || "") + finalProblemAddition,
+          maintenance_expected_return: null,
+          maintenance_priority: null,
+          maintenance_responsible: null,
+          maintenance_started_at: null
+       }).eq("id", id);
+       
+       await supabase.from("movements").insert({
+         equipment_id: id,
+         from_status: eq.status,
+         to_status: "operacional",
+         notes: "LIBERAÇÃO EM MASSA",
+         owner_id: user?.id
+       });
+    });
+
+    await Promise.all(promises);
+    toast.success(`${selectedIds.length} equipamentos liberados!`);
+    setSelectedIds([]);
+    load();
+  };
 
   const handleSubmit = async () => {
     if (!selectedEqId) { toast.error("Selecione o equipamento"); return; }
@@ -423,12 +458,25 @@ function MaintenancePage() {
   };
 
   const grouped = filtered.reduce((acc, e) => {
-    const group = e.maintenance_type === "MEV" ? "MEV" : (e.type || "Geral");
+    let group = "Geral";
+    if (groupBy === "maintenance_type") {
+      group = e.maintenance_type || "Manutenção Geral";
+    } else if (groupBy === "equipment_type") {
+      group = e.type || "Sem Tipo";
+    } else if (groupBy === "priority") {
+      group = e.maintenance_priority || "Média";
+    }
     if (!acc[group]) acc[group] = [];
     acc[group].push(e);
     return acc;
   }, {} as Record<string, Equipment[]>);
-  const sortedGroups = Object.keys(grouped).sort((a, b) => a === "MEV" ? -1 : b === "MEV" ? 1 : a.localeCompare(b));
+  
+  const sortedGroups = Object.keys(grouped).sort((a, b) => {
+    if (groupBy === "priority") {
+      return a === "Crítica" ? -1 : b === "Crítica" ? 1 : a.localeCompare(b);
+    }
+    return a === "MEV" ? -1 : b === "MEV" ? 1 : a.localeCompare(b);
+  });
 
   return (
     <div className="space-y-6">
@@ -463,7 +511,28 @@ function MaintenancePage() {
               </span>
             )}
           </div>
-          <Button variant="outline" onClick={handleExportPDF} className="font-bold border-2 h-10 uppercase text-xs"><FileDown className="h-4 w-4 mr-2" /> Exportar Paisagem</Button>
+          
+          <Select value={groupBy} onValueChange={(v) => setGroupBy(v as any)}>
+            <SelectTrigger className="w-[180px] h-10 font-bold uppercase text-[10px] bg-slate-50 border-2">
+              <SelectValue placeholder="Agrupar por..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="maintenance_type">Agrupar: Tipo de Manutenção</SelectItem>
+              <SelectItem value="equipment_type">Agrupar: Tipo Equipamento</SelectItem>
+              <SelectItem value="priority">Agrupar: Prioridade</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="flex bg-slate-100 p-1 rounded-xl items-center border">
+             <Button variant={viewMode === "cards" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("cards")} className="h-8 px-3 rounded-lg text-xs font-bold shadow-none">
+               CARDS
+             </Button>
+             <Button variant={viewMode === "list" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("list")} className="h-8 px-3 rounded-lg text-xs font-bold shadow-none">
+               LISTA
+             </Button>
+          </div>
+
+          <Button variant="outline" onClick={handleExportPDF} className="font-bold border-2 h-10 uppercase text-xs hidden lg:flex"><FileDown className="h-4 w-4 mr-2" /> Exportar</Button>
           <Dialog open={isAdding} onOpenChange={setIsAdding}>
             <DialogTrigger asChild><Button className="font-bold uppercase shadow-lg h-10 text-xs"><PlusCircle className="h-4 w-4 mr-2" />Nova Intervenção</Button></DialogTrigger>
             <DialogContent className="max-w-md">
@@ -544,76 +613,138 @@ function MaintenancePage() {
         </TabsContent>
 
         <TabsContent value="os" className="mt-0 outline-none space-y-8">
-          {sortedGroups.map(group => (
-            <section key={group} className="animate-in fade-in duration-500">
-              <h2 className="text-sm font-black uppercase mb-3 flex items-center gap-2 border-b-2 pb-1.5 text-foreground/75">
-                <Tag className="h-4 w-4 text-primary" /> 
-                {group === 'MEV' ? 'Equipamentos em MEV' : `Frota: ${group}`}
-              </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                {grouped[group].map(e => {
-                  const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
-                  const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
-                  const isOverdue = dias >= threshold;
+          {viewMode === "list" ? (
+            <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b text-[10px] font-black uppercase text-slate-500">
+                    <th className="p-3 w-10 text-center"><input type="checkbox" className="rounded" /></th>
+                    <th className="p-3">Equipamento</th>
+                    <th className="p-3 hidden sm:table-cell">Grupo / Tipo</th>
+                    <th className="p-3 w-1/3">Problema / Observação</th>
+                    <th className="p-3 text-center">Tempo</th>
+                    <th className="p-3 text-center">Previsão</th>
+                    <th className="p-3 text-center">Ações Rápidas</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filtered.map(e => {
+                    const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
+                    const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
+                    const isOverdue = dias >= threshold;
 
-                  return (
-                    <Card key={e.id} onClick={() => setSelectedDetail(e)} className={cn("p-3 flex flex-col justify-between border shadow-sm space-y-2.5 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all duration-200", isOverdue && "border-red-200 bg-red-50/10")}>
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-start gap-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className="font-mono font-black text-sm text-slate-800">{e.identifier}</p>
-                            {isOverdue && <AlertCircle className="h-3.5 w-3.5 text-red-600 animate-pulse" />}
-                          </div>
-                          <div className="text-[10px] font-black text-slate-900 bg-slate-100/80 px-1.5 py-0.5 rounded flex items-center gap-1">
-                            <Clock className="h-3 w-3 text-slate-500" />
-                            <span>{dias}d</span>
-                          </div>
-                        </div>
-                        
-                        <div className="flex flex-wrap gap-1 text-[9px] font-bold uppercase">
-                          <span className="text-muted-foreground">{e.type}</span>
-                          {e.contract_type && (
-                            <span className="text-primary font-black">· {e.contract_type}</span>
-                          )}
-                        </div>
+                    return (
+                      <tr key={e.id} onClick={() => setSelectedDetail(e)} className={cn("hover:bg-slate-50 cursor-pointer transition-colors", isOverdue && "bg-red-50/30 hover:bg-red-50/50", selectedIds.includes(e.id) && "bg-indigo-50/50")}>
+                        <td className="p-3 text-center" onClick={(evt) => evt.stopPropagation()}>
+                           <input type="checkbox" className="rounded border-slate-300 w-4 h-4 text-primary focus:ring-primary" checked={selectedIds.includes(e.id)} onChange={(evt) => {
+                             if(evt.target.checked) setSelectedIds([...selectedIds, e.id]);
+                             else setSelectedIds(selectedIds.filter(id => id !== e.id));
+                           }} />
+                        </td>
+                        <td className="p-3 font-mono font-black text-slate-800">
+                          {e.identifier}
+                          {isOverdue && <AlertCircle className="h-3.5 w-3.5 text-red-600 inline ml-2 animate-pulse" />}
+                        </td>
+                        <td className="p-3 hidden sm:table-cell">
+                          <span className="text-[10px] font-bold uppercase block text-muted-foreground">{e.type}</span>
+                          <span className="text-[10px] font-black uppercase text-primary">{e.maintenance_type || "Geral"}</span>
+                        </td>
+                        <td className="p-3">
+                           <div className="text-[11px] text-slate-600 max-w-xs truncate font-medium">
+                             {e.maintenance_problem || '—'}
+                           </div>
+                        </td>
+                        <td className="p-3 text-center">
+                           <Badge variant={isOverdue ? "destructive" : "secondary"} className="text-[10px] font-black">{dias} dias</Badge>
+                        </td>
+                        <td className="p-3 text-center text-[10px] font-bold">
+                           {e.maintenance_expected_return ? formatDate(e.maintenance_expected_return).split(" ")[0] : <span className="text-slate-400 italic">N/I</span>}
+                        </td>
+                        <td className="p-3">
+                           <div className="flex gap-1 justify-center">
+                              <Button variant="outline" size="icon" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(e); }} className="h-7 w-7 text-blue-600 hover:bg-blue-50" title="Atualizar Status"><Edit3 className="h-3 w-3" /></Button>
+                              <Button variant="outline" size="icon" onClick={(evt) => { evt.stopPropagation(); release(e); }} className="h-7 w-7 text-emerald-600 hover:bg-emerald-50" title="Liberar Máquina"><CheckCircle2 className="h-3 w-3" /></Button>
+                           </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            sortedGroups.map(group => (
+              <section key={group} className="animate-in fade-in duration-500">
+                <h2 className="text-sm font-black uppercase mb-3 flex items-center gap-2 border-b-2 pb-1.5 text-foreground/75">
+                  <Tag className="h-4 w-4 text-primary" /> 
+                  {groupBy === 'maintenance_type' ? `Tipo: ${group}` : groupBy === 'equipment_type' ? `Frota: ${group}` : `Prioridade: ${group}`}
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {grouped[group].map(e => {
+                    const dias = getDiasParado(e.maintenance_started_at || e.updated_at);
+                    const threshold = alertRules.find(r => r.is_active)?.threshold_days || 5;
+                    const isOverdue = dias >= threshold;
 
-                        <div className="bg-slate-50/80 border border-slate-100 p-2 rounded text-[11px] text-slate-650 max-h-16 overflow-y-auto whitespace-pre-wrap leading-tight">
-                          {e.maintenance_problem || '—'}
-                        </div>
-
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
-                          <div>
-                            <span className="block text-[8px] font-black uppercase text-slate-400">Entrada</span>
-                            <span>{e.maintenance_started_at ? formatDate(e.maintenance_started_at).split(" ")[0] : '—'}</span>
+                    return (
+                      <Card key={e.id} onClick={() => setSelectedDetail(e)} className={cn("relative p-4 flex flex-col justify-between border shadow-sm space-y-3 cursor-pointer hover:shadow-md transition-all duration-200 rounded-2xl group", isOverdue ? "border-red-200 bg-red-50/10" : "hover:border-slate-300")}>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-start gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-mono font-black text-base text-slate-800">{e.identifier}</p>
+                              {isOverdue && <AlertCircle className="h-4 w-4 text-red-600 animate-pulse" />}
+                            </div>
+                            <div className={cn("text-[10px] font-black px-1.5 py-0.5 rounded flex items-center gap-1", isOverdue ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600")}>
+                              <Clock className="h-3 w-3" />
+                              <span>{dias}d</span>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <span className="block text-[8px] font-black uppercase text-slate-400">Previsão</span>
-                            {e.maintenance_expected_return ? (
-                              <span className="text-primary font-black">{formatDate(e.maintenance_expected_return).split(" ")[0]}</span>
-                            ) : (
-                              <span className="italic text-slate-400 text-[9px]">N/I</span>
+                          
+                          <div className="flex flex-wrap gap-1 text-[9px] font-bold uppercase">
+                            <Badge variant="outline" className="bg-white">{e.type}</Badge>
+                            {e.contract_type && (
+                              <Badge variant="secondary" className="bg-primary/10 text-primary hover:bg-primary/20">{e.contract_type}</Badge>
                             )}
                           </div>
-                        </div>
-                      </div>
 
-                      <div className="flex gap-1 pt-1.5 border-t border-slate-100">
-                        <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); handleStartEdit(e); }} className="flex-1 font-bold h-7 text-[9px] text-amber-600 border-amber-100 hover:bg-amber-50 px-1.5">
-                          EDITAR
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(e); }} className="flex-1 font-bold h-7 text-[9px] text-blue-600 border-blue-100 hover:bg-blue-50 px-1.5">
-                          HISTÓRICO
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); release(e); }} className="flex-1 font-bold h-7 text-[9px] text-emerald-600 border-emerald-100 hover:bg-emerald-50 px-1.5">
-                          LIBERAR
-                        </Button>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+                          <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-lg text-xs text-slate-700 max-h-20 overflow-y-auto whitespace-pre-wrap leading-relaxed shadow-inner">
+                            {e.maintenance_problem || '—'}
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium bg-slate-50/50 p-1.5 rounded">
+                            <div>
+                              <span className="block text-[8px] font-black uppercase text-slate-400">Entrada</span>
+                              <span>{e.maintenance_started_at ? formatDate(e.maintenance_started_at).split(" ")[0] : '—'}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="block text-[8px] font-black uppercase text-slate-400">Previsão</span>
+                              {e.maintenance_expected_return ? (
+                                <span className={cn("font-black", isOverdue ? "text-red-600" : "text-primary")}>{formatDate(e.maintenance_expected_return).split(" ")[0]}</span>
+                              ) : (
+                                <span className="italic text-slate-400 text-[9px]">N/I</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Hover Actions Bar */}
+                        <div className="absolute inset-x-0 bottom-0 p-2 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-t from-white via-white to-transparent rounded-b-2xl flex gap-1 justify-center translate-y-1 group-hover:translate-y-0">
+                          <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); handleStartEdit(e); }} className="h-8 text-[9px] font-black uppercase shadow-sm">
+                            Editar
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(e); }} className="h-8 text-[9px] font-black uppercase bg-blue-50 text-blue-700 border-blue-200 shadow-sm hover:bg-blue-100">
+                            Atualizar Status
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={(evt) => { evt.stopPropagation(); release(e); }} className="h-8 text-[9px] font-black uppercase bg-emerald-50 text-emerald-700 border-emerald-200 shadow-sm hover:bg-emerald-100">
+                            Liberar
+                          </Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </section>
+            ))
+          )}
         </TabsContent>
       </Tabs>
 
@@ -876,7 +1007,7 @@ function MaintenancePage() {
                   Editar
                 </Button>
                 <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase text-blue-600 border-blue-200 hover:bg-blue-50" onClick={(evt) => { evt.stopPropagation(); setUpdatingEq(selectedDetail); setSelectedDetail(null); }}>
-                  Histórico
+                  Atualizar Status
                 </Button>
                 <Button variant="outline" size="sm" className="flex-1 font-bold h-10 text-xs uppercase text-emerald-600 border-emerald-200 hover:bg-emerald-50" onClick={(evt) => { evt.stopPropagation(); release(selectedDetail); setSelectedDetail(null); }}>
                   Liberar
@@ -886,6 +1017,21 @@ function MaintenancePage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Barra de Ação Flutuante */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-4 rounded-full shadow-2xl flex items-center gap-6 animate-in slide-in-from-bottom-10 z-50">
+           <div className="flex items-center gap-2">
+             <span className="flex items-center justify-center bg-indigo-500 text-white rounded-full h-6 w-6 text-xs font-bold">{selectedIds.length}</span>
+             <span className="text-sm font-semibold">Equipamentos selecionados</span>
+           </div>
+           <div className="h-6 w-[1px] bg-slate-700"></div>
+           <div className="flex gap-2">
+             <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])} className="hover:bg-slate-800 hover:text-white text-slate-300 font-medium">Cancelar</Button>
+             <Button size="sm" onClick={handleBulkRelease} className="bg-emerald-500 hover:bg-emerald-600 font-bold shadow-lg"><CheckCircle2 className="h-4 w-4 mr-2" /> Liberar Selecionados</Button>
+           </div>
+        </div>
+      )}
     </div>
   );
 }
