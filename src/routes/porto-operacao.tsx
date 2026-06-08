@@ -3467,7 +3467,7 @@ function PortoOperacaoPage() {
                               formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                             />
                             <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                              <LabelList dataKey="minutes" position="top" formatter={(v) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                              <LabelList dataKey="minutes" position="top" formatter={(v: any) => Number(v) > 0 ? formatMinutesToHHMMSS(Number(v)) : ""} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                             </Bar>
                           </BarChart>
                         </ResponsiveContainer>
@@ -3563,7 +3563,7 @@ function PortoOperacaoPage() {
                             formatter={(value: any) => [formatMinutesToHHMMSS(Number(value)), "Tempo Parado"]}
                           />
                           <Bar dataKey="minutes" fill="url(#verticalCylinder)" barSize={36}>
-                            <LabelList dataKey="minutes" position="top" formatter={(v) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
+                            <LabelList dataKey="minutes" position="top" formatter={(v: any) => formatMinutesToHHMMSS(Number(v))} fill="#ffffff" fontSize={9} offset={8} className="font-bold font-mono" />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>

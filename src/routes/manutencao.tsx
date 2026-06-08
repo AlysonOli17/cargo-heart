@@ -724,6 +724,7 @@ function MaintenancePage() {
                               )}
                             </div>
                           </div>
+                        </div>
                       </Card>
                     );
                   })}

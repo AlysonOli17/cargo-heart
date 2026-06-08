@@ -307,7 +307,7 @@ function PessoasPage() {
             query = query.eq("name", payload.name);
           }
 
-          const { data: existing } = await query;
+          const { data: existing } = await (query as any);
 
           if (existing && existing.length > 0) {
             await supabase.from("people" as any).update(payload).eq("id", existing[0].id);

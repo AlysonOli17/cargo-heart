@@ -583,8 +583,8 @@ function UsinaOperacaoPage() {
 
           // We'll infer schedule type AFTER parsing all rows based on max block count
           rowObj._block_index = blockIndex;
-          rowObj._explicit_type = currentSection?.type || null;
-          rowObj._turno_secao = currentSection?.turno || "Dia"; // Fallback for PDF
+          rowObj._explicit_type = null;
+          rowObj._turno_secao = "Dia"; // Fallback for PDF
 
           // Only keep rows that have some meaningful identifier
           if (rowObj.placa || rowObj.equipment || rowObj.equipamento || rowObj.tetag) {
