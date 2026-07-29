@@ -83,6 +83,12 @@ export async function updateScheduleStatus(id: string, status: DailySchedule["st
   if (error) throw error;
 }
 
+export async function updateSchedule(id: string, payload: Partial<DailySchedule>) {
+  const { data, error } = await db.from("daily_schedules").update(payload).eq("id", id).select().single();
+  if (error) throw error;
+  return data;
+}
+
 export async function deleteSchedulesByDate(date: string) {
   const { error } = await db.from("daily_schedules").delete().eq("date", date);
   if (error) throw error;

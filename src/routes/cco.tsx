@@ -5,13 +5,13 @@ import { AppLayout } from "@/components/AppLayout";
 import { supabase } from "@/integrations/supabase/client";
 import {
   getSchedulesByDate, getCorrectivesByDate, getOpenCorrectives,
-  getDailySummary, openCorrective, closeCorrective,
+  getDailySummary, openCorrective, closeCorrective, updateSchedule,
 } from "@/lib/cco-service";
 import type { DailySchedule, Corrective, Contract } from "@/lib/cco-service";
 import {
   Truck, Wrench, CheckCircle2, Clock, AlertTriangle, RefreshCw,
   Play, Square, ChevronDown, ChevronUp, Filter, Activity,
-  TrendingUp, TrendingDown, Circle
+  TrendingUp, TrendingDown, Circle, Pencil
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInMinutes } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -66,6 +66,16 @@ export default function CCOPage() {
   const [problemDesc, setProblemDesc] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Edit Schedule modal state
+  const [editScheduleModal, setEditScheduleModal] = useState<{
+    open: boolean;
+    schedule: any | null;
+  }>({ open: false, schedule: null });
+  const [editOpName, setEditOpName] = useState("");
+  const [editPlate, setEditPlate] = useState("");
+  const [editEquip, setEditEquip] = useState("");
+  const [editLocation, setEditLocation] = useState("");
 
   // Filters
   const [contractFilter, setContractFilter] = useState<string>("all");
@@ -176,6 +186,25 @@ export default function CCOPage() {
       setSaving(false);
     }
   }
+
+  const handleEditSchedule = async () => {
+    if (!editScheduleModal.schedule || !user) return;
+    setSaving(true);
+    try {
+      await updateSchedule(editScheduleModal.schedule.id, {
+        operator_name: editOpName || null,
+        plate: editPlate || null,
+        equipment_identifier: editEquip || editScheduleModal.schedule.equipment_identifier,
+        location: editLocation || null,
+      });
+      setEditScheduleModal({ open: false, schedule: null });
+      await loadData();
+    } catch (e: any) {
+      alert("Erro: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // Handle close corrective
   async function handleCloseCorrective() {
@@ -359,6 +388,13 @@ export default function CCOPage() {
                   setCorrectiveModal({ open: true, mode: "close", schedule: null, corrective });
                   setResolutionNotes("");
                 }}
+                onEditSchedule={s => {
+                  setEditEquip(s.equipment_identifier || "");
+                  setEditPlate(s.plate || "");
+                  setEditOpName(s.operator_name || "");
+                  setEditLocation(s.location || "");
+                  setEditScheduleModal({ open: true, schedule: s });
+                }}
               />
             ))}
           </div>
@@ -481,6 +517,78 @@ export default function CCOPage() {
           </div>
         </div>
       )}
+
+      {/* Edit Schedule Modal */}
+      {editScheduleModal.open && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <Pencil className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-black text-foreground">Editar Programação</h3>
+                  <p className="text-sm text-muted-foreground font-medium">
+                    Ajuste os dados desta linha
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Equipamento</label>
+                  <input
+                    value={editEquip}
+                    onChange={e => setEditEquip(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Placa</label>
+                  <input
+                    value={editPlate}
+                    onChange={e => setEditPlate(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Operador (ou O.S.)</label>
+                  <input
+                    value={editOpName}
+                    onChange={e => setEditOpName(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Local</label>
+                  <input
+                    value={editLocation}
+                    onChange={e => setEditLocation(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 mt-6">
+                <button
+                  onClick={() => setEditScheduleModal({ open: false, schedule: null })}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-border text-sm font-bold hover:bg-accent transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleEditSchedule}
+                  disabled={saving}
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:opacity-90 disabled:opacity-60 transition-colors"
+                >
+                  {saving ? "Salvando..." : "Salvar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }
@@ -541,13 +649,14 @@ function FilterPill({ label, active, onClick, color }: {
   );
 }
 
-function ScheduleGroup({ label, rows, correctives, onOpenCorrective, onStatusChange, onCloseCorrective }: {
+function ScheduleGroup({ label, rows, correctives, onOpenCorrective, onStatusChange, onCloseCorrective, onEditSchedule }: {
   label: string;
   rows: any[];
   correctives: any[];
   onOpenCorrective: (s: any) => void;
   onStatusChange: (s: any, status: string) => void;
   onCloseCorrective: (c: any) => void;
+  onEditSchedule: (s: any) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const inCorrective = rows.filter(r => r.status === "corretiva").length;
@@ -695,6 +804,13 @@ function ScheduleGroup({ label, rows, correctives, onOpenCorrective, onStatusCha
                             <Wrench className="w-3 h-3" />
                           </button>
                         )}
+                        <button
+                          onClick={() => onEditSchedule(row)}
+                          className="px-2 py-1 text-[10px] font-bold bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200 transition-colors ml-2"
+                          title="Editar programação"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
                       </div>
                     </td>
                   </tr>
