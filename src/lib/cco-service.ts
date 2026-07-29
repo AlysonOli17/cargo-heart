@@ -137,6 +137,25 @@ export async function closeCorrective(id: string, end_time: string, resolution_n
   return data;
 }
 
+export async function updateCorrective(id: string, payload: {
+  start_time?: string; end_time?: string | null; problem_type?: string;
+  description?: string | null; resolution_notes?: string | null;
+}) {
+  const { data, error } = await db
+    .from("correctives")
+    .update(payload)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteCorrective(id: string) {
+  const { error } = await db.from("correctives").delete().eq("id", id);
+  if (error) throw error;
+}
+
 export async function getOpenCorrectives() {
   const { data, error } = await db
     .from("correctives")

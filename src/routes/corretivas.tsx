@@ -2,11 +2,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { AppLayout } from "@/components/AppLayout";
-import { getCorrectivesByDate, openCorrective, closeCorrective, getSchedulesByDate, getContracts } from "@/lib/cco-service";
+import { getCorrectivesByDate, openCorrective, closeCorrective, updateCorrective, deleteCorrective, getSchedulesByDate } from "@/lib/cco-service";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Wrench, CheckCircle2, Clock, AlertTriangle, Plus, Filter,
-  ChevronDown, RefreshCw, Circle
+  ChevronDown, RefreshCw, Circle, Pencil, Trash2
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInMinutes } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -18,6 +18,13 @@ export const Route = createFileRoute("/corretivas")({
 function cn(...classes: (string | boolean | undefined)[]) {
   return classes.filter(Boolean).join(" ");
 }
+
+const toDatetimeLocal = (isoString?: string | null) => {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 const PROBLEM_TYPES = [
   { value: "mecanico", label: "Mecânico", color: "bg-red-100 text-red-700 border-red-200" },
@@ -43,13 +50,15 @@ export default function CorretivasPage() {
   // Modal
   const [modal, setModal] = useState<{
     open: boolean;
-    mode: "open" | "close";
+    mode: "open" | "close" | "edit";
     schedule: any | null;
     corrective: any | null;
   }>({ open: false, mode: "open", schedule: null, corrective: null });
   const [problemType, setProblemType] = useState("mecanico");
   const [description, setDescription] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Schedule picker for new corrective
@@ -109,7 +118,7 @@ export default function CorretivasPage() {
         equipment_identifier: modal.schedule.equipment_identifier,
         plate: modal.schedule.plate,
         contract_id: modal.schedule.contract_id,
-        start_time: new Date().toISOString(),
+        start_time: startTime ? new Date(startTime).toISOString() : new Date().toISOString(),
         problem_type: problemType as any,
         description: description || undefined,
         created_by: user.id,
@@ -129,7 +138,12 @@ export default function CorretivasPage() {
     if (!modal.corrective || !user) return;
     setSaving(true);
     try {
-      await closeCorrective(modal.corrective.id, new Date().toISOString(), resolutionNotes || undefined, user.id);
+      await closeCorrective(
+        modal.corrective.id,
+        endTime ? new Date(endTime).toISOString() : new Date().toISOString(),
+        resolutionNotes || undefined,
+        user.id
+      );
 
       // Check remaining open correctives for that schedule
       const remaining = correctives.filter(c =>
@@ -146,6 +160,36 @@ export default function CorretivasPage() {
       alert("Erro: " + e.message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleEditCorrective() {
+    if (!modal.corrective || !user) return;
+    setSaving(true);
+    try {
+      await updateCorrective(modal.corrective.id, {
+        start_time: startTime ? new Date(startTime).toISOString() : undefined,
+        end_time: endTime ? new Date(endTime).toISOString() : null,
+        problem_type: problemType,
+        description: description || null,
+        resolution_notes: resolutionNotes || null,
+      });
+      setModal({ open: false, mode: "open", schedule: null, corrective: null });
+      await loadData();
+    } catch (e: any) {
+      alert("Erro: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteCorrective(id: string) {
+    if (!confirm("Tem certeza que deseja excluir este registro de corretiva? Essa ação não pode ser desfeita.")) return;
+    try {
+      await deleteCorrective(id);
+      await loadData();
+    } catch (e: any) {
+      alert("Erro: " + e.message);
     }
   }
 
@@ -175,7 +219,10 @@ export default function CorretivasPage() {
               <RefreshCw className={cn("w-4 h-4", dataLoading && "animate-spin")} />
             </button>
             <button
-              onClick={() => setModal({ open: true, mode: "open", schedule: null, corrective: null })}
+              onClick={() => {
+                setStartTime(toDatetimeLocal(new Date().toISOString()));
+                setModal({ open: true, mode: "open", schedule: null, corrective: null });
+              }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -251,14 +298,41 @@ export default function CorretivasPage() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <div className={cn(
-                        "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5",
-                        !c.resolved ? "bg-red-100" : "bg-emerald-100"
-                      )}>
-                        {!c.resolved
-                          ? <Wrench className="w-4 h-4 text-red-600" />
-                          : <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        }
+                      <div className="flex flex-col gap-2">
+                        <div className={cn(
+                          "w-8 h-8 rounded-xl flex items-center justify-center shrink-0",
+                          !c.resolved ? "bg-red-100" : "bg-emerald-100"
+                        )}>
+                          {!c.resolved
+                            ? <Wrench className="w-4 h-4 text-red-600" />
+                            : <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          }
+                        </div>
+                        {user?.role === "admin" && (
+                          <div className="flex flex-col gap-1 mt-1">
+                            <button
+                              onClick={() => {
+                                setProblemType(c.problem_type);
+                                setDescription(c.description || "");
+                                setResolutionNotes(c.resolution_notes || "");
+                                setStartTime(toDatetimeLocal(c.start_time));
+                                setEndTime(toDatetimeLocal(c.end_time));
+                                setModal({ open: true, mode: "edit", schedule: null, corrective: c });
+                              }}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                              title="Editar"
+                            >
+                              <Pencil className="w-3.5 h-3.5 mx-auto" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCorrective(c.id)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:bg-red-50 hover:text-red-600 transition-colors"
+                              title="Excluir"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 mx-auto" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -318,6 +392,7 @@ export default function CorretivasPage() {
                     {!c.resolved && (
                       <button
                         onClick={() => {
+                          setEndTime(toDatetimeLocal(new Date().toISOString()));
                           setModal({ open: true, mode: "close", schedule: null, corrective: c });
                           setResolutionNotes("");
                         }}
@@ -426,6 +501,16 @@ export default function CorretivasPage() {
                     </div>
                   </div>
 
+                  <div className="mb-4">
+                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Hora que parou</label>
+                    <input
+                      type="datetime-local"
+                      value={startTime}
+                      onChange={e => setStartTime(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+
                   <div className="mb-6">
                     <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Descrição (opcional)</label>
                     <textarea
@@ -451,7 +536,7 @@ export default function CorretivasPage() {
                     </button>
                   </div>
                 </>
-              ) : (
+              ) : modal.mode === "close" ? (
                 <>
                   <h3 className="font-black text-foreground text-lg mb-2">Registrar Retorno</h3>
                   <p className="text-sm text-muted-foreground mb-5">
@@ -469,6 +554,16 @@ export default function CorretivasPage() {
                     <p className="text-xs text-red-500 font-medium mt-1">
                       Iniciado às {modal.corrective?.start_time ? format(new Date(modal.corrective.start_time), "HH:mm") : "—"}
                     </p>
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Hora que retornou</label>
+                    <input
+                      type="datetime-local"
+                      value={endTime}
+                      onChange={e => setEndTime(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
                   </div>
 
                   <div className="mb-6">
@@ -493,6 +588,95 @@ export default function CorretivasPage() {
                       className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 transition-colors"
                     >
                       {saving ? "Salvando..." : "Registrar Retorno"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h3 className="font-black text-foreground text-lg mb-5">Editar Corretiva</h3>
+                  
+                  <div className="mb-4">
+                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Equipamento</label>
+                    <div className="px-3 py-2.5 rounded-xl border border-border bg-muted/50">
+                      <p className="font-bold text-sm text-foreground">
+                        {modal.corrective?.daily_schedules?.equipment_identifier || modal.corrective?.equipment_identifier}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Tipo do Problema</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {PROBLEM_TYPES.map(p => (
+                        <button
+                          key={p.value}
+                          onClick={() => setProblemType(p.value)}
+                          className={cn(
+                            "px-3 py-2 rounded-xl border text-xs font-bold transition-all",
+                            problemType === p.value ? p.color + " ring-2 ring-offset-1 ring-current" : "border-border text-muted-foreground hover:bg-accent"
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Hora que parou</label>
+                      <input
+                        type="datetime-local"
+                        value={startTime}
+                        onChange={e => setStartTime(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Hora que retornou</label>
+                      <input
+                        type="datetime-local"
+                        value={endTime}
+                        onChange={e => setEndTime(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                        disabled={!modal.corrective?.resolved && !endTime}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Descrição</label>
+                    <textarea
+                      value={description}
+                      onChange={e => setDescription(e.target.value)}
+                      rows={2}
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+
+                  {modal.corrective?.resolved && (
+                    <div className="mb-6">
+                      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">Observações de Resolução</label>
+                      <textarea
+                        value={resolutionNotes}
+                        onChange={e => setResolutionNotes(e.target.value)}
+                        rows={2}
+                        className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <button onClick={() => setModal({ open: false, mode: "open", schedule: null, corrective: null })}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-border text-sm font-bold hover:bg-accent transition-colors">
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleEditCorrective}
+                      disabled={saving}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-bold hover:opacity-90 disabled:opacity-60 transition-colors"
+                    >
+                      {saving ? "Salvando..." : "Salvar Edição"}
                     </button>
                   </div>
                 </>
