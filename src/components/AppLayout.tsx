@@ -3,7 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
 import {
   LayoutDashboard, CalendarDays, Wrench, BarChart3, Settings,
-  LogOut, Menu, X, Truck, ChevronRight, Bell, User
+  LogOut, Menu, X, Truck, ChevronRight, Bell, User, Users
 } from "lucide-react";
 
 const navItems = [
@@ -12,6 +12,7 @@ const navItems = [
   { to: "/corretivas", label: "Corretivas", icon: Wrench, description: "Registrar paradas e retornos" },
   { to: "/relatorios", label: "Relatórios", icon: BarChart3, description: "Métricas e análises" },
   { to: "/cadastros", label: "Cadastros", icon: Settings, description: "Equipamentos, operadores e contratos" },
+  { to: "/usuarios", label: "Usuários", icon: Users, description: "Gestão de acesso e permissões", adminOnly: true },
 ];
 
 const ROLE_LABELS: Record<string, string> = {

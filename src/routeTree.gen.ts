@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UsuariosRouteImport } from './routes/usuarios'
 import { Route as RelatoriosRouteImport } from './routes/relatorios'
 import { Route as ProgramacaoRouteImport } from './routes/programacao'
 import { Route as CorretivasRouteImport } from './routes/corretivas'
@@ -17,6 +18,11 @@ import { Route as CadastrosRouteImport } from './routes/cadastros'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
 
+const UsuariosRoute = UsuariosRouteImport.update({
+  id: '/usuarios',
+  path: '/usuarios',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RelatoriosRoute = RelatoriosRouteImport.update({
   id: '/relatorios',
   path: '/relatorios',
@@ -61,6 +67,7 @@ export interface FileRoutesByFullPath {
   '/corretivas': typeof CorretivasRoute
   '/programacao': typeof ProgramacaoRoute
   '/relatorios': typeof RelatoriosRoute
+  '/usuarios': typeof UsuariosRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -70,6 +77,7 @@ export interface FileRoutesByTo {
   '/corretivas': typeof CorretivasRoute
   '/programacao': typeof ProgramacaoRoute
   '/relatorios': typeof RelatoriosRoute
+  '/usuarios': typeof UsuariosRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -80,6 +88,7 @@ export interface FileRoutesById {
   '/corretivas': typeof CorretivasRoute
   '/programacao': typeof ProgramacaoRoute
   '/relatorios': typeof RelatoriosRoute
+  '/usuarios': typeof UsuariosRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -91,6 +100,7 @@ export interface FileRouteTypes {
     | '/corretivas'
     | '/programacao'
     | '/relatorios'
+    | '/usuarios'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -100,6 +110,7 @@ export interface FileRouteTypes {
     | '/corretivas'
     | '/programacao'
     | '/relatorios'
+    | '/usuarios'
   id:
     | '__root__'
     | '/'
@@ -109,6 +120,7 @@ export interface FileRouteTypes {
     | '/corretivas'
     | '/programacao'
     | '/relatorios'
+    | '/usuarios'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -119,10 +131,18 @@ export interface RootRouteChildren {
   CorretivasRoute: typeof CorretivasRoute
   ProgramacaoRoute: typeof ProgramacaoRoute
   RelatoriosRoute: typeof RelatoriosRoute
+  UsuariosRoute: typeof UsuariosRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/usuarios': {
+      id: '/usuarios'
+      path: '/usuarios'
+      fullPath: '/usuarios'
+      preLoaderRoute: typeof UsuariosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/relatorios': {
       id: '/relatorios'
       path: '/relatorios'
@@ -183,6 +203,7 @@ const rootRouteChildren: RootRouteChildren = {
   CorretivasRoute: CorretivasRoute,
   ProgramacaoRoute: ProgramacaoRoute,
   RelatoriosRoute: RelatoriosRoute,
+  UsuariosRoute: UsuariosRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
