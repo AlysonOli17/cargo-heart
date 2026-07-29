@@ -1,1253 +1,709 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { AppLayout } from "@/components/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { toast } from "sonner";
-import { format, addDays } from "date-fns";
-import { 
-  LayoutDashboard, 
-  Truck, 
-  Wrench, 
-  User, 
-  Calendar, 
-  AlertTriangle, 
-  Activity, 
-  CheckCircle2, 
-  Hourglass, 
-  Plus, 
-  Trash2, 
-  MapPin, 
-  Clock, 
-  FolderSync 
-} from "lucide-react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/hooks/use-auth";
-
-const getSafeDate = (dateStr: string | null | undefined, fallback: Date = new Date()): Date => {
-  if (!dateStr) return fallback;
-  const cleanStr = dateStr.includes("T") ? dateStr : `${dateStr}T12:00:00`;
-  const parsed = new Date(cleanStr);
-  if (isNaN(parsed.getTime())) {
-    return fallback;
-  }
-  return parsed;
-};
+import { AppLayout } from "@/components/AppLayout";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  getSchedulesByDate, getCorrectivesByDate, getOpenCorrectives,
+  getDailySummary, openCorrective, closeCorrective,
+} from "@/lib/cco-service";
+import type { DailySchedule, Corrective, Contract } from "@/lib/cco-service";
+import {
+  Truck, Wrench, CheckCircle2, Clock, AlertTriangle, RefreshCw,
+  Play, Square, ChevronDown, ChevronUp, Filter, Activity,
+  TrendingUp, TrendingDown, Circle
+} from "lucide-react";
+import { format, formatDistanceToNow, differenceInMinutes } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 export const Route = createFileRoute("/cco")({
-  head: () => ({ meta: [{ title: "CCO Centro de Controle Operacional — Frota Busato" }] }),
-  component: () => <AppLayout><CCOPage /></AppLayout>,
+  component: CCOPage,
 });
 
-type Equipment = {
-  id: string;
-  identifier: string;
-  type: string | null;
-  brand: string | null;
-  model: string | null;
-  status: string;
-  operator_name: string | null;
-  maintenance_expected_return: string | null;
-  contract_type: string | null;
-  cost_center: string | null;
-  last_verified_at: string | null;
+const STATUS_CONFIG = {
+  agendado: { label: "Agendado", color: "bg-slate-100 text-slate-600 border-slate-200", dot: "bg-slate-400" },
+  operando: { label: "Operando", color: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" },
+  corretiva: { label: "Em Corretiva", color: "bg-red-50 text-red-700 border-red-200", dot: "bg-red-500" },
+  finalizado: { label: "Finalizado", color: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-400" },
+  ausente: { label: "Ausente", color: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
 };
 
-type CCOAllocation = {
-  id: string;
-  equipment_id: string;
-  scheduled_date: string;
-  shift: string;
-  local: string | null;
-  operator_name: string | null;
-  activity: string | null;
-  status: string;
-  notes: string | null;
-  owner_id: string | null;
-};
+const PROBLEM_TYPES = [
+  { value: "mecanico", label: "Mecânico" },
+  { value: "eletrico", label: "Elétrico" },
+  { value: "pneu", label: "Pneu" },
+  { value: "abastecimento", label: "Abastecimento" },
+  { value: "operador", label: "Operador" },
+  { value: "acidente", label: "Acidente" },
+  { value: "outro", label: "Outro" },
+];
 
-type Programming = {
-  id: string;
-  equipment_id: string;
-  scheduled_date: string;
-  day_of_week: string | null;
-  stop_type: string;
-  notes: string | null;
-  is_completed: boolean;
-};
+function cn(...classes: (string | boolean | undefined)[]) {
+  return classes.filter(Boolean).join(" ");
+}
 
-type UsinaSchedule = {
-  id: string;
-  scheduled_date: string;
-  equipment: string;
-  plate: string | null;
-  model: string | null;
-  client: string | null;
-  shift: string;
-  valley_time: number | null;
-  valley_start: string | null;
-  valley_end: string | null;
-  cost_center: string | null;
-  subet: string | null;
-  local: string | null;
-  activity: string | null;
-  operator: string | null;
-  os_number: string | null;
-  is_completed: boolean;
-  owner_id: string | null;
-};
+export default function CCOPage() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
 
-function CCOPage() {
-  const { user } = useAuth();
-  const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [allocations, setAllocations] = useState<CCOAllocation[]>([]);
-  const [programming, setProgramming] = useState<Programming[]>([]);
-  const [usinaSchedules, setUsinaSchedules] = useState<UsinaSchedule[]>([]);
+  const today = format(new Date(), "yyyy-MM-dd");
+  const [selectedDate, setSelectedDate] = useState(today);
 
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [selectedLocal, setSelectedLocal] = useState<string>("TODOS");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [correctives, setCorrectives] = useState<any[]>([]);
+  const [openCorrectives, setOpenCorrectives] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
 
-  // Dialog states for generic stops
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [schedEqId, setSchedEqId] = useState("");
-  const [schedStopType, setSchedStopType] = useState("Corretiva");
-  const [schedDate, setSchedDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [schedNotes, setSchedNotes] = useState("");
+  // Corrective modal state
+  const [correctiveModal, setCorrectiveModal] = useState<{
+    open: boolean;
+    mode: "open" | "close";
+    schedule: any | null;
+    corrective: any | null;
+  }>({ open: false, mode: "open", schedule: null, corrective: null });
+  const [problemType, setProblemType] = useState("mecanico");
+  const [problemDesc, setProblemDesc] = useState("");
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const [correctiveLogs, setCorrectiveLogs] = useState<any[]>([]);
-  const [contractFilter, setContractFilter] = useState<string>("Todos");
-  const [localFilter, setLocalFilter] = useState<string>("Todos");
-  const [selectedDashboardContract, setSelectedDashboardContract] = useState<string | null>(null);
-  const [drillDownContract, setDrillDownContract] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string>("atendimento");
-  const [newAllocOpen, setNewAllocOpen] = useState(false);
-  const [allocEqId, setAllocEqId] = useState("");
-  const [allocOperator, setAllocOperator] = useState("");
-  const [allocFront, setAllocFront] = useState("");
-  const [allocShift, setAllocShift] = useState("DIA");
-  const [allocNotes, setAllocNotes] = useState("");
+  // Filters
+  const [contractFilter, setContractFilter] = useState<string>("all");
+  const [shiftFilter, setShiftFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  useEffect(() => {
+    if (!loading && !user) navigate({ to: "/auth" });
+  }, [user, loading]);
 
   const loadData = async () => {
-    // 1. Carrega Equipamentos
+    setDataLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("equipment")
-        .select("*")
-        .order("identifier", { ascending: true });
-      if (error) throw error;
-      setEquipment((data ?? []) as Equipment[]);
-    } catch (_) {
-      const localEquip = JSON.parse(localStorage.getItem("local_equipment") || "[]");
-      setEquipment(localEquip);
+      const [sched, corr, open] = await Promise.allSettled([
+        getSchedulesByDate(selectedDate),
+        getCorrectivesByDate(selectedDate),
+        getOpenCorrectives(),
+      ]);
+      setSchedules(sched.status === "fulfilled" ? sched.value : []);
+      setCorrectives(corr.status === "fulfilled" ? corr.value : []);
+      setOpenCorrectives(open.status === "fulfilled" ? open.value : []);
+
+      // Summary view may not exist before migration - ignore errors
+      try {
+        const sum = await getDailySummary(selectedDate);
+        setSummary(sum || []);
+      } catch { setSummary([]); }
+    } catch (e) {
+      console.error("loadData error:", e);
+    } finally {
+      setDataLoading(false);
     }
-
-    // 2. Carrega Alocações do dia
-    try {
-      const { data, error } = await supabase
-        .from("cco_allocations")
-        .select("*")
-        .eq("scheduled_date", selectedDate);
-      if (error) throw error;
-      setAllocations((data ?? []) as CCOAllocation[]);
-      // Cache
-      const localAllocs = JSON.parse(localStorage.getItem("local_cco_allocations") || "[]");
-      const otherDates = localAllocs.filter((a: any) => a.scheduled_date !== selectedDate);
-      localStorage.setItem("local_cco_allocations", JSON.stringify([...otherDates, ...(data ?? [])]));
-    } catch (_) {
-      const localAllocs = JSON.parse(localStorage.getItem("local_cco_allocations") || "[]");
-      setAllocations(localAllocs.filter((a: any) => a.scheduled_date === selectedDate));
-    }
-
-    // 3. Carrega programações CCM
-    try {
-      const { data: progs, error: eProg } = await supabase.from("programming").select("*").eq("is_completed", false);
-      if (eProg) throw eProg;
-      setProgramming((progs ?? []) as Programming[]);
-    } catch (_) {}
-
-    // 4. Carrega escalas Usina E Porto — busca data real E templates (2000-01-0x)
-    let finalUsina: any[] = [];
-    let finalPorto: any[] = [];
-
-    // Usina Schedules
-    try {
-      let { data: scheds, error: eSched } = await supabase
-        .from("usina_daily_schedules")
-        .select("*")
-        .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
-      if (eSched) throw eSched;
-
-      const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
-
-      if (dayScheds.length === 0) {
-        // Clone template for selectedDate's day of week
-        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
-        const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
-        const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
-
-        if (templatesForDay.length > 0) {
-          const clones = templatesForDay.map((t: any) => ({
-            scheduled_date: selectedDate,
-            equipment: t.equipment,
-            plate: t.plate,
-            model: t.model,
-            client: t.client,
-            shift: t.shift,
-            valley_time: t.valley_time,
-            valley_start: t.valley_start,
-            valley_end: t.valley_end,
-            cost_center: t.cost_center,
-            subet: t.subet,
-            local: t.local,
-            activity: t.activity,
-            operator: t.operator,
-            os_number: t.os_number,
-            is_completed: false,
-            owner_id: user?.id
-          }));
-
-          const { data: inserted, error: eInsert } = await supabase
-            .from("usina_daily_schedules")
-            .insert(clones)
-            .select();
-
-          if (!eInsert && inserted) {
-            scheds = [...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate), ...inserted];
-          }
-        }
-      }
-
-      const finalScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
-      finalUsina = finalScheds.map(s => ({ ...s, __source: "USINA" }));
-
-      // Merge with local storage instead of overwriting other dates
-      const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
-      const otherDatesScheds = localScheds.filter((s: any) => s.scheduled_date !== selectedDate);
-      const merged = [...otherDatesScheds, ...finalScheds];
-      localStorage.setItem("local_usina_schedules", JSON.stringify(merged));
-    } catch (_) {
-      const localScheds = JSON.parse(localStorage.getItem("local_usina_schedules") || "[]");
-      finalUsina = localScheds.filter((s: any) => s.scheduled_date === selectedDate).map((s: any) => ({ ...s, __source: "USINA" }));
-    }
-
-    // Porto Schedules
-    try {
-      let { data: scheds, error: eSched } = await supabase
-        .from("porto_daily_schedules")
-        .select("*")
-        .or(`scheduled_date.eq.${selectedDate},and(scheduled_date.gte.2000-01-02,scheduled_date.lte.2000-01-08)`);
-      if (eSched) throw eSched;
-
-      const dayScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
-
-      if (dayScheds.length === 0) {
-        // Clone template for selectedDate's day of week
-        const selectedDayOfWeek = getSafeDate(selectedDate).getDay();
-        const templateDateStr = format(addDays(new Date("2000-01-02T12:00:00"), selectedDayOfWeek), "yyyy-MM-dd");
-        const templatesForDay = (scheds ?? []).filter((s: any) => s.scheduled_date === templateDateStr);
-
-        if (templatesForDay.length > 0) {
-          const clones = templatesForDay.map((t: any) => ({
-            scheduled_date: selectedDate,
-            equipment: t.equipment,
-            plate: t.plate,
-            model: t.model,
-            client: t.client,
-            shift: t.shift,
-            valley_time: t.valley_time,
-            valley_start: t.valley_start,
-            valley_end: t.valley_end,
-            cost_center: t.cost_center,
-            subet: t.subet,
-            local: t.local,
-            activity: t.activity,
-            operator: t.operator,
-            os_number: t.os_number,
-            is_completed: false,
-            owner_id: user?.id
-          }));
-
-          const { data: inserted, error: eInsert } = await supabase
-            .from("porto_daily_schedules")
-            .insert(clones)
-            .select();
-
-          if (!eInsert && inserted) {
-            scheds = [...(scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate), ...inserted];
-          }
-        }
-      }
-
-      const finalScheds = (scheds ?? []).filter((s: any) => s.scheduled_date === selectedDate);
-      finalPorto = finalScheds.map(s => ({ ...s, __source: "PORTO" }));
-
-      // Merge with local storage instead of overwriting other dates
-      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
-      const otherDatesScheds = localScheds.filter((s: any) => s.scheduled_date !== selectedDate);
-      const merged = [...otherDatesScheds, ...finalScheds];
-      localStorage.setItem("local_porto_schedules", JSON.stringify(merged));
-    } catch (_) {
-      const localScheds = JSON.parse(localStorage.getItem("local_porto_schedules") || "[]");
-      finalPorto = localScheds.filter((s: any) => s.scheduled_date === selectedDate).map((s: any) => ({ ...s, __source: "PORTO" }));
-    }
-
-    setUsinaSchedules([...finalUsina, ...finalPorto]);
-
-    // 5. Carrega logs de paradas (Usina E Porto)
-    let logsUsina: any[] = [];
-    let logsPorto: any[] = [];
-
-    try {
-      const { data: logs, error: eLogs } = await supabase.from("usina_corrective_logs").select("*");
-      if (eLogs) throw eLogs;
-      logsUsina = logs ?? [];
-      localStorage.setItem("local_usina_corrective_logs", JSON.stringify(logs ?? []));
-    } catch (_) {
-      logsUsina = JSON.parse(localStorage.getItem("local_usina_corrective_logs") || "[]");
-    }
-
-    try {
-      const { data: logs, error: eLogs } = await supabase.from("porto_corrective_logs").select("*");
-      if (eLogs) throw eLogs;
-      logsPorto = logs ?? [];
-      localStorage.setItem("local_porto_corrective_logs", JSON.stringify(logs ?? []));
-    } catch (_) {
-      logsPorto = JSON.parse(localStorage.getItem("local_porto_corrective_logs") || "[]");
-    }
-
-    setCorrectiveLogs([...logsUsina, ...logsPorto]);
   };
 
   useEffect(() => {
-    if (!user) return;
     loadData();
-    const chEq = supabase.channel("cco-eq-rt").on("postgres_changes", { event: "*", schema: "public", table: "equipment" }, loadData).subscribe();
-    const chProg = supabase.channel("cco-prog-rt").on("postgres_changes", { event: "*", schema: "public", table: "programming" }, loadData).subscribe();
-    const chSched = supabase.channel("cco-sched-rt").on("postgres_changes", { event: "*", schema: "public", table: "usina_daily_schedules" }, loadData).subscribe();
-    const chLogs = supabase.channel("cco-logs-rt").on("postgres_changes", { event: "*", schema: "public", table: "usina_corrective_logs" }, loadData).subscribe();
-    
-    return () => {
-      supabase.removeChannel(chEq);
-      supabase.removeChannel(chProg);
-      supabase.removeChannel(chSched);
-      supabase.removeChannel(chLogs);
-    };
-  }, [user, selectedDate]);
 
-  const handleCreateAllocation = async () => {
-    if (!allocEqId || !allocOperator || !allocFront) {
-      toast.error("Preencha todos os campos obrigatórios");
-      return;
+    // Real-time subscription
+    const channel = supabase
+      .channel("cco-realtime")
+      .on("postgres_changes", { event: "*", schema: "public", table: "daily_schedules" }, loadData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "correctives" }, loadData)
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedDate]);
+
+  // KPIs
+  const kpis = useMemo(() => {
+    const total = schedules.length;
+    const operating = schedules.filter(s => s.status === "operando").length;
+    const inCorrective = schedules.filter(s => s.status === "corretiva").length;
+    const finished = schedules.filter(s => s.status === "finalizado").length;
+    const scheduled = schedules.filter(s => s.status === "agendado").length;
+
+    const totalMinutesLost = correctives
+      .filter(c => c.minutes_lost)
+      .reduce((acc, c) => acc + (c.minutes_lost || 0), 0);
+
+    const openCount = openCorrectives.length;
+
+    return { total, operating, inCorrective, finished, scheduled, totalMinutesLost, openCount };
+  }, [schedules, correctives, openCorrectives]);
+
+  // Filtered + grouped schedules
+  const filteredSchedules = useMemo(() => {
+    return schedules.filter(s => {
+      const matchContract = contractFilter === "all" || s.contracts?.name?.includes(contractFilter);
+      const matchShift = shiftFilter === "all" || s.shift === shiftFilter;
+      const matchStatus = statusFilter === "all" || s.status === statusFilter;
+      return matchContract && matchShift && matchStatus;
+    });
+  }, [schedules, contractFilter, shiftFilter, statusFilter]);
+
+  const groupedSchedules = useMemo(() => {
+    const groups = new Map<string, any[]>();
+    for (const s of filteredSchedules) {
+      const key = `${s.contracts?.name || "Sem contrato"} — ${s.shift} — ${s.team || "Geral"}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(s);
     }
+    return groups;
+  }, [filteredSchedules]);
 
-    const payload = {
-      scheduled_date: selectedDate,
-      equipment_id: allocEqId,
-      operator_name: allocOperator,
-      service_front: allocFront,
-      shift: allocShift,
-      notes: allocNotes,
-      owner_id: user?.id
-    };
-
+  // Handle open corrective
+  async function handleOpenCorrective() {
+    if (!correctiveModal.schedule || !user) return;
+    setSaving(true);
     try {
-      const { error } = await supabase.from("cco_allocations").insert(payload);
-      if (error) throw error;
-      toast.success("Programação operacional criada!");
-      setNewAllocOpen(false);
-      setAllocEqId("");
-      setAllocOperator("");
-      setAllocFront("");
-      setAllocNotes("");
-      loadData();
-    } catch (err: any) {
-      // Direct LocalStorage fallback if table is not created in remote schema
-      const localAllocs = JSON.parse(localStorage.getItem("local_cco_allocations") || "[]");
-      localAllocs.push({ ...payload, id: Math.random().toString(36).substring(2) });
-      localStorage.setItem("local_cco_allocations", JSON.stringify(localAllocs));
-      
-      toast.success("Programação salva localmente (offline)");
-      // Force refresh locally
-      setAllocations(localAllocs.filter((a: any) => a.scheduled_date === selectedDate));
-      setNewAllocOpen(false);
-      setAllocEqId("");
-      setAllocOperator("");
-      setAllocFront("");
-      setAllocNotes("");
-    }
-  };
-
-  const handleDeleteAllocation = async (id: string) => {
-    try {
-      const { error } = await supabase.from("cco_allocations").delete().eq("id", id);
-      if (error) throw error;
-      toast.success("Programação operário removida");
-      loadData();
-    } catch (err) {
-      const localAllocs = JSON.parse(localStorage.getItem("local_cco_allocations") || "[]");
-      const filtered = localAllocs.filter((a: any) => a.id !== id);
-      localStorage.setItem("local_cco_allocations", JSON.stringify(filtered));
-      setAllocations(filtered.filter((a: any) => a.scheduled_date === selectedDate));
-      toast.success("Removido localmente");
-    }
-  };
-
-  const handleConfirmSchedule = async () => {
-    if (!schedEqId) {
-      toast.error("Selecione o equipamento");
-      return;
-    }
-    const { error } = await supabase.from("programming").insert({
-      equipment_id: schedEqId,
-      scheduled_date: schedDate,
-      day_of_week: "Calendário",
-      stop_type: schedStopType,
-      notes: schedNotes,
-      owner_id: user?.id
-    });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Parada agendada com sucesso!");
-      setScheduleOpen(false);
-      setSchedEqId("");
-      setSchedNotes("");
-      loadData();
-    }
-  };
-
-  // D+1 Date helper
-  const dateDPlus1 = format(addDays(getSafeDate(selectedDate), 1), "yyyy-MM-dd");
-
-  // Get unavailable list for D+1
-  const dPlus1Unavailable = useMemo(() => {
-    return equipment.filter(eq => {
-      // Find if has program scheduled for D+1 date
-      const hasDPlus1Prog = programming.some(p => p.equipment_id === eq.id && p.scheduled_date === dateDPlus1);
-      const inOficinaNow = eq.status === "manutencao" || eq.status === "indisponivel";
-      return hasDPlus1Prog || inOficinaNow;
-    });
-  }, [equipment, programming, dateDPlus1]);
-
-  // Grouped active allocations for Usina & Porto
-  const usinaAllocations = useMemo(() => {
-    return allocations.filter(a => {
-      const eq = equipment.find(e => e.id === a.equipment_id);
-      return eq?.contract_type === "Usina";
-    });
-  }, [allocations, equipment]);
-
-  const portoAllocations = useMemo(() => {
-    return allocations.filter(a => {
-      const eq = equipment.find(e => e.id === a.equipment_id);
-      return eq?.contract_type === "Porto";
-    });
-  }, [allocations, equipment]);
-
-  // Available equipment list
-  const availableEqs = useMemo(() => {
-    return equipment.filter(eq => {
-      const isAllocated = allocations.some(a => a.equipment_id === eq.id);
-      const isOficina = eq.status === "manutencao" || eq.status === "indisponivel";
-      return !isAllocated && !isOficina;
-    });
-  }, [equipment, allocations]);
-
-  // Daily Attendance Dashboard computations
-  const getScheduleContract = (s: any) => {
-    if (s.__source) {
-      const srcUpper = s.__source.trim().toUpperCase();
-      if (srcUpper === "PORTO" || srcUpper === "USINA" || srcUpper === "EVENTUAL") {
-        return srcUpper;
-      }
-    }
-    if (s.client) {
-      const clientUpper = s.client.trim().toUpperCase();
-      if (clientUpper.includes("USINA")) return "USINA";
-      if (clientUpper.includes("PORTO")) return "PORTO";
-      if (clientUpper.includes("EVENTUAL")) return "EVENTUAL";
-    }
-    // Fallback to equipment registered contract_type if daily client field is not set
-    const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-    const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-    const eq = equipment.find(e => {
-      const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
-    });
-    if (eq?.contract_type) {
-      const typeUpper = eq.contract_type.trim().toUpperCase();
-      if (typeUpper === "USINA" || typeUpper === "PORTO" || typeUpper === "EVENTUAL") {
-        return typeUpper;
-      }
-    }
-    return s.__source || "USINA";
-  };
-
-  const filteredScheds = useMemo(() => {
-    return usinaSchedules.filter(s => {
-      const contractType = getScheduleContract(s);
-      const matchesContract = contractFilter === "Todos" || contractType.toLowerCase() === contractFilter.toLowerCase();
-      const matchesLocal = localFilter === "Todos" || s.local === localFilter;
-
-      return matchesContract && matchesLocal;
-    });
-  }, [usinaSchedules, equipment, contractFilter, localFilter]);
-
-  const stats = useMemo(() => {
-    const total = filteredScheds.length;
-    const naoAtendidos = filteredScheds.filter(s => {
-      const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id);
-      const isCurrentlyBroken = activeStops.some(l => !l.stop_end);
-      return isCurrentlyBroken;
-    });
-    const atendidos = total - naoAtendidos.length;
-    const pct = total > 0 ? Math.round((atendidos / total) * 100) : 100;
-    const correctiveHistoryList = filteredScheds.filter(s => {
-      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
-      return stops.length > 0;
-    });
-
-    return {
-      total,
-      atendidos,
-      naoAtendidos: naoAtendidos.length,
-      naoAtendidosList: naoAtendidos,
-      correctiveHistoryList,
-      pct
-    };
-  }, [filteredScheds, correctiveLogs]);
-
-  // Dashboard filtering for Left Gauge
-  const dashboardScheds = useMemo(() => {
-    return filteredScheds.filter(s => {
-      const contractKey = getScheduleContract(s);
-      return !selectedDashboardContract || contractKey === selectedDashboardContract.toUpperCase();
-    });
-  }, [filteredScheds, equipment, selectedDashboardContract]);
-
-  const dashboardStats = useMemo(() => {
-    const total = dashboardScheds.length;
-    const naoAtendidos = dashboardScheds.filter(s => {
-      const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id);
-      const isCurrentlyBroken = activeStops.some(l => !l.stop_end);
-      return isCurrentlyBroken;
-    });
-    const atendidos = total - naoAtendidos.length;
-    const pct = total > 0 ? Math.round((atendidos / total) * 100) : 100;
-
-    return {
-      total,
-      atendidos,
-      naoAtendidos: naoAtendidos.length,
-      naoAtendidosList: naoAtendidos,
-      pct
-    };
-  }, [dashboardScheds, correctiveLogs]);
-
-  const contractStats = useMemo(() => {
-    const defaults = ["USINA", "PORTO", "EVENTUAL"];
-    const map: Record<string, { total: number, eventuais: number, naoAtendidos: number, atendidos: number }> = {};
-    
-    defaults.forEach(d => {
-      map[d] = { total: 0, eventuais: 0, naoAtendidos: 0, atendidos: 0 };
-    });
-
-    filteredScheds.forEach(s => {
-      const contractKey = getScheduleContract(s);
-      const activeStops = correctiveLogs.filter(l => l.schedule_id === s.id);
-      const isBroken = activeStops.some(l => !l.stop_end);
-
-      if (!map[contractKey]) {
-        map[contractKey] = { total: 0, eventuais: 0, naoAtendidos: 0, atendidos: 0 };
-      }
-
-      map[contractKey].total++;
-      if (contractKey === "EVENTUAL") {
-        map[contractKey].eventuais++;
-      }
-      if (isBroken) {
-        map[contractKey].naoAtendidos++;
-      } else {
-        map[contractKey].atendidos++;
-      }
-    });
-
-    return Object.keys(map).map(name => {
-      const item = map[name];
-      const pct = item.total > 0 ? Math.round((item.atendidos / item.total) * 100) : 100;
-      return {
-        name,
-        pct,
-        total: item.total,
-        eventuais: item.eventuais,
-        naoAtendidos: item.naoAtendidos,
-        atendidos: item.atendidos
-      };
-    });
-  }, [filteredScheds, equipment, correctiveLogs]);
-
-  const drillDownData = useMemo(() => {
-    if (!drillDownContract) return null;
-    
-    const compScheds = filteredScheds.filter(s => {
-      const contractKey = getScheduleContract(s);
-      return contractKey === drillDownContract.toUpperCase();
-    });
-
-    const typeMap: Record<string, { total: number, atendidos: number, naoAtendidos: number, items: any[] }> = {};
-    compScheds.forEach(s => {
-      const sEqClean = s.equipment?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const sPlateClean = s.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-      const eq = equipment.find(e => {
-        const eIdClean = e.identifier?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        const ePlateClean = e.plate?.replace(/\s+/g, "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
-        return (sEqClean && eIdClean === sEqClean) || (sPlateClean && ePlateClean === sPlateClean);
+      await openCorrective({
+        schedule_id: correctiveModal.schedule.id,
+        date: selectedDate,
+        equipment_identifier: correctiveModal.schedule.equipment_identifier,
+        plate: correctiveModal.schedule.plate,
+        contract_id: correctiveModal.schedule.contract_id,
+        start_time: new Date().toISOString(),
+        problem_type: problemType as any,
+        description: problemDesc || undefined,
+        created_by: user.id,
       });
+      setCorrectiveModal({ open: false, mode: "open", schedule: null, corrective: null });
+      setProblemType("mecanico");
+      setProblemDesc("");
+      await loadData();
+    } catch (e: any) {
+      alert("Erro: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
-      const eqType = eq?.type || "Outros / Avulso";
-      if (!typeMap[eqType]) {
-        typeMap[eqType] = { total: 0, atendidos: 0, naoAtendidos: 0, items: [] };
+  // Handle close corrective
+  async function handleCloseCorrective() {
+    if (!correctiveModal.corrective || !user) return;
+    setSaving(true);
+    try {
+      await closeCorrective(
+        correctiveModal.corrective.id,
+        new Date().toISOString(),
+        resolutionNotes || undefined,
+        user.id,
+      );
+      // Re-check if there are other open correctives for the same schedule
+      const remaining = openCorrectives.filter(
+        c => c.schedule_id === correctiveModal.corrective.schedule_id && c.id !== correctiveModal.corrective.id
+      );
+      if (remaining.length === 0) {
+        // Set status back to operando
+        await (supabase as any)
+          .from("daily_schedules")
+          .update({ status: "operando" })
+          .eq("id", correctiveModal.corrective.schedule_id);
       }
+      setCorrectiveModal({ open: false, mode: "open", schedule: null, corrective: null });
+      setResolutionNotes("");
+      await loadData();
+    } catch (e: any) {
+      alert("Erro: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
-      const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
-      const isBroken = stops.some(l => !l.stop_end);
+  async function handleStatusChange(schedule: any, newStatus: string) {
+    await (supabase as any).from("daily_schedules").update({ status: newStatus }).eq("id", schedule.id);
+    await loadData();
+  }
 
-      typeMap[eqType].total++;
-      if (isBroken) {
-        typeMap[eqType].naoAtendidos++;
-      } else {
-        typeMap[eqType].atendidos++;
-      }
-      typeMap[eqType].items.push({ schedule: s, isBroken, stops });
-    });
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
 
-    return Object.keys(typeMap).map(type => ({
-      type,
-      ...typeMap[type]
-    }));
-  }, [drillDownContract, filteredScheds, equipment, correctiveLogs]);
-
-  const distinctLocals = useMemo(() => {
-    const list = new Set<string>();
-    usinaSchedules.forEach(s => {
-      if (s.local) list.add(s.local);
-    });
-    return Array.from(list);
-  }, [usinaSchedules]);
+  if (!user) return null;
 
   return (
-    <div className="space-y-6">
-
-
-
-
-      {/* Main Tab Panels */}
-      <Tabs defaultValue="atendimento" value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="flex justify-between items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200">
-          <TabsList className="bg-transparent border-none gap-1">
-            <TabsTrigger value="atendimento" className="font-bold text-xs uppercase px-6 h-10 rounded-lg">Gestão de Atendimento</TabsTrigger>
-            <TabsTrigger value="ccm" className="font-bold text-xs uppercase px-6 h-10 rounded-lg flex items-center gap-1.5">
-              CCM Oficina
-              {dPlus1Unavailable.length > 0 && (
-                <span className="h-2 w-2 bg-red-500 rounded-full animate-ping" />
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-
+    <AppLayout>
+      <div className="space-y-6">
+        {/* Page header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-black uppercase tracking-tight text-foreground">
+              CCO Dashboard
+            </h1>
+            <p className="text-muted-foreground text-sm font-medium capitalize">
+              {new Date(selectedDate + "T12:00:00").toLocaleDateString("pt-BR", {
+                weekday: "long", day: "2-digit", month: "long", year: "numeric"
+              })}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="px-3 py-2 text-sm font-medium rounded-lg border border-border bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <button
+              onClick={loadData}
+              className="p-2 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              <RefreshCw className={cn("w-4 h-4", dataLoading && "animate-spin")} />
+            </button>
+          </div>
         </div>
 
-        {/* Tab 0: Gestão de Atendimento Diário */}
-        <TabsContent value="atendimento" className="mt-6 space-y-6">
-          <div className="bg-teal-700 text-white p-3 rounded-xl flex flex-col md:flex-row items-center justify-between gap-3 shadow">
-            <div className="flex items-center gap-2">
-              <Activity className="h-5 w-5 animate-pulse text-teal-300" />
-              <Button 
-                onClick={() => setScheduleOpen(true)}
-                className="bg-teal-800 hover:bg-teal-900 border border-teal-650 text-white font-black uppercase text-[10px] tracking-wider h-8 rounded-lg"
-              >
-                <Calendar className="h-4 w-4 mr-1.5" />
-                Agendar Parada
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs font-bold">
-                <span>Contrato:</span>
-                <select 
-                  value={contractFilter}
-                  onChange={e => setContractFilter(e.target.value)}
-                  className="bg-teal-800 text-white border border-teal-600 rounded px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-400 font-bold"
-                >
-                  <option value="Todos">Todos</option>
-                  <option value="Usina">Usina</option>
-                  <option value="Porto">Porto</option>
-                </select>
-              </div>
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          <KPICard label="Total" value={kpis.total} icon={Truck} color="slate" />
+          <KPICard label="Operando" value={kpis.operating} icon={Activity} color="emerald" />
+          <KPICard label="Agendado" value={kpis.scheduled} icon={Clock} color="blue" />
+          <KPICard label="Em Corretiva" value={kpis.inCorrective} icon={Wrench} color="red" pulse={kpis.inCorrective > 0} />
+          <KPICard label="Finalizado" value={kpis.finished} icon={CheckCircle2} color="teal" />
+          <KPICard
+            label="Horas Perdidas"
+            value={`${Math.floor(kpis.totalMinutesLost / 60)}h ${kpis.totalMinutesLost % 60}m`}
+            icon={TrendingDown}
+            color="amber"
+            valueSmall
+          />
+          <KPICard label="Paradas Abertas" value={kpis.openCount} icon={AlertTriangle} color="orange" pulse={kpis.openCount > 0} />
+        </div>
 
-              <div className="flex items-center gap-1.5 text-xs font-bold">
-                <span>Local:</span>
-                <select 
-                  value={localFilter}
-                  onChange={e => setLocalFilter(e.target.value)}
-                  className="bg-teal-800 text-white border border-teal-600 rounded px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-400 font-bold"
-                >
-                  <option value="Todos">Todos</option>
-                  {distinctLocals.map(l => (
-                    <option key={l} value={l}>{l}</option>
-                  ))}
-                </select>
-              </div>
-
-              <input 
-                type="date" 
-                value={selectedDate} 
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const today = format(new Date(), "yyyy-MM-dd");
-                  if (val > today) {
-                    setSelectedDate(today);
-                    toast.warning("Não é permitido selecionar uma data futura.");
-                  } else {
-                    setSelectedDate(val);
-                  }
-                }} 
-                max={format(new Date(), "yyyy-MM-dd")}
-                className="bg-teal-800 text-white border border-teal-600 rounded px-2.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-400 font-bold font-mono h-8 cursor-pointer" 
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            
-            {/* Left Column: Gauge & KPIs & Meta */}
-            <div className="lg:col-span-6 space-y-6">
-              
-                          <Card className="bg-white shadow-sm border border-slate-200">
-                <CardHeader className="bg-slate-50 border-b py-2 flex flex-row items-center justify-between">
-                  <CardTitle className="text-[9px] font-black text-slate-700 uppercase tracking-wider">
-                    Atendimento {selectedDashboardContract ? `— Contrato ${selectedDashboardContract}` : ""}
-                  </CardTitle>
-                  {selectedDashboardContract && (
-                    <Button 
-                      variant="ghost" 
-                      onClick={() => {
-                        setSelectedDashboardContract(null);
-                      }} 
-                      className="h-5 px-1.5 text-[8px] font-black uppercase text-indigo-650 hover:text-indigo-800 p-0"
-                    >
-                      Limpar Filtro [x]
-                    </Button>
-                  )}
-                </CardHeader>
-                <CardContent className="p-3 flex flex-col items-center">
-                  <div className="relative w-full max-w-[130px] h-[65px] mb-2">
-                    <svg viewBox="0 0 100 50" className="w-full h-full">
-                      {/* Gauge Base Ring */}
-                      <path 
-                        d="M 10 50 A 40 40 0 0 1 90 50" 
-                        fill="none" 
-                        stroke="#e2e8f0" 
-                        strokeWidth="12" 
-                        strokeLinecap="round" 
-                      />
-                      {/* Gauge Color Segments */}
-                      <path 
-                        d="M 10 50 A 40 40 0 0 1 90 50" 
-                        fill="none" 
-                        stroke="#ef4444" // Red (0-75%)
-                        strokeWidth="12" 
-                        strokeLinecap="round" 
-                        strokeDasharray="94.2 125.6"
-                      />
-                      <path 
-                        d="M 10 50 A 40 40 0 0 1 90 50" 
-                        fill="none" 
-                        stroke="#f59e0b" // Yellow (75-90%)
-                        strokeWidth="12" 
-                        strokeDasharray="18.8 125.6"
-                        strokeDashoffset="-94.2"
-                      />
-                      <path 
-                        d="M 10 50 A 40 40 0 0 1 90 50" 
-                        fill="none" 
-                        stroke="#10b981" // Green (90-100%)
-                        strokeWidth="12" 
-                        strokeLinecap="round" 
-                        strokeDasharray="12.6 125.6"
-                        strokeDashoffset="-113"
-                      />
-                      
-                      {/* Needle Indicator */}
-                      {(() => {
-                        const angle = (dashboardStats.pct / 100) * 180 - 180;
-                        return (
-                          <g transform={`translate(50,50) rotate(${angle})`}>
-                            <line x1="0" y1="0" x2="-35" y2="0" stroke="#334155" strokeWidth="2.5" strokeLinecap="round" />
-                            <circle cx="0" cy="0" r="4" fill="#334155" />
-                          </g>
-                        );
-                      })()}
-                    </svg>
-                  </div>
-                  <div className="text-xl font-black text-slate-800 tracking-tighter">
-                    [{dashboardStats.pct}.00%]
-                  </div>
-
-                  {/* Meta Status Indicator inside Gauge Card */}
-                  <div className={`mt-2 w-full p-2 rounded-lg text-white text-center flex flex-col items-center justify-center ${stats.pct >= 95 ? "bg-teal-650" : stats.pct >= 85 ? "bg-amber-600" : "bg-red-650"}`}>
-                    <span className="font-black text-[9px] uppercase tracking-wider">
-                      {stats.pct >= 95 ? "✓ Meta Atingida!" : stats.pct >= 85 ? "⚠️ Próximo da Meta" : "🚨 Abaixo da Meta"}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* KPIs stack */}
-              <div className="grid grid-cols-3 gap-2">
-                <Card className="bg-slate-50 border border-slate-200">
-                  <CardContent className="p-2 text-center">
-                    <p className="text-[8.5px] font-black uppercase text-slate-550 tracking-tighter leading-none">Total Programado</p>
-                    <h3 className="text-lg font-black text-slate-850 mt-1">{stats.total}</h3>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-50 border border-slate-200">
-                  <CardContent className="p-2 text-center">
-                    <p className="text-[8.5px] font-black uppercase text-slate-555 tracking-tighter leading-none">Total Atendido</p>
-                    <h3 className="text-lg font-black text-emerald-700 mt-1">{stats.atendidos}</h3>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-slate-50 border border-slate-200">
-                  <CardContent className="p-2 text-center">
-                    <p className="text-[8.5px] font-black uppercase text-slate-555 tracking-tighter leading-none">Não Atendido</p>
-                    <h3 className="text-lg font-black text-rose-700 mt-1">{stats.naoAtendidos}</h3>
-                  </CardContent>
-                </Card>
-              </div>
-            </div>
-
-            {/* Right Column: Company Grid */}
-            <div className="lg:col-span-6 space-y-4">
-              <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-                <div className="bg-slate-50 border-b p-3">
-                  <h3 className="font-black text-slate-800 text-xs uppercase tracking-wider">Performance por Contrato (Clique para detalhar)</h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader className="bg-slate-100/50">
-                      <TableRow className="text-[9px] uppercase font-black text-slate-600">
-                        <TableHead>Contrato</TableHead>
-                        <TableHead className="text-center">%</TableHead>
-                        <TableHead className="text-center">Total</TableHead>
-                        <TableHead className="text-center">Não Atend.</TableHead>
-                        <TableHead className="text-center">Atend.</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody className="text-xs font-bold text-slate-800">
-                      {contractStats.map((comp, idx) => {
-                        const isRowActive = selectedDashboardContract === comp.name;
-                        return (
-                          <TableRow 
-                            key={idx} 
-                            className={`hover:bg-slate-50 transition-colors ${isRowActive ? "bg-teal-50/30 border-l-4 border-l-teal-600" : ""}`}
-                          >
-                            <TableCell className="font-black text-slate-900 py-3 uppercase">
-                              <div className="flex flex-col gap-1.5">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="h-2 w-2 rounded-full bg-teal-500" />
-                                  <span>{comp.name}</span>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (selectedDashboardContract === comp.name) {
-                                        setSelectedDashboardContract(null);
-                                      } else {
-                                        setSelectedDashboardContract(comp.name);
-                                      }
-                                    }}
-                                    className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase border transition-all ${
-                                      selectedDashboardContract === comp.name 
-                                        ? "bg-teal-600 text-white border-teal-600" 
-                                        : "bg-slate-50 text-slate-650 border-slate-200 hover:bg-slate-100"
-                                    }`}
-                                  >
-                                    Filtrar
-                                  </button>
-                                  <button 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setDrillDownContract(comp.name);
-                                    }}
-                                    className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase border bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 transition-all ml-auto"
-                                  >
-                                    Tipos
-                                  </button>
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-center py-3">
-                              <span className={`px-2 py-0.5 rounded font-black ${comp.pct >= 95 ? "bg-emerald-100 text-emerald-700" : comp.pct >= 85 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700"}`}>
-                                {comp.pct}%
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-center py-3">{comp.total}</TableCell>
-                            <TableCell className="text-center py-3 text-rose-600">{comp.naoAtendidos}</TableCell>
-                            <TableCell className="text-center py-3 text-emerald-600">{comp.atendidos}</TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          {/* Bottom Table: Detalhamento dos Não Atendimentos */}
-          <div className="bg-white border rounded-xl shadow-sm overflow-hidden mt-6">
-            <div className="bg-slate-50 border-b border-slate-200 p-3">
-              <h3 className="font-black text-slate-700 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                Histórico e Detalhamento de Corretivas
+        {/* Open correctives alert */}
+        {openCorrectives.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <h3 className="font-black text-red-700 text-sm uppercase tracking-widest">
+                {openCorrectives.length} Corretiva{openCorrectives.length > 1 ? "s" : ""} em Andamento
               </h3>
             </div>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-slate-50">
-                  <TableRow className="text-[9px] uppercase font-black text-slate-600">
-                    <TableHead>OS</TableHead>
-                    <TableHead>Contrato</TableHead>
-                    <TableHead>Equipamento</TableHead>
-                    <TableHead>Situação</TableHead>
-                    <TableHead>Local</TableHead>
-                    <TableHead>Observação</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody className="text-xs font-bold text-slate-800">
-                  {stats.correctiveHistoryList.map((s, idx) => {
-                    const stops = correctiveLogs.filter(l => l.schedule_id === s.id);
-                    const activeStop = stops.find(l => !l.stop_end);
-                    const isBroken = !!activeStop;
-                    const contractKey = getScheduleContract(s);
-                    const displayReason = activeStop?.reason || stops[0]?.reason || "Parada mecânica sem justificativa";
-                    
-                    return (
-                      <TableRow 
-                        key={idx} 
-                        className={isBroken 
-                          ? "bg-rose-50/30 hover:bg-rose-50/50 border-l-4 border-l-rose-500" 
-                          : "hover:bg-slate-50/60 border-l-4 border-l-slate-200 opacity-80"
-                        }
-                      >
-                        <TableCell className="font-mono text-slate-600">{s.os_number || "—"}</TableCell>
-                        <TableCell className="uppercase">{contractKey}</TableCell>
-                        <TableCell className="font-mono text-slate-700">
-                          {s.equipment} {s.plate ? `(${s.plate})` : ""}
-                        </TableCell>
-                        <TableCell className="text-[10px] font-black uppercase">
-                          {isBroken ? (
-                            <span className="text-rose-600">⚠️ Em Corretiva</span>
-                          ) : (
-                            <span className="text-emerald-600">✓ Resolvido</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="uppercase text-slate-500">{s.local || "—"}</TableCell>
-                        <TableCell className="italic text-slate-400 font-medium max-w-[200px] truncate" title={displayReason}>
-                          {displayReason}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {stats.correctiveHistoryList.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-emerald-600 italic font-black uppercase text-[10px]">
-                        ✓ 100% de Atendimento. Nenhuma pendência registrada hoje!
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        </TabsContent>
-
-
-
-        {/* Tab 3: CCM Oficina (D+1 Focus) */}
-        <TabsContent value="ccm" className="mt-6 space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Left 2 Columns: D+1 Alerta de Indisponibilidade Planejada */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="bg-red-50 border-red-200 border-2 rounded-xl p-4">
-                <h2 className="text-sm font-black uppercase text-red-700 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-red-600 animate-bounce" />
-                  CCM Planejamento D+1 (Indisponíveis para amanhã {dateDPlus1.split('-').reverse().slice(0,2).join('/')})
-                </h2>
-                <p className="text-xs text-red-600 mt-1">Lista de equipamentos que possuem preventiva agendada, lavagem programada, ou aperto de mola programados para amanhã.</p>
-              </div>
-
-              <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
-                <div className="divide-y divide-slate-100">
-                  {dPlus1Unavailable.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 italic font-bold">Nenhum equipamento agendado ou em oficina para amanhã.</div>
-                  ) : (
-                    dPlus1Unavailable.map(eq => {
-                      const tomorrowProg = programming.find(p => p.equipment_id === eq.id && p.scheduled_date === dateDPlus1);
-                      const isNowInOficina = eq.status === "manutencao" || eq.status === "indisponivel";
-                      return (
-                        <div key={eq.id} className="p-4 flex justify-between items-center hover:bg-red-50/10">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-black text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-xs">{eq.identifier}</span>
-                              <span className="text-xs font-bold text-slate-600 uppercase">{eq.type}</span>
-                            </div>
-                            <div className="mt-1.5 flex items-center gap-3">
-                              {tomorrowProg && (
-                                <span className="text-[10px] font-black text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100 uppercase">
-                                  {tomorrowProg.stop_type}: {tomorrowProg.notes || "Parada programada"}
-                                </span>
-                              )}
-                              {isNowInOficina && (
-                                <span className="text-[10px] font-black text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100 uppercase">
-                                  Ativo na Oficina: {eq.maintenance_problem || "Ajustes mecânicos"}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          {eq.maintenance_expected_return && (
-                            <span className="text-[10px] font-mono text-slate-500 bg-slate-50 border p-1 rounded">
-                              Previsão: {format(new Date(eq.maintenance_expected_return), "dd/MM HH:mm")}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
+            <div className="space-y-2">
+              {openCorrectives.map(c => (
+                <div key={c.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-red-100">
+                  <div className="flex items-center gap-2">
+                    <Wrench className="w-3.5 h-3.5 text-red-500" />
+                    <div>
+                      <span className="font-black text-sm text-red-800">
+                        {c.daily_schedules?.equipment_identifier || c.equipment_identifier}
+                      </span>
+                      {c.daily_schedules?.plate && (
+                        <span className="text-red-500 text-xs font-mono ml-2">{c.daily_schedules.plate}</span>
+                      )}
+                      <span className="text-red-600 text-xs font-medium ml-2">
+                        — {PROBLEM_TYPES.find(p => p.value === c.problem_type)?.label}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-red-500 text-xs font-mono">
+                      {formatDistanceToNow(new Date(c.start_time), { locale: ptBR, addSuffix: false })} parado
+                    </span>
+                    <button
+                      onClick={() => setCorrectiveModal({ open: true, mode: "close", schedule: null, corrective: c })}
+                      className="px-2 py-1 text-xs font-bold bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors"
+                    >
+                      Liberar
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
-
-            {/* Right Column: Oficina em tempo real */}
-            <div className="space-y-4">
-              <div className="bg-slate-900 text-white rounded-xl p-4">
-                <h3 className="text-xs font-black uppercase tracking-wider flex items-center gap-2">
-                  <Wrench className="h-4 w-4 text-orange-500" />
-                  Status Oficina Atual
-                </h3>
-                <p className="text-[10px] text-slate-400 mt-1">Intervenções mecânicas em andamento nas últimas horas.</p>
-              </div>
-
-              <div className="space-y-2">
-                {equipment.filter(eq => eq.status === "manutencao" || eq.status === "indisponivel").map(eq => (
-                  <Card key={eq.id} className="border-2 border-orange-100">
-                    <CardContent className="p-3 space-y-1.5">
-                      <div className="flex justify-between items-start">
-                        <span className="font-mono font-black text-sm text-slate-800">{eq.identifier}</span>
-                        <span className="text-[8px] bg-orange-100 text-orange-700 font-black uppercase px-2 py-0.5 rounded-full">Oficina</span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 italic font-medium">"{eq.maintenance_problem || "Sem detalhes da avaria"}"</p>
-                    </CardContent>
-                  </Card>
-                ))}
-                {equipment.filter(eq => eq.status === "manutencao" || eq.status === "indisponivel").length === 0 && (
-                  <div className="text-center p-6 text-xs text-slate-400 italic font-bold">Oficina vazia no momento.</div>
-                )}
-              </div>
-            </div>
-
           </div>
-        </TabsContent>
-      </Tabs>
+        )}
 
-      {/* Contract Equipment Type Drill-down Dialog */}
-      <Dialog open={!!drillDownContract} onOpenChange={() => setDrillDownContract(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-black uppercase text-slate-800 flex items-center gap-2">
-              <Truck className="h-5 w-5 text-teal-600" />
-              Detalhamento de Equipamentos — Contrato {drillDownContract}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="border rounded-xl overflow-hidden">
-              <Table>
-                <TableHeader className="bg-slate-50">
-                  <TableRow className="text-[10px] uppercase font-black text-slate-600">
-                    <TableHead>Tipo de Equipamento</TableHead>
-                    <TableHead className="text-center">Total Escala</TableHead>
-                    <TableHead className="text-center text-emerald-600">Atendidos</TableHead>
-                    <TableHead className="text-center text-rose-600">Não Atendidos</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody className="text-xs font-bold text-slate-800">
-                  {drillDownData?.map((d, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell className="uppercase">{d.type}</TableCell>
-                      <TableCell className="text-center">{d.total}</TableCell>
-                      <TableCell className="text-center text-emerald-600 font-black">{d.atendidos}</TableCell>
-                      <TableCell className="text-center text-rose-600 font-black">{d.naoAtendidos}</TableCell>
-                    </TableRow>
-                  ))}
-                  {(!drillDownData || drillDownData.length === 0) && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center py-6 text-slate-400 italic">
-                        Nenhum equipamento alocado hoje.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+        {/* Filters */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <Filter className="w-3.5 h-3.5 text-muted-foreground" />
+          <FilterPill label="Todos" active={contractFilter === "all"} onClick={() => setContractFilter("all")} />
+          <FilterPill label="Habitual" active={contractFilter === "Habitual"} onClick={() => setContractFilter("Habitual")} />
+          <FilterPill label="Eventual" active={contractFilter === "Eventual"} onClick={() => setContractFilter("Eventual")} />
+          <div className="w-px h-4 bg-border mx-1" />
+          <FilterPill label="Dia" active={shiftFilter === "Dia"} onClick={() => setShiftFilter(shiftFilter === "Dia" ? "all" : "Dia")} />
+          <FilterPill label="Noite" active={shiftFilter === "Noite"} onClick={() => setShiftFilter(shiftFilter === "Noite" ? "all" : "Noite")} />
+          <div className="w-px h-4 bg-border mx-1" />
+          <FilterPill label="Operando" active={statusFilter === "operando"} onClick={() => setStatusFilter(statusFilter === "operando" ? "all" : "operando")} color="emerald" />
+          <FilterPill label="Corretiva" active={statusFilter === "corretiva"} onClick={() => setStatusFilter(statusFilter === "corretiva" ? "all" : "corretiva")} color="red" />
+          <FilterPill label="Agendado" active={statusFilter === "agendado"} onClick={() => setStatusFilter(statusFilter === "agendado" ? "all" : "agendado")} color="blue" />
+        </div>
+
+        {/* Schedule table */}
+        {dataLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+          </div>
+        ) : filteredSchedules.length === 0 ? (
+          <div className="text-center py-20 text-muted-foreground">
+            <Truck className="w-12 h-12 mx-auto mb-3 opacity-20" />
+            <p className="font-bold text-sm">Nenhuma programação encontrada</p>
+            <p className="text-xs mt-1">Importe o Excel do dia na aba Programação</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {Array.from(groupedSchedules.entries()).map(([group, rows]) => (
+              <ScheduleGroup
+                key={group}
+                label={group}
+                rows={rows}
+                correctives={correctives}
+                onOpenCorrective={s => {
+                  setCorrectiveModal({ open: true, mode: "open", schedule: s, corrective: null });
+                  setProblemType("mecanico");
+                  setProblemDesc("");
+                }}
+                onStatusChange={handleStatusChange}
+                onCloseCorrective={corrective => {
+                  setCorrectiveModal({ open: true, mode: "close", schedule: null, corrective });
+                  setResolutionNotes("");
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Corrective Modal */}
+      {correctiveModal.open && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6">
+              {correctiveModal.mode === "open" ? (
+                <>
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+                      <Wrench className="w-5 h-5 text-red-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-foreground">Registrar Corretiva</h3>
+                      <p className="text-sm text-muted-foreground font-medium">
+                        {correctiveModal.schedule?.equipment_identifier} · {correctiveModal.schedule?.plate}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">
+                        Tipo do Problema
+                      </label>
+                      <select
+                        value={problemType}
+                        onChange={e => setProblemType(e.target.value)}
+                        className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      >
+                        {PROBLEM_TYPES.map(p => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">
+                        Descrição (opcional)
+                      </label>
+                      <textarea
+                        value={problemDesc}
+                        onChange={e => setProblemDesc(e.target.value)}
+                        rows={3}
+                        placeholder="Descreva o problema..."
+                        className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-6">
+                    <button
+                      onClick={() => setCorrectiveModal({ open: false, mode: "open", schedule: null, corrective: null })}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-border text-sm font-bold hover:bg-accent transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      id="btn-open-corrective"
+                      onClick={handleOpenCorrective}
+                      disabled={saving}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700 disabled:opacity-60 transition-colors"
+                    >
+                      {saving ? "Salvando..." : "Registrar Parada"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-foreground">Registrar Retorno</h3>
+                      <p className="text-sm text-muted-foreground font-medium">
+                        {correctiveModal.corrective?.daily_schedules?.equipment_identifier || correctiveModal.corrective?.equipment_identifier}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="bg-muted/50 rounded-xl p-3 mb-4">
+                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Tempo parado</p>
+                    <p className="text-2xl font-black text-foreground mt-1">
+                      {formatDuration(differenceInMinutes(new Date(), new Date(correctiveModal.corrective?.start_time)))}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-1.5">
+                      Observações de Resolução (opcional)
+                    </label>
+                    <textarea
+                      value={resolutionNotes}
+                      onChange={e => setResolutionNotes(e.target.value)}
+                      rows={3}
+                      placeholder="O que foi feito para resolver..."
+                      className="w-full px-3 py-2.5 rounded-xl border border-border bg-background text-foreground text-sm font-medium resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                  <div className="flex gap-2 mt-6">
+                    <button
+                      onClick={() => setCorrectiveModal({ open: false, mode: "open", schedule: null, corrective: null })}
+                      className="flex-1 px-4 py-2.5 rounded-xl border border-border text-sm font-bold hover:bg-accent transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      id="btn-close-corrective"
+                      onClick={handleCloseCorrective}
+                      disabled={saving}
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-60 transition-colors"
+                    >
+                      {saving ? "Salvando..." : "Registrar Retorno"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
-            
-            {drillDownData && drillDownData.length > 0 && (
-              <div className="space-y-2 mt-4">
-                <p className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Lista detalhada de equipamentos:</p>
-                <div className="max-h-72 overflow-y-auto border rounded-xl divide-y divide-slate-100">
-                  {drillDownData.flatMap(d => d.items).map((item, idx) => {
-                    const fmtTime = (iso: string | null | undefined) => {
-                      if (!iso) return null;
-                      try { return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }); }
-                      catch { return null; }
-                    };
-                    // Show plate only if different from equipment name
-                    const showPlate = item.schedule.plate && item.schedule.plate !== item.schedule.equipment;
-                    return (
-                      <div key={idx} className={`px-3 py-2 space-y-1 ${item.isBroken ? "bg-rose-50/30" : ""}`}>
-                        {/* Equipment row */}
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono bg-slate-100 border px-1.5 py-0.5 rounded text-[11px] text-slate-700 font-black">
-                              {item.schedule.equipment || "—"}
-                            </span>
-                            {showPlate && (
-                              <span className="font-mono text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded text-[10px]">
-                                {item.schedule.plate}
-                              </span>
-                            )}
-                            {item.schedule.local && (
-                              <span className="text-slate-400 text-[9px] uppercase font-semibold">{item.schedule.local}</span>
-                            )}
-                          </div>
-                          <div>
-                            {item.isBroken ? (
-                              <Badge className="bg-red-100 text-red-700 border border-red-200 text-[9px] font-black uppercase">⚠️ Em Corretiva</Badge>
-                            ) : (
-                              <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200 text-[9px] font-black uppercase">✓ Operacional</Badge>
-                            )}
-                          </div>
-                        </div>
-                        {/* Stop times */}
-                        {item.stops?.length > 0 && (
-                          <div className="pl-1 space-y-0.5">
-                            {item.stops.map((stop: any, si: number) => {
-                              const inicio = fmtTime(stop.stop_start);
-                              const fim = fmtTime(stop.stop_end);
-                              const isActive = !stop.stop_end;
-                              return (
-                                <div key={si} className="flex items-center gap-2 text-[9px] font-bold">
-                                  <span className="text-slate-400">Parada {si + 1}:</span>
-                                  <span className="text-slate-600 font-mono">{inicio || "—"}</span>
-                                  <span className="text-slate-300">→</span>
-                                  {isActive ? (
-                                    <span className="text-rose-600 font-black uppercase tracking-wide animate-pulse">Em aberto</span>
-                                  ) : (
-                                    <span className="text-slate-600 font-mono">{fim}</span>
-                                  )}
-                                  {stop.reason && (
-                                    <span className="text-slate-400 italic truncate max-w-[180px]" title={stop.reason}>— {stop.reason}</span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
+          </div>
+        </div>
+      )}
+    </AppLayout>
+  );
+}
+
+function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}min` : `${m}min`;
+}
+
+function KPICard({ label, value, icon: Icon, color, pulse, valueSmall }: {
+  label: string; value: string | number; icon: any; color: string; pulse?: boolean; valueSmall?: boolean;
+}) {
+  const colorMap: Record<string, string> = {
+    slate: "bg-slate-50 text-slate-600 border-slate-200",
+    emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    blue: "bg-blue-50 text-blue-700 border-blue-200",
+    red: "bg-red-50 text-red-700 border-red-200",
+    teal: "bg-teal-50 text-teal-700 border-teal-200",
+    amber: "bg-amber-50 text-amber-700 border-amber-200",
+    orange: "bg-orange-50 text-orange-700 border-orange-200",
+  };
+  return (
+    <div className={cn("rounded-xl border p-3 relative overflow-hidden", colorMap[color] || colorMap.slate)}>
+      {pulse && (
+        <span className="absolute top-2 right-2 flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-current" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-current" />
+        </span>
+      )}
+      <Icon className="w-4 h-4 opacity-60 mb-1.5" />
+      <p className={cn("font-black leading-none", valueSmall ? "text-lg" : "text-2xl")}>{value}</p>
+      <p className="text-[9px] font-bold uppercase tracking-widest opacity-70 mt-1">{label}</p>
+    </div>
+  );
+}
+
+function FilterPill({ label, active, onClick, color }: {
+  label: string; active: boolean; onClick: () => void; color?: string;
+}) {
+  const colorActive: Record<string, string> = {
+    emerald: "bg-emerald-600 text-white border-emerald-600",
+    red: "bg-red-600 text-white border-red-600",
+    blue: "bg-blue-600 text-white border-blue-600",
+  };
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "px-3 py-1 rounded-full text-xs font-bold border transition-all",
+        active
+          ? (color ? colorActive[color] : "bg-primary text-primary-foreground border-primary")
+          : "bg-card border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ScheduleGroup({ label, rows, correctives, onOpenCorrective, onStatusChange, onCloseCorrective }: {
+  label: string;
+  rows: any[];
+  correctives: any[];
+  onOpenCorrective: (s: any) => void;
+  onStatusChange: (s: any, status: string) => void;
+  onCloseCorrective: (c: any) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const inCorrective = rows.filter(r => r.status === "corretiva").length;
+  const operating = rows.filter(r => r.status === "operando").length;
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+      {/* Group header */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors border-b border-border"
+      >
+        <div className="flex items-center gap-3">
+          {inCorrective > 0 && (
+            <span className="flex h-2.5 w-2.5 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+            </span>
+          )}
+          <span className="font-black text-xs uppercase tracking-widest text-foreground">{label}</span>
+          <span className="text-[10px] text-muted-foreground font-medium">{rows.length} equip.</span>
+          {operating > 0 && (
+            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 text-[9px] font-black uppercase">{operating} op.</span>
+          )}
+          {inCorrective > 0 && (
+            <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[9px] font-black uppercase animate-pulse">{inCorrective} corr.</span>
+          )}
+        </div>
+        {collapsed ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronUp className="w-4 h-4 text-muted-foreground" />}
+      </button>
+
+      {!collapsed && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left min-w-[800px]">
+            <thead>
+              <tr className="border-b border-border text-[9px] font-black text-muted-foreground uppercase tracking-widest bg-muted/10">
+                <th className="px-4 py-2">Status</th>
+                <th className="px-4 py-2">Equipamento</th>
+                <th className="px-4 py-2">Placa</th>
+                <th className="px-4 py-2">Operador</th>
+                <th className="px-4 py-2">Turno / Horário</th>
+                <th className="px-4 py-2">Local</th>
+                <th className="px-4 py-2">Paradas Hoje</th>
+                <th className="px-4 py-2">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map(row => {
+                const rowCorrectives = correctives.filter(c => c.schedule_id === row.id);
+                const openCorr = rowCorrectives.find(c => !c.resolved);
+                const totalMinsLost = rowCorrectives
+                  .filter(c => c.minutes_lost)
+                  .reduce((a, c) => a + (c.minutes_lost || 0), 0);
+                const cfg = STATUS_CONFIG[row.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.agendado;
+
+                return (
+                  <tr key={row.id} className={cn(
+                    "hover:bg-muted/20 transition-colors",
+                    row.status === "corretiva" && "bg-red-50/50"
+                  )}>
+                    <td className="px-4 py-3">
+                      <span className={cn("inline-flex items-center gap-1.5 px-2 py-1 rounded-full border text-[9px] font-black uppercase", cfg.color)}>
+                        <span className={cn("w-1.5 h-1.5 rounded-full", cfg.dot, row.status === "corretiva" && "animate-pulse")} />
+                        {cfg.label}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="font-black text-sm text-foreground">{row.equipment_identifier}</p>
+                      {row.model && <p className="text-[10px] text-muted-foreground font-medium">{row.model}</p>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-mono font-bold text-xs text-foreground">{row.plate || "—"}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-sm font-medium text-foreground">{row.operator_name || "—"}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs font-bold text-foreground">{row.turno}</p>
+                      {row.schedule_start && row.schedule_end && (
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          {row.schedule_start?.slice(0, 5)} — {row.schedule_end?.slice(0, 5)}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-xs font-medium text-muted-foreground max-w-[180px] truncate" title={row.location || ""}>
+                        {row.location || "—"}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-foreground">{rowCorrectives.length}x</span>
+                        {totalMinsLost > 0 && (
+                          <span className="text-[10px] text-amber-600 font-bold">
+                            {Math.floor(totalMinsLost / 60)}h{totalMinsLost % 60}m perdidos
+                          </span>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setDrillDownContract(null)} className="font-bold">Fechar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog for Agendar Parada */}
-      <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-black uppercase flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-teal-600" />
-              Agendar Parada
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-3">
-            <div className="flex flex-col space-y-2">
-              <Label className="text-[10px] font-black uppercase">Equipamento</Label>
-              <Select value={schedEqId} onValueChange={setSchedEqId}>
-                <SelectTrigger className="h-10 font-bold">
-                  <SelectValue placeholder="Selecione o equipamento..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {equipment.map((eq) => (
-                    <SelectItem key={eq.id} value={eq.id}>
-                      {eq.identifier} ({eq.type || "—"})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label className="text-[10px] font-black uppercase">Data da Parada</Label>
-                <Input type="date" value={schedDate} onChange={(e) => setSchedDate(e.target.value)} className="h-10 font-bold" />
-              </div>
-              <div className="space-y-2">
-                <Label className="text-[10px] font-black uppercase">Tipo de Parada</Label>
-                <Select value={schedStopType} onValueChange={setSchedStopType}>
-                  <SelectTrigger className="h-10 font-bold"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["Manutenção Geral", "MEV", "Lavador", "Mola", "Borracharia", "Preventiva", "Elétrica", "Motor", "Solda"].map(t => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase">Observações / Notas</Label>
-              <textarea 
-                value={schedNotes} 
-                onChange={(e) => setSchedNotes(e.target.value)} 
-                placeholder="Motivo do agendamento..." 
-                className="flex min-h-[80px] w-full rounded-md border border-slate-200 bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-            </div>
-            <Button 
-              onClick={handleConfirmSchedule} 
-              className="w-full h-12 font-black uppercase bg-teal-700 hover:bg-teal-600 text-white"
-            >
-              CONFIRMAR AGENDAMENTO
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        {/* Quick status changes */}
+                        {row.status === "agendado" && (
+                          <button
+                            onClick={() => onStatusChange(row, "operando")}
+                            className="px-2 py-1 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-md hover:bg-emerald-200 transition-colors"
+                            title="Marcar como operando"
+                          >
+                            <Play className="w-3 h-3" />
+                          </button>
+                        )}
+                        {row.status === "operando" && (
+                          <>
+                            <button
+                              onClick={() => onOpenCorrective(row)}
+                              className="px-2 py-1 text-[10px] font-bold bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
+                              title="Registrar corretiva"
+                            >
+                              <Wrench className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={() => onStatusChange(row, "finalizado")}
+                              className="px-2 py-1 text-[10px] font-bold bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors"
+                              title="Finalizar"
+                            >
+                              <Square className="w-3 h-3" />
+                            </button>
+                          </>
+                        )}
+                        {row.status === "corretiva" && openCorr && (
+                          <button
+                            onClick={() => onCloseCorrective(openCorr)}
+                            className="px-2 py-1 text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-md hover:bg-emerald-200 transition-colors flex items-center gap-1"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Liberar</span>
+                          </button>
+                        )}
+                        {row.status === "agendado" && (
+                          <button
+                            onClick={() => onOpenCorrective(row)}
+                            className="px-2 py-1 text-[10px] font-bold bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
+                            title="Registrar corretiva diretamente"
+                          >
+                            <Wrench className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

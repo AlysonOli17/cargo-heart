@@ -9,57 +9,27 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as UsinaOperacaoRouteImport } from './routes/usina-operacao'
-import { Route as PortoOperacaoRouteImport } from './routes/porto-operacao'
-import { Route as PessoasRouteImport } from './routes/pessoas'
-import { Route as OperacaoRouteImport } from './routes/operacao'
-import { Route as ManutencaoRouteImport } from './routes/manutencao'
-import { Route as HistoricoRouteImport } from './routes/historico'
-import { Route as FidelizacaoRouteImport } from './routes/fidelizacao'
-import { Route as EquipamentosRouteImport } from './routes/equipamentos'
+import { Route as RelatoriosRouteImport } from './routes/relatorios'
+import { Route as ProgramacaoRouteImport } from './routes/programacao'
+import { Route as CorretivasRouteImport } from './routes/corretivas'
 import { Route as CcoRouteImport } from './routes/cco'
+import { Route as CadastrosRouteImport } from './routes/cadastros'
 import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AcessoRouteImport } from './routes/acesso'
 import { Route as IndexRouteImport } from './routes/index'
 
-const UsinaOperacaoRoute = UsinaOperacaoRouteImport.update({
-  id: '/usina-operacao',
-  path: '/usina-operacao',
+const RelatoriosRoute = RelatoriosRouteImport.update({
+  id: '/relatorios',
+  path: '/relatorios',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PortoOperacaoRoute = PortoOperacaoRouteImport.update({
-  id: '/porto-operacao',
-  path: '/porto-operacao',
+const ProgramacaoRoute = ProgramacaoRouteImport.update({
+  id: '/programacao',
+  path: '/programacao',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PessoasRoute = PessoasRouteImport.update({
-  id: '/pessoas',
-  path: '/pessoas',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OperacaoRoute = OperacaoRouteImport.update({
-  id: '/operacao',
-  path: '/operacao',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ManutencaoRoute = ManutencaoRouteImport.update({
-  id: '/manutencao',
-  path: '/manutencao',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HistoricoRoute = HistoricoRouteImport.update({
-  id: '/historico',
-  path: '/historico',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FidelizacaoRoute = FidelizacaoRouteImport.update({
-  id: '/fidelizacao',
-  path: '/fidelizacao',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const EquipamentosRoute = EquipamentosRouteImport.update({
-  id: '/equipamentos',
-  path: '/equipamentos',
+const CorretivasRoute = CorretivasRouteImport.update({
+  id: '/corretivas',
+  path: '/corretivas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CcoRoute = CcoRouteImport.update({
@@ -67,14 +37,14 @@ const CcoRoute = CcoRouteImport.update({
   path: '/cco',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CadastrosRoute = CadastrosRouteImport.update({
+  id: '/cadastros',
+  path: '/cadastros',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AcessoRoute = AcessoRouteImport.update({
-  id: '/acesso',
-  path: '/acesso',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -85,163 +55,93 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
+  '/cadastros': typeof CadastrosRoute
   '/cco': typeof CcoRoute
-  '/equipamentos': typeof EquipamentosRoute
-  '/fidelizacao': typeof FidelizacaoRoute
-  '/historico': typeof HistoricoRoute
-  '/manutencao': typeof ManutencaoRoute
-  '/operacao': typeof OperacaoRoute
-  '/pessoas': typeof PessoasRoute
-  '/porto-operacao': typeof PortoOperacaoRoute
-  '/usina-operacao': typeof UsinaOperacaoRoute
+  '/corretivas': typeof CorretivasRoute
+  '/programacao': typeof ProgramacaoRoute
+  '/relatorios': typeof RelatoriosRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
+  '/cadastros': typeof CadastrosRoute
   '/cco': typeof CcoRoute
-  '/equipamentos': typeof EquipamentosRoute
-  '/fidelizacao': typeof FidelizacaoRoute
-  '/historico': typeof HistoricoRoute
-  '/manutencao': typeof ManutencaoRoute
-  '/operacao': typeof OperacaoRoute
-  '/pessoas': typeof PessoasRoute
-  '/porto-operacao': typeof PortoOperacaoRoute
-  '/usina-operacao': typeof UsinaOperacaoRoute
+  '/corretivas': typeof CorretivasRoute
+  '/programacao': typeof ProgramacaoRoute
+  '/relatorios': typeof RelatoriosRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/acesso': typeof AcessoRoute
   '/auth': typeof AuthRoute
+  '/cadastros': typeof CadastrosRoute
   '/cco': typeof CcoRoute
-  '/equipamentos': typeof EquipamentosRoute
-  '/fidelizacao': typeof FidelizacaoRoute
-  '/historico': typeof HistoricoRoute
-  '/manutencao': typeof ManutencaoRoute
-  '/operacao': typeof OperacaoRoute
-  '/pessoas': typeof PessoasRoute
-  '/porto-operacao': typeof PortoOperacaoRoute
-  '/usina-operacao': typeof UsinaOperacaoRoute
+  '/corretivas': typeof CorretivasRoute
+  '/programacao': typeof ProgramacaoRoute
+  '/relatorios': typeof RelatoriosRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/acesso'
     | '/auth'
+    | '/cadastros'
     | '/cco'
-    | '/equipamentos'
-    | '/fidelizacao'
-    | '/historico'
-    | '/manutencao'
-    | '/operacao'
-    | '/pessoas'
-    | '/porto-operacao'
-    | '/usina-operacao'
+    | '/corretivas'
+    | '/programacao'
+    | '/relatorios'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/acesso'
     | '/auth'
+    | '/cadastros'
     | '/cco'
-    | '/equipamentos'
-    | '/fidelizacao'
-    | '/historico'
-    | '/manutencao'
-    | '/operacao'
-    | '/pessoas'
-    | '/porto-operacao'
-    | '/usina-operacao'
+    | '/corretivas'
+    | '/programacao'
+    | '/relatorios'
   id:
     | '__root__'
     | '/'
-    | '/acesso'
     | '/auth'
+    | '/cadastros'
     | '/cco'
-    | '/equipamentos'
-    | '/fidelizacao'
-    | '/historico'
-    | '/manutencao'
-    | '/operacao'
-    | '/pessoas'
-    | '/porto-operacao'
-    | '/usina-operacao'
+    | '/corretivas'
+    | '/programacao'
+    | '/relatorios'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AcessoRoute: typeof AcessoRoute
   AuthRoute: typeof AuthRoute
+  CadastrosRoute: typeof CadastrosRoute
   CcoRoute: typeof CcoRoute
-  EquipamentosRoute: typeof EquipamentosRoute
-  FidelizacaoRoute: typeof FidelizacaoRoute
-  HistoricoRoute: typeof HistoricoRoute
-  ManutencaoRoute: typeof ManutencaoRoute
-  OperacaoRoute: typeof OperacaoRoute
-  PessoasRoute: typeof PessoasRoute
-  PortoOperacaoRoute: typeof PortoOperacaoRoute
-  UsinaOperacaoRoute: typeof UsinaOperacaoRoute
+  CorretivasRoute: typeof CorretivasRoute
+  ProgramacaoRoute: typeof ProgramacaoRoute
+  RelatoriosRoute: typeof RelatoriosRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/usina-operacao': {
-      id: '/usina-operacao'
-      path: '/usina-operacao'
-      fullPath: '/usina-operacao'
-      preLoaderRoute: typeof UsinaOperacaoRouteImport
+    '/relatorios': {
+      id: '/relatorios'
+      path: '/relatorios'
+      fullPath: '/relatorios'
+      preLoaderRoute: typeof RelatoriosRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/porto-operacao': {
-      id: '/porto-operacao'
-      path: '/porto-operacao'
-      fullPath: '/porto-operacao'
-      preLoaderRoute: typeof PortoOperacaoRouteImport
+    '/programacao': {
+      id: '/programacao'
+      path: '/programacao'
+      fullPath: '/programacao'
+      preLoaderRoute: typeof ProgramacaoRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/pessoas': {
-      id: '/pessoas'
-      path: '/pessoas'
-      fullPath: '/pessoas'
-      preLoaderRoute: typeof PessoasRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/operacao': {
-      id: '/operacao'
-      path: '/operacao'
-      fullPath: '/operacao'
-      preLoaderRoute: typeof OperacaoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/manutencao': {
-      id: '/manutencao'
-      path: '/manutencao'
-      fullPath: '/manutencao'
-      preLoaderRoute: typeof ManutencaoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/historico': {
-      id: '/historico'
-      path: '/historico'
-      fullPath: '/historico'
-      preLoaderRoute: typeof HistoricoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/fidelizacao': {
-      id: '/fidelizacao'
-      path: '/fidelizacao'
-      fullPath: '/fidelizacao'
-      preLoaderRoute: typeof FidelizacaoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/equipamentos': {
-      id: '/equipamentos'
-      path: '/equipamentos'
-      fullPath: '/equipamentos'
-      preLoaderRoute: typeof EquipamentosRouteImport
+    '/corretivas': {
+      id: '/corretivas'
+      path: '/corretivas'
+      fullPath: '/corretivas'
+      preLoaderRoute: typeof CorretivasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cco': {
@@ -251,18 +151,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CcoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cadastros': {
+      id: '/cadastros'
+      path: '/cadastros'
+      fullPath: '/cadastros'
+      preLoaderRoute: typeof CadastrosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/acesso': {
-      id: '/acesso'
-      path: '/acesso'
-      fullPath: '/acesso'
-      preLoaderRoute: typeof AcessoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -277,17 +177,12 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AcessoRoute: AcessoRoute,
   AuthRoute: AuthRoute,
+  CadastrosRoute: CadastrosRoute,
   CcoRoute: CcoRoute,
-  EquipamentosRoute: EquipamentosRoute,
-  FidelizacaoRoute: FidelizacaoRoute,
-  HistoricoRoute: HistoricoRoute,
-  ManutencaoRoute: ManutencaoRoute,
-  OperacaoRoute: OperacaoRoute,
-  PessoasRoute: PessoasRoute,
-  PortoOperacaoRoute: PortoOperacaoRoute,
-  UsinaOperacaoRoute: UsinaOperacaoRoute,
+  CorretivasRoute: CorretivasRoute,
+  ProgramacaoRoute: ProgramacaoRoute,
+  RelatoriosRoute: RelatoriosRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

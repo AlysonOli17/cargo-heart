@@ -1,13 +1,14 @@
-import { Outlet, createRootRoute } from "@tanstack/react-router";
+import { Outlet, createRootRoute, redirect } from "@tanstack/react-router";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
+
+function RootInner() {
+  return <Outlet />;
+}
 
 export const Route = createRootRoute({
-  component: RootComponent,
+  component: () => (
+    <AuthProvider>
+      <RootInner />
+    </AuthProvider>
+  ),
 });
-
-function RootComponent() {
-  return (
-    <>
-      <Outlet />
-    </>
-  );
-}
