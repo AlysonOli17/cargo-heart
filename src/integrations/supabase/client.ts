@@ -9,8 +9,17 @@ if (!supabaseUrl || !supabaseKey) {
   );
 }
 
-// Using untyped client to avoid conflicts with existing schema types
+// Configured with detectSessionInUrl: false and implicit flow to prevent
+// PKCE redirect exchange from hanging in production (SPA environments)
 export const supabase = createClient(
   supabaseUrl || "https://placeholder.supabase.co",
-  supabaseKey || "placeholder-key"
+  supabaseKey || "placeholder-key",
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
+      flowType: "implicit",
+    },
+  }
 );
