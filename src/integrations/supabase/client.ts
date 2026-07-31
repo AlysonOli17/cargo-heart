@@ -9,8 +9,11 @@ if (!supabaseUrl || !supabaseKey) {
   );
 }
 
-// Configured with detectSessionInUrl: false and implicit flow to prevent
-// PKCE redirect exchange from hanging in production (SPA environments)
+// Dummy lock to prevent navigator.locks from hanging in some browser environments
+const dummyLock = async (name: string, acquire: () => Promise<any>) => {
+  return await acquire();
+};
+
 export const supabase = createClient(
   supabaseUrl || "https://placeholder.supabase.co",
   supabaseKey || "placeholder-key",
@@ -20,6 +23,7 @@ export const supabase = createClient(
       autoRefreshToken: true,
       detectSessionInUrl: false,
       flowType: "implicit",
+      lock: dummyLock,
     },
   }
 );
