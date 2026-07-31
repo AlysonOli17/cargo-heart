@@ -200,11 +200,12 @@ export function parseExcelFile(buffer: ArrayBuffer, filename: string): ParsedDay
         schedRow.operator_name = row[10] ? String(row[10]).trim() : null;
         schedRow.work_order = row[11] ? String(row[11]).trim() : null;
       } else {
-        // Eventual (Dia or Noite) and Habitual Noite: no Tablet column
+        // Eventual (Dia or Noite) and Habitual Noite:
+        // col7=LOCAL, col8=extra/blank column, col9=ATIVIDADE, col10=OPERADOR, col11=OS
         schedRow.location = row[7] ? String(row[7]).trim() : null;
-        schedRow.activity = row[8] ? String(row[8]).trim() : null;
-        schedRow.operator_name = row[9] ? String(row[9]).trim() : null;
-        schedRow.work_order = row[10] ? String(row[10]).trim() : null;
+        schedRow.activity = row[9] ? String(row[9]).trim() : null;
+        schedRow.operator_name = row[10] ? String(row[10]).trim() : null;
+        schedRow.work_order = row[11] ? String(row[11]).trim() : null;
       }
 
       currentGroup.rows.push(schedRow);
