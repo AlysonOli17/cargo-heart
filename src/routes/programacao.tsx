@@ -413,6 +413,7 @@ export default function ProgramacaoPage() {
                     <th className="px-4 py-2">Operador</th>
                     <th className="px-4 py-2">Horário</th>
                     <th className="px-4 py-2">Local</th>
+                    <th className="px-4 py-2">OS</th>
                     <th className="px-4 py-2">Status</th>
                   </tr>
                 </thead>
@@ -439,6 +440,7 @@ export default function ProgramacaoPage() {
                       <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={s.location || ""}>
                         {s.location || "—"}
                       </td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{s.work_order || "—"}</td>
                       <td className="px-4 py-2.5">
                         <span className={cn(
                           "inline-flex px-2 py-0.5 rounded-full text-[9px] font-black uppercase border",
@@ -497,6 +499,7 @@ function GroupPreview({ group }: { group: ParsedDay["groups"][number] }) {
                 <th className="px-3 py-1.5">Turno / Horário</th>
                 <th className="px-3 py-1.5">Operador</th>
                 <th className="px-3 py-1.5">Local</th>
+                <th className="px-3 py-1.5">OS</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
@@ -512,6 +515,7 @@ function GroupPreview({ group }: { group: ParsedDay["groups"][number] }) {
                   </td>
                   <td className="px-3 py-1.5 text-[10px] text-muted-foreground font-medium">{row.operator_name || "—"}</td>
                   <td className="px-3 py-1.5 text-[10px] text-muted-foreground max-w-[180px] truncate">{row.location || "—"}</td>
+                  <td className="px-3 py-1.5 font-mono text-[10px] text-muted-foreground">{row.work_order || "—"}</td>
                 </tr>
               ))}
             </tbody>

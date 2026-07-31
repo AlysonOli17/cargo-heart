@@ -189,22 +189,19 @@ export function parseExcelFile(buffer: ArrayBuffer, filename: string): ParsedDay
         team: currentGroup.team,
       };
 
-      // Column positions vary slightly between Dia and Noite blocks
-      // Detect by checking if row[7] looks like a location or tablet
-      // Noite block: [equip, plate, model, client, turno, horario, cc, LOCAL, , ACTIVITY, OPERATOR, OS]
-      // Dia block:   [equip, plate, model, client, turno, horario, cc, TABLET, LOCAL, ACTIVITY, OPERATOR, OS]
-      const col7 = String(row[7] || "").trim();
-      const col8 = String(row[8] || "").trim();
-
-      if (col8 && col8.toUpperCase() !== col8.toLowerCase()) {
-        // col7 is likely tablet (number/empty), col8 is location
-        schedRow.location = col8 || null;
+      // Column layout differs by contract type:
+      // Habitual Dia: [equip, plate, model, client, turno, horario, cc, TABLET, LOCAL, ACTIVITY, OPERATOR, OS]
+      // Eventual Dia:  [equip, plate, model, client, turno, horario, cc, LOCAL,  ACTIVITY, OPERATOR, OS]
+      // Noite blocks:  [equip, plate, model, client, turno, horario, cc, LOCAL,  ACTIVITY, OPERATOR, OS]
+      if (currentGroup.contract_type === "Habitual" && currentGroup.shift === "Dia") {
+        // Habitual Dia has an extra "Tablet" column at col7, shifting everything right by 1
+        schedRow.location = row[8] ? String(row[8]).trim() : null;
         schedRow.activity = row[9] ? String(row[9]).trim() : null;
         schedRow.operator_name = row[10] ? String(row[10]).trim() : null;
         schedRow.work_order = row[11] ? String(row[11]).trim() : null;
       } else {
-        // col7 is location
-        schedRow.location = col7 || null;
+        // Eventual (Dia or Noite) and Habitual Noite: no Tablet column
+        schedRow.location = row[7] ? String(row[7]).trim() : null;
         schedRow.activity = row[8] ? String(row[8]).trim() : null;
         schedRow.operator_name = row[9] ? String(row[9]).trim() : null;
         schedRow.work_order = row[10] ? String(row[10]).trim() : null;

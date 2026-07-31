@@ -699,6 +699,7 @@ function ScheduleGroup({ label, rows, correctives, onOpenCorrective, onStatusCha
                 <th className="px-4 py-2">Operador</th>
                 <th className="px-4 py-2">Turno / Horário</th>
                 <th className="px-4 py-2">Local</th>
+                <th className="px-4 py-2">OS</th>
                 <th className="px-4 py-2">Paradas Hoje</th>
                 <th className="px-4 py-2">Ações</th>
               </tr>
@@ -746,6 +747,9 @@ function ScheduleGroup({ label, rows, correctives, onOpenCorrective, onStatusCha
                         {row.location || "—"}
                       </p>
                     </td>
+                    <td className="px-4 py-3">
+                       <span className="font-mono text-xs text-muted-foreground">{row.work_order || "—"}</span>
+                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-foreground">{rowCorrectives.length}x</span>
