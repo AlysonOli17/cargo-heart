@@ -10,8 +10,11 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 // Dummy lock to prevent navigator.locks from hanging in some browser environments
-const dummyLock = async (name: string, acquire: () => Promise<any>) => {
-  return await acquire();
+const dummyLock = async (...args: any[]) => {
+  const acquire = args.find(arg => typeof arg === 'function');
+  if (acquire) {
+    return await acquire();
+  }
 };
 
 export const supabase = createClient(
