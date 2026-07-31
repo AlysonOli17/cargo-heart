@@ -135,7 +135,7 @@ export default function ProgramacaoPage() {
             turno: row.turno,
             schedule_start: row.schedule_start,
             schedule_end: row.schedule_end,
-            status: "agendado" as const,
+            status: "operando" as const,
             imported_from: filename,
             created_by: user.id,
           });
