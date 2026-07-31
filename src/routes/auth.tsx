@@ -26,6 +26,13 @@ function AuthPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    
+    // Check if env vars are loaded properly
+    if (!import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes("placeholder")) {
+      setError("ERRO DE CONFIGURAÇÃO: As variáveis do Supabase não foram carregadas no Vercel. Certifique-se de fazer um Redeploy DESMARCANDO a opção 'Use existing Build Cache'.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       await signIn(email, password);
